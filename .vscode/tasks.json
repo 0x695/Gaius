@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cmake: configure",
+            "type": "shell",
+            "command": "cmake -S ${workspaceFolder} -B ${workspaceFolder}/build -DCMAKE_BUILD_TYPE=RelWithDebInfo",
+            "windows": {
+                "command": "cmake -S ${workspaceFolder} -B ${workspaceFolder}/build -DCMAKE_TOOLCHAIN_FILE=C:/dev/tools/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo"
+            }
+        },
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "cmake --build ${workspaceFolder}/build -j",
+            "windows": {
+                "command": "cmake --build ${workspaceFolder}/build --config RelWithDebInfo -j"
+            },
+            "group": { "kind": "build", "isDefault": true },
+            "dependsOn": ["cmake: configure"]
+        },
+        {
+            "label": "test (needs GAIUS_TEST_ASSETS env var)",
+            "type": "shell",
+            "command": "${workspaceFolder}/build/gaius_tests",
+            "windows": {
+                "command": "${workspaceFolder}/build/RelWithDebInfo/gaius_tests.exe",
+                "options": {
+                    "env": { "GAIUS_TEST_ASSETS": "E:\\dev_res\\ig_res\\Caesar\\US" }
+                }
+            },
+            "dependsOn": ["build"]
+        }
+    ]
+}

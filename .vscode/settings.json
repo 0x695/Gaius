@@ -1,0 +1,17 @@
+{
+    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "files.associations": {
+        "*.hpp": "cpp"
+    },
+    "cmake.configureOnOpen": true,
+    "cmake.configureSettings": {
+        "CMAKE_TOOLCHAIN_FILE": "C:/dev/tools/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    },
+    "cmake.testEnvironment": {
+        "GAIUS_TEST_ASSETS": "E:\\dev_res\\ig_res\\Caesar\\US"
+    },
+    "terminal.integrated.env.windows": {
+        "GAIUS_TEST_ASSETS": "E:\\dev_res\\ig_res\\Caesar\\US"
+    }
+}

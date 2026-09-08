@@ -1,0 +1,73 @@
+# Build output
+build/
+build-*/
+out/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.obj
+*.o
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.lib
+!third_party/**/*.lib
+
+# IDE / editor
+.vs/
+.idea/
+*.user
+.vscode/*.log
+
+# vcpkg local artifacts (the vcpkg install itself lives outside this repo)
+vcpkg_installed/
+
+# --- Original Caesar (1992) game assets — NEVER commit these. ---
+# See CLAUDE.md "Critical rule before touching anything" / GAIUS_MASTERPLAN.md
+# section 3 (IP posture). Tests/tools read these from a directory pointed at
+# by the GAIUS_TEST_ASSETS env var, which lives outside this repo entirely —
+# these patterns are a safety net, not the primary defense.
+*.VPX
+*.vpx
+*.PL8
+*.pl8
+*.PL1
+*.pl1
+*.P32
+*.p32
+*.256
+EMPIRE2.*
+*.SAV
+*.sav
+CSR.EXE
+csr.exe
+COHORT.EXE
+COHORT.CSR
+EDATA.CSR
+CONTFRM.GD8
+*.VOC
+*.voc
+*.MDI
+*.mdi
+*.XMI
+*.xmi
+*.XM2
+*.xm2
+*.MOD
+*.mod
+*.VAS
+*.vas
+*.ADV
+*.adv
+*.DRV
+*.drv
+*.GD8
+*.gd8
+CAESAR.BAT
+CAESAR.INF
+LOADER.EXE
+HIRES!.COM
+*.iso
+*.ISO
