@@ -30,6 +30,10 @@ enum class CommandType {
     PanEnd,
     Zoom,         // relative zoom delta: scroll wheel, pinch gesture, gamepad triggers
     ToggleWindowMode,  // dev/debug binding in Phase 1; a real settings UI arrives Phase 9
+    CycleTool,    // next construction tool: Tab, gamepad X/West. Added in Phase 5 for
+                  // build mode -- exactly the kind of extension this enum's original
+                  // comment anticipated ("room to add ... without changing this enum's
+                  // meaning for existing commands").
 };
 
 struct Command {

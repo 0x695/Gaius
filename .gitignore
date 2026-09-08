@@ -24,6 +24,17 @@ compile_commands.json
 # vcpkg local artifacts (the vcpkg install itself lives outside this repo)
 vcpkg_installed/
 
+# Android -- SDL2 source is fetched by android/fetch_sdl2.ps1, not vendored
+# (same reasoning as desktop not vendoring SDL2); everything else here is
+# machine-specific config or build output.
+android/app/jni/SDL/
+android/local.properties
+android/.gradle/
+android/app/build/
+android/app/.cxx/
+android/build/
+*.apk
+
 # --- Original Caesar (1992) game assets — NEVER commit these. ---
 # See CLAUDE.md "Critical rule before touching anything" / GAIUS_MASTERPLAN.md
 # section 3 (IP posture). Tests/tools read these from a directory pointed at

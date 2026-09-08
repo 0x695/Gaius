@@ -58,10 +58,24 @@ target_link_libraries(empire_view PRIVATE gaius_formats)
 target_link_libraries(empire_view PRIVATE stb_image_write)
 
 add_executable(save_inspect tools/save_inspect.cpp)
-target_link_libraries(save_inspect PRIVATE gaius_formats)
+target_link_libraries(save_inspect PRIVATE gaius_formats gaius_model)
 
 add_executable(bindiff_exe tools/bindiff_exe.cpp)
 target_link_libraries(bindiff_exe PRIVATE gaius_formats)
+
+# --- model library (Phase 2: normalized data model, Layer 2) ---------------
+add_library(gaius_model STATIC
+  model/city_state.cpp
+)
+target_link_libraries(gaius_model PUBLIC gaius_formats)
+
+# --- systems library (Phase 3: service propagation; Phase 4: housing) ------
+add_library(gaius_systems STATIC
+  systems/service.cpp
+  systems/housing.cpp
+  systems/construction.cpp
+)
+target_link_libraries(gaius_systems PUBLIC gaius_model)
 
 # --- platform layer (Phase 1: window/input/paths) --------------------------
 add_library(gaius_platform STATIC
@@ -75,10 +89,10 @@ target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
-target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_platform stb_image_write)
+target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_platform stb_image_write)
 
 # --- tests -----------------------------------------------------------------
 enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
-target_link_libraries(gaius_tests PRIVATE gaius_formats stb_image)
+target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)

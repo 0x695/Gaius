@@ -51,12 +51,15 @@ For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/g
 
 ```text
 formats/    Layer 1 — exact import (VPX, P32, .256, PL8, EMPIRE2, SAV, EXEPACK)
+model/      Layer 2 — normalized data model (Phase 2): CityState/CityMap/Actor — see GAIUS_ROADMAP.md
+systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, land-value gate + population)
 platform/   window/input/paths abstraction (Phase 1) — see GAIUS_MASTERPLAN.md section 5a
-apps/       gaius_viewer and future interactive apps
-tools/      CLI utilities built on formats/
+apps/       gaius_viewer (EMPIRE2 + .SAV) and android_hello (Android platform-layer smoke test)
+android/    Android target — see android/README.md
+tools/      CLI utilities built on formats/ and model/
 tests/      dependency-free test harness (see above)
 docs/       FORMATS.md and findings addenda
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
 ```
 
-Future layers (model/, systems/, render/, save/ write-back, editor/) land in later roadmap phases — see `GAIUS_ROADMAP.md`.
+Future layers (render/, save/ write-back, editor/) land in later roadmap phases — see `GAIUS_ROADMAP.md`.

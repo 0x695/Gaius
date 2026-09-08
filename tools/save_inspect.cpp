@@ -4,7 +4,10 @@
 // formats/save/save.hpp) and print offset/size/name for each, plus the
 // leading global-words section decoded per CAESAR_SAVE_FORMAT.md
 // (128 x 16-bit words, descending DS address from DS:0x6CE2), matching
-// caesar_save_layout.py's output for direct cross-checking.
+// caesar_save_layout.py's output for direct cross-checking. Also loads the
+// save through model::CityState (Phase 2) and prints the 70-record actor
+// table -- see model/city_state.hpp for which fields are confirmed vs.
+// still opaque.
 //
 // Usage:
 //   save_inspect <CAESARxx.SAV>
@@ -13,8 +16,10 @@
 #include <string>
 
 #include "formats/save/save.hpp"
+#include "model/city_state.hpp"
 
 using namespace gaius::formats;
+using namespace gaius::model;
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -39,6 +44,25 @@ int main(int argc, char** argv) {
             uint16_t value = static_cast<uint16_t>(block_ptr[i]) | (static_cast<uint16_t>(block_ptr[i + 1]) << 8);
             std::printf("  save+0x%04zX -> DS:0x%04X = 0x%04X (%u)\n", i, ds_addr, value, value);
         }
+
+        // Actor table (Phase 2, model::CityState) -- only the fields
+        // confirmed in CAESAR_CITY_STATE_v9.md are printed by name;
+        // everything else in each 50-byte record is still opaque (see
+        // model/city_state.hpp). "active" rows only, to keep this
+        // readable -- most of the 70 slots are typically unused.
+        CityState state = load(sf);
+        std::printf("\nActor table (active records only; %d slots total, type<11=city coords, type>=11=province):\n",
+                    kActorCount);
+        int active_count = 0;
+        for (int i = 0; i < kActorCount; ++i) {
+            const Actor& a = state.objects[i];
+            if (a.active() == 0) continue;
+            ++active_count;
+            std::printf("  [%2d] type=%-3u %-8s state=%-3u screen=(%u,%u) raw=(%u,%u) packed_xy=%u\n", i, a.type(),
+                        a.coord_space() == ActorCoordSpace::City ? "city" : "province", a.state(), a.screen_x(),
+                        a.screen_y(), a.raw_x(), a.raw_y(), a.packed_xy());
+        }
+        std::printf("  (%d/%d slots active)\n", active_count, kActorCount);
         return 0;
     } catch (const FormatError& e) {
         std::fprintf(stderr, "format error: %s\n", e.what());

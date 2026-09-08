@@ -5,21 +5,38 @@
 // (GAIUS_MASTERPLAN.md section 5a) end-to-end with a real SDL2 window,
 // not just static PNG dumps like Phase 0's tools produced.
 //
-// Renders an EMPIRE2 scenario as a pannable/zoomable world (camera larger
-// than the fixed logical viewport -- deliberately, to actually exercise
-// pan/zoom rather than fitting everything on screen at once) using the
-// SAME terrain-family color classification as Phase 0's empire_view tool.
+// Accepts either an EMPIRE2.0xx scenario (rendered with the same
+// terrain-family color classification as Phase 0's empire_view tool) or a
+// CAESARxx.SAV save file (rendered as the 100x100 city tile grid or one of
+// the four service-layer heatmaps -- see apps/viewer/save_view.hpp). Which
+// one is picked is decided by the file's exact size, not its extension --
+// same "sniff structure, don't trust extensions" lesson as
+// docs/CAESAR_GOG_BUILD_FINDINGS.md's MINIFONT.PL1 finding.
 //
 // Controls:
 //   left-drag with middle mouse / single-finger touch drag / left gamepad
 //     stick  -> pan
 //   scroll wheel / gamepad triggers                        -> zoom
+//   right-click / two-finger tap / gamepad B                -> cycle save
+//     layer (save-file mode only; no-op for an EMPIRE2 scenario)
+//   Tab / gamepad X                                         -> cycle build tool
+//   left-click / tap / gamepad A                            -> place current
+//     build tool at the clicked cell (save-file mode only)
 //   F11                                                     -> cycle window mode
 //   Escape / window close                                   -> quit
 //
+// Build mode (Phase 5) places through systems::construction, which carries
+// the real seed tiles and footprints recovered from the executable. The
+// drag-based commands (Road/Wall/Plaza/Clear Area) are deliberately absent
+// from the tool ring -- their auto-tiling rules aren't reverse engineered
+// to implementable precision yet, and faking them would be worse than
+// leaving them out. See systems/construction.hpp.
+//
 // Usage:
-//   gaius_viewer <EMPIRE2.0xx>
-//   gaius_viewer <EMPIRE2.0xx> --screenshot out.png --frames N   (headless smoke test)
+//   gaius_viewer <EMPIRE2.0xx | CAESARxx.SAV>
+//   gaius_viewer <path> --screenshot out.png --frames N   (headless smoke test)
+//   gaius_viewer <CAESARxx.SAV> --test-layer 0..4         (headless: pick a layer directly)
+//   gaius_viewer <CAESARxx.SAV> --test-build T X Y        (headless: place tool T at cell X,Y)
 
 #include <SDL.h>
 
@@ -27,27 +44,53 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
+#include "apps/viewer/save_view.hpp"
 #include "formats/empire2/empire2.hpp"
+#include "formats/save/save.hpp"
+#include "model/city_state.hpp"
 #include "platform/input.hpp"
 #include "platform/paths.hpp"
 #include "platform/window.hpp"
 #include "stb_image_write.h"
+#include "systems/construction.hpp"
 
 using namespace gaius;
 using gaius::formats::empire2::EmpireMap;
 using gaius::formats::empire2::kMapH;
 using gaius::formats::empire2::kMapW;
+namespace fs = std::filesystem;
 
 namespace {
 
 constexpr int kLogicalW = 320;  // matches the original Caesar screen resolution -- a deliberate nod, not a constraint
 constexpr int kLogicalH = 200;
-constexpr int kCellPx = 16;  // world pixels per map cell at zoom == 1
+constexpr int kCellPx = 16;  // world pixels per EMPIRE2 map cell at zoom == 1
 constexpr int kWorldW = kMapW * kCellPx;
 constexpr int kWorldH = kMapH * kCellPx;
+
+constexpr int kCityCellPx = 6;  // world pixels per city-grid cell at zoom == 1
+constexpr int kCityWorldW = viewer::kCityW * kCityCellPx;
+constexpr int kCityWorldH = viewer::kCityH * kCityCellPx;
+
+// Build-mode tool ring: the placeable construction commands, in toolbar
+// order. Deliberately excludes the drag-auto-tiled ones (Road/Wall/Plaza/
+// Clear Area) and the variant-selected ones (Forum/Workshop) -- see
+// systems/construction.hpp for why those can't be placed yet.
+constexpr systems::construction::CommandId kBuildTools[] = {
+    systems::construction::CommandId::Housing,   systems::construction::CommandId::Well,
+    systems::construction::CommandId::Fountain,  systems::construction::CommandId::ReservoirPipe,
+    systems::construction::CommandId::Temple,    systems::construction::CommandId::BathHouses,
+    systems::construction::CommandId::Hospital,  systems::construction::CommandId::School,
+    systems::construction::CommandId::Oracle,    systems::construction::CommandId::Theater,
+    systems::construction::CommandId::Coliseum,  systems::construction::CommandId::Hippodrome,
+    systems::construction::CommandId::Barracks,  systems::construction::CommandId::Prefecture,
+    systems::construction::CommandId::Market,    systems::construction::CommandId::HeavyIndustry,
+};
+constexpr int kBuildToolCount = sizeof(kBuildTools) / sizeof(kBuildTools[0]);
 
 // Same classification as tools/empire_view.cpp -- kept in sync deliberately;
 // this is exactly the kind of small duplication that should collapse into
@@ -66,20 +109,27 @@ formats::RGB classify_color(uint8_t v) {
     return {100, 100, 100};
 }
 
+// Generalized over world size so the same pan/zoom/input-handling code
+// drives either the EMPIRE2 world or the (differently-sized) city-save
+// world -- the two view modes differ only in what they sample and draw,
+// never in how the camera behaves.
 struct Camera {
-    double x = kWorldW / 2.0 - kLogicalW / 2.0;  // top-left world pixel visible at viewport (0,0)
-    double y = kWorldH / 2.0 - kLogicalH / 2.0;
+    double world_w, world_h;
+    double x, y;  // top-left world pixel visible at viewport (0,0)
     double zoom = 1.0;
+
+    explicit Camera(double ww, double wh)
+        : world_w(ww), world_h(wh), x(ww / 2.0 - kLogicalW / 2.0), y(wh / 2.0 - kLogicalH / 2.0) {}
 
     void clamp() {
         zoom = std::clamp(zoom, 0.5, 8.0);
         double view_w = kLogicalW / zoom, view_h = kLogicalH / zoom;
-        x = std::clamp(x, 0.0, std::max(0.0, kWorldW - view_w));
-        y = std::clamp(y, 0.0, std::max(0.0, kWorldH - view_h));
+        x = std::clamp(x, 0.0, std::max(0.0, world_w - view_w));
+        y = std::clamp(y, 0.0, std::max(0.0, world_h - view_h));
     }
 };
 
-void render_frame(const EmpireMap& map, const Camera& cam, std::vector<uint8_t>& rgb_out) {
+void render_empire_frame(const EmpireMap& map, const Camera& cam, std::vector<uint8_t>& rgb_out) {
     rgb_out.resize(static_cast<size_t>(kLogicalW) * kLogicalH * 3);
     for (int vy = 0; vy < kLogicalH; ++vy) {
         for (int vx = 0; vx < kLogicalW; ++vx) {
@@ -103,13 +153,16 @@ void render_frame(const EmpireMap& map, const Camera& cam, std::vector<uint8_t>&
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <EMPIRE2.0xx> [--screenshot out.png --frames N]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <EMPIRE2.0xx | CAESARxx.SAV> [--screenshot out.png --frames N]\n", argv[0]);
         return 1;
     }
-    std::string empire_path = argv[1];
+    std::string in_path = argv[1];
     std::string screenshot_path;
     int screenshot_frames = 0;
     double test_pan_x = 0, test_pan_y = 0, test_zoom = 1.0;
+    int test_layer = -1;
+    struct TestBuild { int tool, x, y; };
+    std::vector<TestBuild> test_builds;  // repeatable: --test-build may appear many times
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
@@ -121,13 +174,49 @@ int main(int argc, char** argv) {
             test_pan_y = std::atof(argv[++i]);
         }
         if (std::strcmp(argv[i], "--test-zoom") == 0 && i + 1 < argc) test_zoom = std::atof(argv[++i]);
+        if (std::strcmp(argv[i], "--test-layer") == 0 && i + 1 < argc) test_layer = std::atoi(argv[++i]);
+        // Headless build-mode hook: place tool #N at grid cell (x,y) before
+        // the first frame, so the placement path can be smoke-tested without
+        // a real mouse -- same spirit as --test-pan/--test-zoom. Repeatable,
+        // so a whole test city can be laid down in one invocation.
+        if (std::strcmp(argv[i], "--test-build") == 0 && i + 3 < argc) {
+            TestBuild b;
+            b.tool = std::atoi(argv[++i]);
+            b.x = std::atoi(argv[++i]);
+            b.y = std::atoi(argv[++i]);
+            test_builds.push_back(b);
+        }
     }
 
+    // Dispatch by exact file size, not extension -- EMPIRE2.0xx is always
+    // exactly 1602 bytes, CAESARxx.SAV is always exactly 57126
+    // (formats::save::kSaveSize); no other size is valid input here. Same
+    // "sniff structure, don't trust extensions" lesson as
+    // docs/CAESAR_GOG_BUILD_FINDINGS.md's MINIFONT.PL1 finding.
+    std::error_code ec;
+    uintmax_t file_size = fs::file_size(in_path, ec);
+    if (ec) {
+        std::fprintf(stderr, "failed to stat %s: %s\n", in_path.c_str(), ec.message().c_str());
+        return 2;
+    }
+    bool save_mode = (file_size == formats::save::kSaveSize);
+
     EmpireMap map;
+    formats::save::SaveFile save;
+    model::CityState state;  // save mode works on the Layer 2 model so build mode can mutate it
+    viewer::SaveLayer layer = viewer::SaveLayer::Tiles;
+    if (test_layer >= 0 && test_layer < viewer::kSaveLayerCount) layer = viewer::kSaveLayerOrder[test_layer];
+    int tool_index = 0;
+
     try {
-        map = formats::empire2::load(empire_path);
+        if (save_mode) {
+            save = formats::save::load(in_path);
+            state = model::load(save);
+        } else {
+            map = formats::empire2::load(in_path);
+        }
     } catch (const formats::FormatError& e) {
-        std::fprintf(stderr, "failed to load %s: %s\n", empire_path.c_str(), e.what());
+        std::fprintf(stderr, "failed to load %s: %s\n", in_path.c_str(), e.what());
         return 2;
     }
 
@@ -146,10 +235,27 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "note: platform::data_path unavailable in this environment: %s\n", e.what());
     }
 
-    try {
-        platform::Window window("Gaius Viewer - " + empire_path, kLogicalW, kLogicalH, 960, 600);
+    if (save_mode) {
+        std::printf("save mode -- layer: %s (right-click / two-finger-tap / gamepad B to cycle)\n",
+                    viewer::layer_label(layer));
+        std::printf("build mode -- tool: %s (Tab / gamepad X to cycle, left-click / tap / gamepad A to place)\n",
+                    systems::construction::command_name(kBuildTools[tool_index]));
+        for (const auto& b : test_builds) {
+            if (b.tool < 0 || b.tool >= kBuildToolCount) {
+                std::printf("--test-build: tool index %d out of range (0..%d)\n", b.tool, kBuildToolCount - 1);
+                continue;
+            }
+            auto tool = kBuildTools[b.tool];
+            bool ok = systems::construction::place(state.city, tool, b.x, b.y);
+            std::printf("--test-build: place %s at (%d,%d): %s\n", systems::construction::command_name(tool), b.x, b.y,
+                        ok ? "OK" : "rejected");
+        }
+    }
 
-        Camera cam;
+    try {
+        platform::Window window("Gaius Viewer - " + in_path, kLogicalW, kLogicalH, 960, 600);
+
+        Camera cam = save_mode ? Camera(kCityWorldW, kCityWorldH) : Camera(kWorldW, kWorldH);
         cam.x += test_pan_x;
         cam.y += test_pan_y;
         cam.zoom *= test_zoom;
@@ -178,6 +284,34 @@ int main(int argc, char** argv) {
                         window.set_mode(next);
                         break;
                     }
+                    case platform::CommandType::Secondary:
+                        if (save_mode) {
+                            layer = viewer::next_layer(layer);
+                            std::printf("layer: %s\n", viewer::layer_label(layer));
+                        }
+                        break;
+                    case platform::CommandType::CycleTool:
+                        if (save_mode) {
+                            tool_index = (tool_index + 1) % kBuildToolCount;
+                            std::printf("build tool: %s\n",
+                                        systems::construction::command_name(kBuildTools[tool_index]));
+                        }
+                        break;
+                    case platform::CommandType::Select: {
+                        if (!save_mode) break;
+                        // Physical click -> logical framebuffer -> world -> grid cell,
+                        // reusing the same camera math the renderer samples through, so
+                        // mouse, touch tap and gamepad A all land on the same cell.
+                        int lx = 0, ly = 0;
+                        if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly)) break;
+                        int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / kCityCellPx;
+                        int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / kCityCellPx;
+                        auto tool = kBuildTools[tool_index];
+                        bool ok = systems::construction::place(state.city, tool, cell_x, cell_y);
+                        std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x,
+                                    cell_y, ok ? "OK" : "rejected (terrain not buildable / off grid)");
+                        break;
+                    }
                     case platform::CommandType::PanBegin:
                         break;
                     case platform::CommandType::PanEnd:
@@ -196,7 +330,12 @@ int main(int argc, char** argv) {
                 }
             }
 
-            render_frame(map, cam, frame);
+            if (save_mode) {
+                viewer::render_city_map_layer(state.city, layer, kCityCellPx, cam.x, cam.y, cam.zoom, kLogicalW,
+                                               kLogicalH, frame);
+            } else {
+                render_empire_frame(map, cam, frame);
+            }
             window.present_rgb24(frame);
             ++frame_count;
 
