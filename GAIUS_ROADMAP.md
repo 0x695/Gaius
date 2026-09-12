@@ -239,7 +239,7 @@ Phase 1  Static viewer + platform skeleton        (unblocked)
 Phase 2  Normalized model + save round-trip       (soft-blocked: save loader)
 Phase 3  Service propagation primitives           (mostly unblocked)
 Phase 4  Housing/population                       (partially blocked: tile IDs)
-Phase 5  Construction dispatcher + build-mode UI  (THE critical RE+eng sprint)
+Phase 5  Construction dispatcher + build-mode UI  (DONE - was the critical RE sprint)
 Phase 6  Economy + military                       (hard-blocked: needs new RE)
 Phase 7  Forum/ratings/win-loss                   (mostly unblocked once 2-6 exist)
 Phase 8  Format completeness + save loader        (closes remaining format debt)
@@ -247,4 +247,4 @@ Phase 9  Platform packaging + QoL polish          (unblocked; can run parallel t
 Phase 10 Editor + IGDK integration                (final)
 ```
 
-Phases 0–3 can start immediately in parallel with continued RE work on Phase 5's dispatcher (the highest-leverage next RE target per the existing corpus's own recommendation). Cross-platform/QoL work (masterplan section 5a) is deliberately spread across Phase 1 (foundations), Phase 5 (build-mode input parity), and Phase 9 (packaging/polish) rather than concentrated at the end — the goal is that by the time Phase 9 starts, every platform has already been run against real, if incomplete, gameplay many times over.
+Phases 0–5 are complete. The dispatcher that was the highest-leverage RE target is recovered (`DS:127C`), so the critical path now runs through Phase 6's economic-actor tracing — with Phase 7 and Phase 9 both largely unblocked and available to run in parallel while that RE proceeds. Cross-platform/QoL work (masterplan section 5a) is deliberately spread across Phase 1 (foundations), Phase 5 (build-mode input parity), and Phase 9 (packaging/polish) rather than concentrated at the end — the goal is that by the time Phase 9 starts, every platform has already been run against real, if incomplete, gameplay many times over.
