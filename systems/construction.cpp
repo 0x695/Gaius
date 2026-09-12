@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "systems/construction.hpp"
 
 namespace gaius::systems::construction {

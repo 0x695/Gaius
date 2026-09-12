@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — ui/toolbar.hpp
 //
 // The build toolbar: layout, hit-testing and rendering, closing

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "formats/pal256/pal256.hpp"
 
 #include <cstdio>

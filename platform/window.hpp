@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — platform/window.hpp
 //
 // Thin SDL2 window/renderer wrapper implementing the resolution-

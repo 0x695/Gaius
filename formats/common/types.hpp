@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/common/types.hpp
 //
 // Shared, format-agnostic value types used across every Layer 1 decoder

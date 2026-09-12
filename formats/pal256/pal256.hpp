@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/pal256/pal256.hpp
 //
 // .256 palette decoder.

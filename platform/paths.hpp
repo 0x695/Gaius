@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — platform/paths.hpp
 //
 // Per-OS config/save-data directory resolution. See GAIUS_MASTERPLAN.md

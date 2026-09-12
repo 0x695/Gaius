@@ -2,7 +2,7 @@
 
 An open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the spirit of Julius/Augustus for Caesar III. Sibling project to **IGDK** and **IGA**.
 
-See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. This repo currently implements **Phase 0**: the Layer 1 format library and CLI tools. See `docs/FORMATS.md` for exactly what's done and tested.
+See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. **Phases 0-5 are complete**: the Layer 1 format library and CLI tools, the SDL2 platform layer and viewer, the Layer 2 data model, the service/housing/construction simulation systems, and a scalable build toolbar. See `docs/FORMATS.md` for per-format status and `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` for the reverse engineering behind the construction system.
 
 ## IP posture — read before doing anything else
 
@@ -52,7 +52,8 @@ For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/g
 ```text
 formats/    Layer 1 — exact import (VPX, P32, .256, PL8, EMPIRE2, SAV, EXEPACK)
 model/      Layer 2 — normalized data model (Phase 2): CityState/CityMap/Actor — see GAIUS_ROADMAP.md
-systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, land-value gate + population)
+systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, land-value gate + population), construction.hpp/.cpp (Phase 5, DS:127C command dispatch + placement)
+ui/         scalable toolbar (Phase 5) — metrics/font/toolbar, no SDL dependency
 platform/   window/input/paths abstraction (Phase 1) — see GAIUS_MASTERPLAN.md section 5a
 apps/       gaius_viewer (EMPIRE2 + .SAV) and android_hello (Android platform-layer smoke test)
 android/    Android target — see android/README.md
@@ -63,3 +64,37 @@ third_party/stb/   vendored stb_image / stb_image_write (public domain)
 ```
 
 Future layers (render/, save/ write-back, editor/) land in later roadmap phases — see `GAIUS_ROADMAP.md`.
+
+## Licensing
+
+**Code: [GNU GPL v3.0 or later](LICENSE).** Chosen to match the convention of the
+reimplementation community Gaius belongs to (OpenRCT2, OpenRA, OpenMW and OpenXcom
+are all GPL-3.0), and so that the reverse-engineering work in this repo stays
+available to that community rather than being absorbable into a closed product.
+
+Note the one-way compatibility with the projects named above as inspiration:
+Julius and Augustus are both **AGPL-3.0** (verified, not assumed), and AGPL-3.0
+permits combining GPL-3.0 work — so they can adopt code from Gaius. The reverse
+does not hold, which is deliberate: that's the direction that helps the wider
+community. AGPL itself was considered and rejected, since its distinguishing
+network-use clause is inert for a local single-player game.
+
+**Documentation: [CC BY-SA 4.0](docs/LICENSE)**, covering `docs/`, `GAIUS_MASTERPLAN.md`
+and `GAIUS_ROADMAP.md`. The reverse-engineering findings are arguably this repo's most
+valuable output and a code licence fits prose badly; CC BY-SA keeps the share-alike
+intent while making the findings cleanly quotable back into the wider preservation
+corpus.
+
+**Third-party components** keep their own licences and are not covered by the above:
+`third_party/stb/` is public domain, and the vendored SDL2 Android glue under
+`android/` is zlib-licensed — see [`android/README.md`](android/README.md) for the
+attribution detail.
+
+### This is not a licence for the game
+
+The licences above cover **our own code and documentation only**. *Caesar* itself,
+its assets, and its trademarks remain the property of their respective rights
+holders; nothing here grants any right to them, and this repo distributes none of
+them. That's a statement of fact about someone else's intellectual property, kept
+deliberately separate from our copyright in our own work — see the IP posture
+section above, and `GAIUS_MASTERPLAN.md` section 3.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — systems/construction.hpp
 //
 // Layer 3, GAIUS_ROADMAP.md Phase 5: the construction/placement system.

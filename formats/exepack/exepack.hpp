@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/exepack/exepack.hpp
 //
 // Microsoft EXEPACK decompressor for CSR.EXE-style DOS executables.

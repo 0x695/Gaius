@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/p32/p32.hpp
 //
 // .P32 palette decoder.

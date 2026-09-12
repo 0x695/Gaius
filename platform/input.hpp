@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — platform/input.hpp
 //
 // Unified input abstraction per GAIUS_MASTERPLAN.md section 5a point 4:

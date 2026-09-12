@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/save/save.hpp
 //
 // CAESARxx.SAV block-table reader — Layer 1, READ-ONLY.

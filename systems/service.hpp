@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — systems/service.hpp
 //
 // Layer 3 (per GAIUS_MASTERPLAN.md section 5's engine module breakdown):

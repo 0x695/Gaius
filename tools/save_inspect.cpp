@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius CLI tool: save_inspect
 //
 // Slice a CAESARxx.SAV file into its confirmed blocks (see

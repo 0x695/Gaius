@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — ui/metrics.hpp
 //
 // The single source of UI sizing, implementing GAIUS_MASTERPLAN.md

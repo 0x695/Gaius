@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — ui/font.hpp
 //
 // A small built-in 5x7 bitmap font for UI text.

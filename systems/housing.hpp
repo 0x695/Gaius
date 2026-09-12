@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — systems/housing.hpp
 //
 // Layer 3, GAIUS_ROADMAP.md Phase 4: the residential development state

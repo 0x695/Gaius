@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — apps/android_hello/android_main.cpp
 //
 // Phase 1's last open item per GAIUS_ROADMAP.md: "confirm a clean build +

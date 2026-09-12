@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius CLI tool: dump_pl8
 //
 // Decode a .PL8 sprite sheet and write every frame out as a PNG contact

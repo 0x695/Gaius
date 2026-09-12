@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius CLI tool: bindiff_exe
 //
 // Decompress two EXEPACK'd DOS executables (via formats::exepack) and

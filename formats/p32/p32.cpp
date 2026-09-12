@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "formats/p32/p32.hpp"
 
 #include <cstdio>

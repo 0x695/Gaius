@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius Phase 1 deliverable: gaius_viewer
 //
 // "Look at your data" tool per GAIUS_ROADMAP.md Phase 1 -- proves the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius CLI tool: dump_vpx
 //
 // Decode a .VPX file and write it out as a PNG, optionally paired with a

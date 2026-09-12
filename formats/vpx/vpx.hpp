@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/vpx/vpx.hpp
 //
 // .VPX graphics decoder — port of the validated `caesar_vpx.py` prototype.

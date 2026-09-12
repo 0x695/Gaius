@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "formats/exepack/exepack.hpp"
 
 #include <cstdio>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius CLI tool: empire_view
 //
 // Render an EMPIRE2.0xx scenario, either as ASCII (matching the

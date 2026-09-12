@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — apps/viewer/save_view.hpp
 //
 // Save-file viewer support for gaius_viewer: the "100x100 tile grid + four

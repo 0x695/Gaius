@@ -49,7 +49,18 @@ android/build/
 *.P32
 *.p32
 *.256
-EMPIRE2.*
+# The scenario data files are EMPIRE2.000-EMPIRE2.049, so match the numeric
+# extension specifically rather than "EMPIRE2.*". The broad glob silently
+# swallowed our OWN decoder sources (formats/empire2/empire2.cpp/.hpp) for
+# two commits, because core.ignorecase is true on Windows/macOS and so
+# "EMPIRE2.*" matched "empire2.cpp" -- which meant a fresh clone was
+# missing a file CMakeLists.txt requires and could not build at all.
+EMPIRE2.[0-9][0-9][0-9]
+empire2.[0-9][0-9][0-9]
+# Belt-and-braces: never ignore our own source, whatever the patterns above
+# grow into later.
+!formats/empire2/*.cpp
+!formats/empire2/*.hpp
 *.SAV
 *.sav
 CSR.EXE

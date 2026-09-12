@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/pl8/pl8.hpp
 //
 // .PL8 sprite sheet decoder.

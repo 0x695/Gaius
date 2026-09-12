@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — model/city_state.hpp
 //
 // Layer 2 (normalized internal representation) per GAIUS_MASTERPLAN.md

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius Phase 0 test harness — no external test framework, deliberately.
 //
 // Per GAIUS_MASTERPLAN.md's testing strategy, this is corpus-driven: the
