@@ -34,6 +34,12 @@ enum class CommandType {
                   // build mode -- exactly the kind of extension this enum's original
                   // comment anticipated ("room to add ... without changing this enum's
                   // meaning for existing commands").
+    Hover,        // pointer moved with no button held. Mouse-only by nature: touch has
+                  // no hover state and gamepad has no pointer, so those devices simply
+                  // never emit this. UI that uses it must therefore treat it as
+                  // enrichment (a label preview) and never as the only way to learn
+                  // something -- otherwise it would become a mouse-only code path,
+                  // which masterplan 5a point 4 exists to prevent.
 };
 
 struct Command {

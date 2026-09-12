@@ -43,7 +43,13 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
         }
 
         case SDL_MOUSEMOTION: {
-            if (!(event.motion.state & SDL_BUTTON_MMASK)) return std::nullopt;
+            if (!(event.motion.state & SDL_BUTTON_MMASK)) {
+                Command hover;
+                hover.type = CommandType::Hover;
+                hover.x = event.motion.x;
+                hover.y = event.motion.y;
+                return hover;
+            }
             Command c;
             c.type = CommandType::PanMove;
             c.x = event.motion.x;

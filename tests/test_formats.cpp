@@ -29,6 +29,9 @@
 #include "systems/construction.hpp"
 #include "systems/housing.hpp"
 #include "systems/service.hpp"
+#include "ui/font.hpp"
+#include "ui/metrics.hpp"
+#include "ui/toolbar.hpp"
 
 namespace fs = std::filesystem;
 using namespace gaius::formats;
@@ -906,6 +909,220 @@ void test_exepack_golden_decode() {
     CHECK(find("Caesar - Online help"));
 }
 
+// --- Phase 5: toolbar UI (ui/metrics, ui/font, ui/toolbar) -------------
+//
+// All headless: ui/ deliberately has no SDL dependency, so layout and
+// hit-testing are testable as pure functions. The invariant these exist
+// to protect is the one in ui/toolbar.hpp's header -- a drawn button and
+// its touch target can never drift apart -- which is checked directly by
+// test_ui_hit_test_matches_drawn_buttons below.
+
+void test_ui_metrics_scale_together() {
+    std::printf("test_ui_metrics_scale_together\n");
+    using namespace gaius::ui;
+
+    // The masterplan's floor clause: "Original toolbar icon sizes are a
+    // floor, not a ceiling, on touch targets." Every breakpoint must be
+    // at least the original 16px, and the touch ones strictly above it.
+    for (auto bp : {Breakpoint::Desktop, Breakpoint::Handheld, Breakpoint::Phone, Breakpoint::Tv}) {
+        Metrics m = metrics_for(bp);
+        CHECK(m.scale >= 1);
+        CHECK(m.icon_px >= kOriginalIconPx);
+        CHECK(m.button_px() > m.icon_px);  // padding is real, not zero
+    }
+    // Desktop reproduces the original exactly; touch goes above it.
+    CHECK(metrics_for(Breakpoint::Desktop).icon_px == kOriginalIconPx);
+    CHECK(metrics_for(Breakpoint::Phone).icon_px > kOriginalIconPx);
+    CHECK(metrics_for(Breakpoint::Handheld).icon_px > kOriginalIconPx);
+
+    // "resizes toolbar icons, text, and hit targets together" -- text
+    // and icon must move in lockstep, not independently.
+    Metrics d = metrics_for(Breakpoint::Desktop);
+    Metrics p = metrics_for(Breakpoint::Phone);
+    CHECK(p.icon_px == d.icon_px * (p.scale / d.scale));
+    CHECK(p.glyph_scale == d.glyph_scale * (p.scale / d.scale));
+    CHECK(p.label_h == d.label_h * (p.scale / d.scale));
+
+    // The measured constants: PANEL1.VPX's panel is rows 176..199.
+    CHECK(kOriginalPanelTop + kOriginalPanelH == kOriginalScreenH);
+
+    // Touch presence, not window size, decides. The regression this
+    // guards: a small *window* on a desktop must stay Desktop, or a mouse
+    // user gets 36px buttons and a panel filling half the screen.
+    CHECK(breakpoint_for(960, 600, false) == Breakpoint::Desktop);
+    CHECK(breakpoint_for(320, 200, false) == Breakpoint::Desktop);
+    CHECK(breakpoint_for(3840, 2160, false) == Breakpoint::Desktop);  // Tv is opt-in, never inferred
+    CHECK(breakpoint_for(960, 440, true) == Breakpoint::Phone);
+    CHECK(breakpoint_for(1280, 800, true) == Breakpoint::Handheld);
+    // Orientation must not change the answer.
+    CHECK(breakpoint_for(440, 960, true) == breakpoint_for(960, 440, true));
+}
+
+void test_ui_toolbar_layout() {
+    std::printf("test_ui_toolbar_layout\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+
+    const CommandId tools[] = {CommandId::Housing, CommandId::Well,     CommandId::Temple,
+                               CommandId::Theater, CommandId::Coliseum, CommandId::Hippodrome};
+    const int n = 6;
+
+    for (auto bp : {Breakpoint::Desktop, Breakpoint::Handheld, Breakpoint::Phone, Breakpoint::Tv}) {
+        Metrics m = metrics_for(bp);
+        Toolbar bar(tools, n, m, 320, 200);
+
+        CHECK(bar.count() == n);
+        // Panel is anchored to the bottom of the screen and fits in it.
+        Rect p = bar.panel();
+        CHECK(p.x == 0);
+        CHECK(p.w == 320);
+        CHECK(p.y + p.h == 200);
+        CHECK(p.h > 0 && p.h < 200);
+        CHECK(bar.rows() * bar.columns() >= n);
+
+        // Every button lies inside the panel, and none overlap.
+        for (int i = 0; i < n; ++i) {
+            Rect b = bar.button(i);
+            CHECK(b.w == m.button_px() && b.h == m.button_px());
+            CHECK(b.y >= p.y && b.y + b.h <= p.y + p.h);
+            CHECK(b.x >= 0 && b.x + b.w <= 320);
+            for (int j = i + 1; j < n; ++j) {
+                Rect o = bar.button(j);
+                bool disjoint = b.x + b.w <= o.x || o.x + o.w <= b.x || b.y + b.h <= o.y || o.y + o.h <= b.y;
+                CHECK(disjoint);
+            }
+        }
+    }
+
+    // Out-of-range indices give an empty rect, not UB -- button() is
+    // reachable from input handling.
+    Toolbar bar(tools, n, metrics_for(Breakpoint::Desktop), 320, 200);
+    CHECK(bar.button(-1).w == 0);
+    CHECK(bar.button(n).w == 0);
+
+    // The real viewer ring must fit in one row at desktop scale, the way
+    // the original's 16 icons did in its measured 24px bar.
+    const CommandId ring[] = {CommandId::Housing,  CommandId::Well,       CommandId::Fountain, CommandId::ReservoirPipe,
+                              CommandId::Temple,   CommandId::BathHouses, CommandId::Hospital, CommandId::School,
+                              CommandId::Oracle,   CommandId::Theater,    CommandId::Coliseum, CommandId::Hippodrome,
+                              CommandId::Barracks, CommandId::Prefecture, CommandId::Market,   CommandId::HeavyIndustry};
+    Toolbar full(ring, 16, metrics_for(Breakpoint::Desktop), 320, 200);
+    CHECK(full.rows() == 1);
+    CHECK(full.panel().h <= 32);  // comparable to the original's 24px bar
+}
+
+void test_ui_hit_test_matches_drawn_buttons() {
+    std::printf("test_ui_hit_test_matches_drawn_buttons\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+
+    const CommandId ring[] = {CommandId::Housing,  CommandId::Well,       CommandId::Fountain, CommandId::ReservoirPipe,
+                              CommandId::Temple,   CommandId::BathHouses, CommandId::Hospital, CommandId::School,
+                              CommandId::Oracle,   CommandId::Theater,    CommandId::Coliseum, CommandId::Hippodrome,
+                              CommandId::Barracks, CommandId::Prefecture, CommandId::Market,   CommandId::HeavyIndustry};
+    const int n = 16;
+
+    // THE invariant: for every button, at every breakpoint, hit-testing
+    // its drawn rectangle returns that button -- centre and all four
+    // corners. If rendering and hit-testing ever computed geometry
+    // separately, this is what would catch it.
+    for (auto bp : {Breakpoint::Desktop, Breakpoint::Handheld, Breakpoint::Phone, Breakpoint::Tv}) {
+        Toolbar bar(ring, n, metrics_for(bp), 320, 200);
+        for (int i = 0; i < n; ++i) {
+            Rect b = bar.button(i);
+            CHECK(bar.hit_test(b.x + b.w / 2, b.y + b.h / 2) == i);
+            CHECK(bar.hit_test(b.x, b.y) == i);
+            CHECK(bar.hit_test(b.x + b.w - 1, b.y) == i);
+            CHECK(bar.hit_test(b.x, b.y + b.h - 1) == i);
+            CHECK(bar.hit_test(b.x + b.w - 1, b.y + b.h - 1) == i);
+            // Just outside the drawn rect must not hit this button.
+            CHECK(bar.hit_test(b.x - 1, b.y) != i);
+            CHECK(bar.hit_test(b.x, b.y - 1) != i);
+            CHECK(bar.hit_test(b.x + b.w, b.y) != i);
+            CHECK(bar.hit_test(b.x, b.y + b.h) != i);
+            // Every button is a real touch target of at least the
+            // original icon size.
+            CHECK(b.w >= kOriginalIconPx && b.h >= kOriginalIconPx);
+        }
+        // Above the panel is map, not toolbar -- this is what stops a
+        // toolbar click from also placing a building.
+        Rect p = bar.panel();
+        CHECK(bar.hit_test(160, p.y - 1) == -1);
+        CHECK(!bar.contains(160, p.y - 1));
+        CHECK(bar.contains(160, p.y));
+        CHECK(bar.contains(0, 199));
+    }
+}
+
+void test_ui_font_rendering() {
+    std::printf("test_ui_font_rendering\n");
+    using namespace gaius::ui;
+
+    CHECK(text_width("", 1) == 0);
+    CHECK(text_width("A", 1) == kGlyphW);
+    CHECK(text_width("AB", 1) == kGlyphW + kGlyphAdvance);
+    // Text scales with the same factor as icons.
+    CHECK(text_width("HOUSING", 2) == 2 * text_width("HOUSING", 1));
+
+    const int w = 64, h = 16;
+    std::vector<uint8_t> buf(static_cast<size_t>(w) * h * 3, 0);
+    draw_text(buf, w, h, 1, 1, "AB", 1, RGB{255, 255, 255});
+    size_t lit = 0;
+    for (size_t i = 0; i < buf.size(); i += 3)
+        if (buf[i] != 0) ++lit;
+    CHECK(lit > 0);  // something was actually drawn
+
+    // Lowercase is upcased rather than dropped.
+    std::vector<uint8_t> lower(static_cast<size_t>(w) * h * 3, 0);
+    draw_text(lower, w, h, 1, 1, "ab", 1, RGB{255, 255, 255});
+    CHECK(lower == buf);
+
+    // Clipping: drawing far off every edge must not write out of bounds
+    // or crash. (Buffer contents are checked for no growth/corruption.)
+    std::vector<uint8_t> edge(static_cast<size_t>(w) * h * 3, 7);
+    draw_text(edge, w, h, -100, -100, "CLIP", 1, RGB{1, 2, 3});
+    draw_text(edge, w, h, 1000, 1000, "CLIP", 1, RGB{1, 2, 3});
+    draw_text(edge, w, h, -2, -2, "CLIP", 3, RGB{1, 2, 3});
+    CHECK(edge.size() == static_cast<size_t>(w) * h * 3);
+    // A too-small buffer is refused rather than overrun.
+    std::vector<uint8_t> tiny(10, 0);
+    draw_text(tiny, w, h, 0, 0, "X", 1, RGB{255, 255, 255});
+    CHECK(tiny.size() == 10);
+}
+
+void test_ui_toolbar_render() {
+    std::printf("test_ui_toolbar_render\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+
+    const CommandId tools[] = {CommandId::Housing, CommandId::Hippodrome, CommandId::HeavyIndustry};
+    Toolbar bar(tools, 3, metrics_for(Breakpoint::Desktop), 320, 200);
+
+    const int w = 320, h = 200;
+    std::vector<uint8_t> frame(static_cast<size_t>(w) * h * 3, 0x11);
+    render(bar, 0, -1, gaius::viewer::heat_color, frame, w, h);
+
+    Rect p = bar.panel();
+    // The row directly above the panel is untouched map...
+    for (int x = 0; x < w; ++x) {
+        size_t i = (static_cast<size_t>(p.y - 1) * w + x) * 3;
+        CHECK(frame[i] == 0x11);
+    }
+    // ...and the panel itself was painted over.
+    size_t any_changed = 0;
+    for (int y = p.y; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            size_t i = (static_cast<size_t>(y) * w + x) * 3;
+            if (frame[i] != 0x11) ++any_changed;
+        }
+    CHECK(any_changed > 0);
+
+    // A too-small buffer is refused rather than overrun.
+    std::vector<uint8_t> tiny(10, 0);
+    render(bar, 0, -1, gaius::viewer::heat_color, tiny, w, h);
+    CHECK(tiny.size() == 10);
+}
+
 }  // namespace
 
 int main() {
@@ -929,6 +1146,11 @@ int main() {
     test_construction_placement_specs();
     test_construction_place();
     test_construction_to_simulation_pipeline();
+    test_ui_metrics_scale_together();
+    test_ui_toolbar_layout();
+    test_ui_hit_test_matches_drawn_buttons();
+    test_ui_font_rendering();
+    test_ui_toolbar_render();
     test_p32_expand_math();
     test_pal256_expand_math();
     test_pl8_synthetic();

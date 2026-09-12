@@ -57,6 +57,8 @@
 #include "platform/window.hpp"
 #include "stb_image_write.h"
 #include "systems/construction.hpp"
+#include "ui/metrics.hpp"
+#include "ui/toolbar.hpp"
 
 using namespace gaius;
 using gaius::formats::empire2::EmpireMap;
@@ -118,12 +120,20 @@ struct Camera {
     double x, y;  // top-left world pixel visible at viewport (0,0)
     double zoom = 1.0;
 
+    // Height of the map area actually VISIBLE to the player, in logical
+    // pixels. This is less than kLogicalH whenever the toolbar panel
+    // occludes the bottom of the frame. Clamping against the full buffer
+    // height instead would leave the world's last panel_h/zoom pixels
+    // permanently behind the panel -- reachable by neither eye nor click,
+    // which for a 100x100 city at desktop scale hides its bottom ~5 rows.
+    double visible_h = kLogicalH;
+
     explicit Camera(double ww, double wh)
         : world_w(ww), world_h(wh), x(ww / 2.0 - kLogicalW / 2.0), y(wh / 2.0 - kLogicalH / 2.0) {}
 
     void clamp() {
         zoom = std::clamp(zoom, 0.5, 8.0);
-        double view_w = kLogicalW / zoom, view_h = kLogicalH / zoom;
+        double view_w = kLogicalW / zoom, view_h = visible_h / zoom;
         x = std::clamp(x, 0.0, std::max(0.0, world_w - view_w));
         y = std::clamp(y, 0.0, std::max(0.0, world_h - view_h));
     }
@@ -163,6 +173,9 @@ int main(int argc, char** argv) {
     int test_layer = -1;
     struct TestBuild { int tool, x, y; };
     std::vector<TestBuild> test_builds;  // repeatable: --test-build may appear many times
+    struct TestClick { int x, y; };
+    std::vector<TestClick> test_clicks;  // logical-space clicks, for headless UI tests
+    int ui_scale_override = -1;          // -1 = use the size heuristic
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
@@ -185,6 +198,23 @@ int main(int argc, char** argv) {
             b.x = std::atoi(argv[++i]);
             b.y = std::atoi(argv[++i]);
             test_builds.push_back(b);
+        }
+        // Headless UI hook: a click in LOGICAL framebuffer coordinates,
+        // fed through the same handler the real Select command uses, so
+        // toolbar hit-testing is exercised rather than bypassed.
+        if (std::strcmp(argv[i], "--test-click") == 0 && i + 2 < argc) {
+            TestClick c;
+            c.x = std::atoi(argv[++i]);
+            c.y = std::atoi(argv[++i]);
+            test_clicks.push_back(c);
+        }
+        if (std::strcmp(argv[i], "--ui-scale") == 0 && i + 1 < argc) {
+            std::string v = argv[++i];
+            if (v == "desktop") ui_scale_override = static_cast<int>(ui::Breakpoint::Desktop);
+            else if (v == "handheld") ui_scale_override = static_cast<int>(ui::Breakpoint::Handheld);
+            else if (v == "phone") ui_scale_override = static_cast<int>(ui::Breakpoint::Phone);
+            else if (v == "tv") ui_scale_override = static_cast<int>(ui::Breakpoint::Tv);
+            else std::fprintf(stderr, "unknown --ui-scale '%s' (desktop|handheld|phone|tv)\n", v.c_str());
         }
     }
 
@@ -255,7 +285,29 @@ int main(int argc, char** argv) {
     try {
         platform::Window window("Gaius Viewer - " + in_path, kLogicalW, kLogicalH, 960, 600);
 
+        // Toolbar. Sized from the physical window (or an explicit
+        // --ui-scale), but laid out in LOGICAL coordinates, which is what
+        // makes one hit-test correct for mouse, touch and gamepad alike:
+        // every device's position reaches it through
+        // window.window_to_logical().
+        int pw0 = 0, ph0 = 0;
+        window.physical_size(&pw0, &ph0);
+        // Touch presence is a fact SDL reports; screen size alone is not
+        // enough to tell a small window from a small device.
+        bool has_touch = SDL_GetNumTouchDevices() > 0;
+        ui::Breakpoint bp = ui_scale_override >= 0 ? static_cast<ui::Breakpoint>(ui_scale_override)
+                                                   : ui::breakpoint_for(pw0, ph0, has_touch);
+        ui::Metrics metrics = ui::metrics_for(bp);
+        ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH);
+        int hovered = -1;
+        if (save_mode) {
+            std::printf("toolbar: %s scale=%dx  %d buttons (%dx%d px) in %d row(s), panel %d px tall\n",
+                        ui::breakpoint_name(bp), metrics.scale, kBuildToolCount, metrics.button_px(),
+                        metrics.button_px(), toolbar.rows(), toolbar.panel().h);
+        }
+
         Camera cam = save_mode ? Camera(kCityWorldW, kCityWorldH) : Camera(kWorldW, kWorldH);
+        if (save_mode) cam.visible_h = kLogicalH - toolbar.panel().h;
         cam.x += test_pan_x;
         cam.y += test_pan_y;
         cam.zoom *= test_zoom;
@@ -263,6 +315,33 @@ int main(int argc, char** argv) {
         std::vector<uint8_t> frame;
         bool running = true;
         int frame_count = 0;
+
+        // One handler for "the primary action happened at this logical
+        // point", shared by the real input path and --test-click. The
+        // toolbar gets first refusal: a click on the panel selects a tool
+        // and must NOT also fall through to the map underneath it.
+        auto handle_select_logical = [&](int lx, int ly) {
+            if (!save_mode) return;
+            int hit = toolbar.hit_test(lx, ly);
+            if (hit >= 0) {
+                tool_index = hit;
+                std::printf("tool: %s\n", systems::construction::command_name(kBuildTools[tool_index]));
+                return;
+            }
+            if (toolbar.contains(lx, ly)) return;  // panel background, not a button
+
+            int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / kCityCellPx;
+            int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / kCityCellPx;
+            auto tool = kBuildTools[tool_index];
+            bool ok = systems::construction::place(state.city, tool, cell_x, cell_y);
+            std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x, cell_y,
+                        ok ? "OK" : "rejected (terrain not buildable / off grid)");
+        };
+
+        for (const auto& c : test_clicks) {
+            std::printf("--test-click (%d,%d): ", c.x, c.y);
+            handle_select_logical(c.x, c.y);
+        }
 
         while (running) {
             SDL_Event event;
@@ -299,17 +378,19 @@ int main(int argc, char** argv) {
                         break;
                     case platform::CommandType::Select: {
                         if (!save_mode) break;
-                        // Physical click -> logical framebuffer -> world -> grid cell,
-                        // reusing the same camera math the renderer samples through, so
-                        // mouse, touch tap and gamepad A all land on the same cell.
+                        // Physical click -> logical framebuffer -> toolbar or
+                        // world -> grid cell, reusing the same camera math the
+                        // renderer samples through, so mouse, touch tap and
+                        // gamepad A all land on the same button or cell.
                         int lx = 0, ly = 0;
                         if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly)) break;
-                        int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / kCityCellPx;
-                        int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / kCityCellPx;
-                        auto tool = kBuildTools[tool_index];
-                        bool ok = systems::construction::place(state.city, tool, cell_x, cell_y);
-                        std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x,
-                                    cell_y, ok ? "OK" : "rejected (terrain not buildable / off grid)");
+                        handle_select_logical(lx, ly);
+                        break;
+                    }
+                    case platform::CommandType::Hover: {
+                        if (!save_mode) break;
+                        int lx = 0, ly = 0;
+                        hovered = window.window_to_logical(cmd->x, cmd->y, &lx, &ly) ? toolbar.hit_test(lx, ly) : -1;
                         break;
                     }
                     case platform::CommandType::PanBegin:
@@ -333,6 +414,12 @@ int main(int argc, char** argv) {
             if (save_mode) {
                 viewer::render_city_map_layer(state.city, layer, kCityCellPx, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
+                // Toolbar draws over the map, as the original's panel does.
+                // The map is still rendered full-frame so the click ->
+                // world math stays a single uniform mapping; the panel
+                // simply occludes the bottom, and handle_select_logical
+                // keeps clicks there from reaching the occluded cells.
+                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH);
             } else {
                 render_empire_frame(map, cam, frame);
             }

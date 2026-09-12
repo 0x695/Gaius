@@ -77,6 +77,16 @@ add_library(gaius_systems STATIC
 )
 target_link_libraries(gaius_systems PUBLIC gaius_model)
 
+# --- ui library (Phase 5: scalable toolbar, masterplan 5a point 3) ---------
+# Deliberately free of SDL and of apps/: pure geometry + pixel writes into
+# an RGB24 buffer, so layout/hit-testing is unit-testable headlessly.
+add_library(gaius_ui STATIC
+  ui/metrics.cpp
+  ui/font.cpp
+  ui/toolbar.cpp
+)
+target_link_libraries(gaius_ui PUBLIC gaius_systems)
+
 # --- platform layer (Phase 1: window/input/paths) --------------------------
 add_library(gaius_platform STATIC
   platform/window.cpp
@@ -89,10 +99,10 @@ target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
-target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_platform stb_image_write)
+target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_platform stb_image_write)
 
 # --- tests -----------------------------------------------------------------
 enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
-target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems stb_image)
+target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)
