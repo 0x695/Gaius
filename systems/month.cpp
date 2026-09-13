@@ -3,8 +3,11 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
+#include <vector>
 
 #include "formats/save/save.hpp"
+#include "systems/actors.hpp"
 #include "systems/housing.hpp"
 
 namespace gaius::systems::month {
@@ -46,15 +49,31 @@ SimState sim_state_from_save(const model::CityState& state) {
     return sim;
 }
 
-void run_step(model::CityMap& city, SimState& sim) {
+namespace {
+
+void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state) {
+    // The main loop (0xFA13): a random draw every frame, then the frame
+    // counters (0x1147E), the walkers (0x23C4C) and the step (0x2936A).
+    sim.random.advance();
+    ++sim.ticks;
+    if (state) actors::update(*state, sim.random, sim.ticks);
+
     const int step = sim.step;
     if (step < kHousingSteps) {
         // 0x294CF: one growth value per row, a signed byte.
+        std::vector<std::pair<int, int>> collapsed;
         housing::DevelopmentContext ctx;
         ctx.population_units = sim.population_units;
         ctx.land_value_growth = static_cast<int8_t>(
             static_cast<uint8_t>(sim.land_value_growth_base + (sim.random.walk & 3) - 1));
+        if (state) ctx.collapsed = &collapsed;
         housing::develop_row(city, step, ctx);
+        if (state) {
+            // The engine spawns each rioter inside the row; nothing in the row
+            // reads the actor table, so spawning after it is the same.
+            for (const auto& [x, y] : collapsed) actors::spawn_rioter(*state, x, y);
+            actors::run_spawners(*state, sim.random, step);
+        }
         if (step == kDrawStep) sim.random.advance();
     } else if (step == 100) {
         service::reset_tick(city, sim.service);
@@ -82,6 +101,10 @@ void run_step(model::CityMap& city, SimState& sim) {
         if (++sim.month_counter_18 >= 18) sim.month_counter_18 = 0;
     }
 }
+
+}  // namespace
+
+void run_step(model::CityMap& city, SimState& sim) { run_step_impl(city, sim, nullptr); }
 
 void run_month(model::CityMap& city, SimState& sim) {
     do {
@@ -152,7 +175,7 @@ void run_economy(model::CityState& state) {
 
 void run_step(model::CityState& state, SimState& sim) {
     const int step = sim.step;
-    run_step(state.city, sim);
+    run_step_impl(state.city, sim, &state);
     if (step == 101) {
         model::set_global_word(state, 0x6C10, sim.population_units);
         model::set_global_word(state, 0x6C0E, 4 * sim.population_units);

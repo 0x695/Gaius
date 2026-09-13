@@ -21,7 +21,7 @@
 //   right-click / two-finger tap / gamepad B                -> cycle save
 //     layer (save-file mode only; no-op for an EMPIRE2 scenario)
 //   Tab / gamepad X                                         -> cycle build tool
-//   Space / gamepad Y                                       -> pause / resume time (a month every 2 s;
+//   Space / gamepad Y                                       -> pause / resume time (a month about every 2 s;
 //                                                              save-file mode)
 //   left-click / tap / gamepad A                            -> place current
 //     build tool at the clicked cell (save-file mode only)
@@ -342,12 +342,21 @@ int main(int argc, char** argv) {
     systems::month::SimState sim;
     if (save_mode) sim = systems::month::sim_state_from_save(state);
     bool time_running = save_mode && !start_paused;
-    constexpr Uint32 kMonthMs = 2000;
+    // One step every 19 ms: a month (106 steps) in about 2 s, and the walkers
+    // move a pixel each step.
+    constexpr Uint32 kStepMs = 19;
+    auto report_month = [&]() {
+        std::printf("month %d, year %d: population %d\n", sim.month + 1, sim.year, 4 * sim.population_units);
+    };
     auto advance_month = [&]() {
         systems::month::run_month(state, sim);
         city_image_dirty = true;
-        std::printf("month %d, year %d: population %d\n", sim.month + 1, sim.year,
-                    4 * sim.population_units);
+        report_month();
+    };
+    auto advance_step = [&]() {
+        systems::month::run_step(state, sim);
+        city_image_dirty = true;
+        if (sim.step == 0) report_month();
     };
 
     // One placement for the click handler and --test-build: the drag-built
@@ -399,7 +408,7 @@ int main(int argc, char** argv) {
                         ok ? "OK" : "rejected");
         }
         for (int m = 0; m < run_months; ++m) advance_month();
-        std::printf("time: %s (Space / gamepad Y)\n", time_running ? "running, a month every 2 s" : "paused");
+        std::printf("time: %s (Space / gamepad Y)\n", time_running ? "running, about 2 s a month" : "paused");
     }
 
     try {
@@ -468,7 +477,7 @@ int main(int argc, char** argv) {
             handle_select_logical(c.x, c.y);
         }
 
-        Uint32 last_month_ms = SDL_GetTicks();
+        Uint32 last_step_ms = SDL_GetTicks();
         while (running) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
@@ -579,10 +588,11 @@ int main(int argc, char** argv) {
 
             if (time_running) {
                 const Uint32 now = SDL_GetTicks();
-                if (now - last_month_ms >= kMonthMs) {
-                    advance_month();
-                    last_month_ms = now;
+                for (int budget = 8; budget > 0 && now - last_step_ms >= kStepMs; --budget) {
+                    advance_step();
+                    last_step_ms += kStepMs;
                 }
+                if (now - last_step_ms >= kStepMs) last_step_ms = now;  // behind: drop the backlog
             }
 
             if (save_mode && show_sprites) {

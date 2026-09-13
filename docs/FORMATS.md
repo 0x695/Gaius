@@ -59,7 +59,7 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 
   | Block | Runtime address | Size | What it is |
   |---|---|---|---|
-  | `objects_70x50` | `DS:0x5D84` | 70×50 | the actor table: word +0 sprite frame, +2/+4 world x/y, byte +6 active, +7 type, word +8 own index (see `model::Actor`; the renderer at flat `0x6946` reads these) |
+  | `objects_70x50` | `DS:0x5D84` | 70×50 | the actor table: word +0 sprite frame, +2/+4 world x/y, byte +6 active, +7 type, word +8 own index (see `model::Actor`; the renderer at flat `0x6946` reads these; every other field is laid out in `systems/actors.hpp` and dispatch findings section 20) |
   | `table_480` | `DS:0x5BA4` | 30×16 | forum records (tiles `0xE0`-`0xE7`, which the corpus called temples): +0 column, +2 row, +4 grade, +6 timer, +8 active — `construction::place_forum` |
   | `table_120` | `DS:0x5B2C` | 10×12 | barracks records (tile `0xEF`): +0 column, +2 row, +6 active (`0x12A94`) |
   | `table_720` | `DS:0x585C` | 30×24 | workshop records (tiles `0xF5`/`0xF6`): +0 column, +2 row, +4 goods, +6 timer, +8 active, +0x10 production level; they also drive the bottom-row sprites (renderer `0x20613`) — `construction::place_workshop` |

@@ -326,7 +326,7 @@ A scan of the whole table, bounded at each handler's true end, found no other DS
 
 A month is 106 steps, counted in `DS:0x6D9D` (dispatcher at `0x2936A`):
 
-- **Steps 0-99:** the housing development pass for row = step (`0x294CF`), then five other per-row routines (`0x2D2F5`, `0x2CE7C`, `0x2CD1C`, `0x2E209`, `0x2CD10`) that haven't been read.
+- **Steps 0-99:** the housing development pass for row = step (`0x294CF`), then five other per-row routines (`0x2D2F5`, `0x2CE7C`, `0x2CD1C`, `0x2E209`, `0x2CD10`), read in sections 19.4 and 20.
 - **Steps 100-105** (jump table at `0x29466`): 100, the reset `0x2C8D3` and `0x2DA0D`; 101, population and water (`0x2C93F`) and `0x28215`; 102-105, the four quarter scans (`0x2BBBB` from rows 0, 25, 50 and 75), the last also publishing the scan counters and calling six monthly routines.
 - **Rollover** (`0x29476`): at step 106 the step resets and month `DS:0x6C1C` advances; at 12, month resets, year `DS:0x6C32` advances, `DS:0x6C7C` is set to 80 and `0x28238` runs. `DS:0x6D9B` counts months mod 18, and `0x2DA0D` only runs while it is 0.
 
@@ -423,7 +423,7 @@ State at `2EF9:0286`-`028E`. The image's initial values are 55, 49, 12, 12, 55, 
 
 `0286` is therefore a random walk over 1-99. The housing pass never calls the generator; it reads `0286`, and each row's land-value growth is `DS:0x6BF6 + (0286 & 3) - 1` as a signed byte.
 
-The generator has 45 call sites. In the monthly simulation path exactly five draw each month:
+The generator has 45 call sites. In the monthly simulation path five draw each month (and the main loop draws once per frame besides -- section 20.1):
 - `0x2E209`, only at step 80 — after that step's housing row, so rows 0-80 share one growth value and rows 81-99 the next.
 - `0x2DF7D`, four draws at step 105. Each one rolls `0286` against a threshold (`DS:0x6BE0`, `0x6BE2`, `0x6BE4`, `0x6BDE`) and, if it passes and a count is nonzero, halves `028C` until it fits that count to pick a target. That looks like the monthly event roll, but it isn't modeled.
 
@@ -559,10 +559,186 @@ Recomputed from each real save's own inputs, all five outputs match in all four 
   - `0x2CD1C` from barracks: rows 75-84, kind 4.
 
   All go through the actor allocator `0334:28F9`.
-- **Actor movement** is a two-level dispatch in `0x23C52`: actor type through `DS:0x134C` (30 handlers), then state (+0x31) through `DS:0x1384` (16 handlers). It isn't transcribed yet.
+- **Actor movement** is a two-level dispatch in `0x23C52`: actor type through `DS:0x134C` (14 handlers, types 0-13), then state (+0x31) through `DS:0x1384` (16 handlers). Transcribed in section 20.
 - **Province-level events:** `0x2E249`/`0x2E220` (step 80) cycle province-map tiles `0x4C`/`0x79`/`0x7A`/`0x61`.
 - **Ratings and messages:**
   - the step-105 routines `0x2E0BE`, `0x2DC72`, `0x2DEC8`, `0x2DD21` and `0x2DE0F` work on province, ratings and message globals;
   - so do the 18-month `0x2D6F4` and `0x27BA1` (population milestones, with flags in `table_10`).
 
   None touches the city grid layers; they belong to Phases 6-7.
+
+## 20. Walkers (2026-09-13)
+
+The actor table's records move by a type x state dispatch. This section reads everything in it that runs on the city map; `systems::actors` implements it.
+
+### 20.1 Where walkers run: the main loop
+
+- **Every frame**, the loop at flat `0xFA13`:
+  1. advances the frame phase `DS:0x6DE3` (0-10) and calls `1F6F:1A08`;
+  2. draws a random number (`2EF9:1425`);
+  3. asks the speed gate `0xFAA2` whether this frame is a simulation step. The gate reads `3496:0000[speed / 10 x 10 + phase]`, with the speed in `DS:0x5292`; row 10 passes every frame, lower rows fewer.
+- **On a step frame** it then runs:
+  1. `0x1147E`, which steps the frame counters `DS:0x6D44`-`0x6D34` (periods 4, 8, 16 for `0x6D40`, 32 for `0x6D3E`, 64 for `0x6D3C`, ...);
+  2. the actor update `0x23C4C`;
+  3. one month step `0x2936A`.
+- **A correction to 17.3.** The generator draws once per frame, on top of the five draws the steps make. At the fastest speed that's one extra draw per step, which is what Gaius does. Slower speeds also draw on the frames between steps; Gaius doesn't model that.
+- **The dispatcher's order** for steps 0-99 is the housing row `0x294CF`, then forums `0x2D2F5`, workshops `0x2CE7C`, barracks `0x2CD1C`, `0x2E209` and `0x2CD10` (`0x27BA1` at step 80). Before any step it calls `0x29472`, and the 18-month routine `0x2D6F4` when `DS:0x6D97` is 1.
+
+### 20.2 The record, the allocator and the update
+
+The record is 50 bytes at `DS:0x5D84` + slot x 50. Renderer findings section 8 gives +0 to +9; the rest:
+
+| Offset | Size | Field |
+|---|---|---|
+| `+0A` | byte | facing, 0-7 clockwise from north |
+| `+0B` | byte | following an obstacle |
+| `+0C` | byte | which hand keeps the obstacle: 0 turns clockwise, 1 anticlockwise |
+| `+0D`/`+0E` | byte | the follow target cell |
+| `+0F` | byte | pixels left before the next cell |
+| `+10` | byte | steps until the hand flips |
+| `+11` | byte | the flip interval |
+| `+12`/`+13` | byte | the destination cell (city actors); the current cell (province actors) |
+| `+14` | word | the home record's index, or the actor being chased |
+| `+17` | byte | status: `1` stopped, `2` the cell was already occupied, `4` this tick began a cell |
+| `+18` | word | the cell: row x 100 + column (row x 40 + column for types 11 and up) |
+| `+1A` | word | the cell of the last blocked step |
+| `+1E` | byte | that obstacle's class |
+| `+1F` | byte | age |
+| `+22`/`+24` | word | the column and row of the last blocked step |
+| `+26` | word | the actor last touched |
+| `+28` | word | a state timer |
+| `+2C`/`+2D` | byte | a second destination (province states) |
+| `+31` | byte | state |
+
+- **Allocator `0x5C39`** (`0334:28F9`; type, column, row).
+  - It scans for a slot with active = 0. At the first one it checks the type's counter, and fails if that's full: types 0-2 `DS:0x6C1A` (30), 3-4 `0x6C18` (8), 5-7 and 10-12 `0x6C16` (12), 8-9 `0x6C14` (10), 13 `0x6C12` (10); any other type fails.
+  - Otherwise it increments the counter and sets the cell, type, destination (the spawn cell), `+2C`/`+2D` = 0, active = 1, x and y = the cell x 16, and the index. The slot is left in `DS:0x6DBD`.
+  - It doesn't clear the other fields; `0x5DC7` zeroed them when the slot was freed.
+- **Free `0x5DC7`** decrements the same counter, clears `7BB4` bit `0x40` at the cell for types below 11, and zeroes the record.
+- **Update `0x23C4C`.** For each slot with active = 1, a negative type is freed; any other calls `[DS:0x134C + type x 4]`.
+
+### 20.3 Movement (`0x254DF`)
+
+The routine's argument is a 256-byte walkability table, indexed by tile id:
+
+- **`3496:1E04`** passes road tiles `0x36`-`0x43` and the crossing tiles `0x5E`-`0x61` and `0x82`-`0x89`.
+- **`3496:1F08`** also passes open ground `0x1D`-`0x2D` and rubble (`0xA2`, `0xA3`, `0xA7`, `0xAA`, `0xAD`, `0xB0`).
+- **Blocking values:**
+  - 1: no class;
+  - 2: housing `0xC8`-`0xD7`;
+  - 3: other buildings, `0xD8` and up;
+  - 4: wall pieces `0x92`-`0x95` and `0x9E`-`0xA1`;
+  - 5: `0x2E`-`0x35` and `0x44`-`0x49`, terrain the walkers clear to `0x1D` (probably trees; unconfirmed).
+- **The obstacle class** is 1 << (value - 2), set by `0x26A8F`.
+
+Each call moves the walker one pixel:
+
+1. **Between cells.** It clears status bit 4 and counts down `+0F`. While that stays above 0, the walker steps a pixel along its facing (`0x26CEE`) and returns.
+2. **At a cell.** When `+0F` reaches 0 it sets bit 4, clears the class and reloads 16. It releases `7BB4` bit `0x40`, recomputes the cell, and takes the direct facing toward the destination (`0x26B3C`, where 8 means arrived).
+3. **Arrived.** `0x26BB0` snaps x and y to the cell, sets bit `0x40`, clears `+0F`, `+10`, `+11`, `+0C`, the status and the class, and sets status 1.
+4. **Following an obstacle.** With `+0B` = 1 the walker aims at the follow target instead, and stops following once that facing matches the direct one.
+5. **Trying a step.** Not following, it tries the direct facing with `0x25909`:
+   - a next cell whose table value is 0 passes;
+   - anything else fails and records the obstacle (`+22`/`+24`, `+0D`/`+0E`, `+1A`, `+1E`);
+   - a step off the map fails without recording anything.
+6. **Turning.** On a failure it starts following, with the destination as the target, and turns one facing at a time in its hand's direction, up to 8 times, until a step passes. Every failed try overwrites the follow target with its obstacle, so the next cell turns from there: the walker keeps the obstacle on one hand. If no step passes, `0x26BB0` stops it.
+7. **Stepping.** It sets the facing, re-marks the cell (status bit 2 if bit `0x40` was already set there) and moves a pixel.
+   - Within 45 degrees of the direct facing, following ends.
+   - Otherwise `+10` counts down. At 0, `+11` grows by 2 (a signed byte with no cap), `+10` reloads from it, the hand flips and following ends.
+
+`0x26059` is the province-map version: a 40-wide map, the layer at `3496:2754`, occupancy bit `0x80`, and `0x26C4F` in place of `0x26BB0`.
+
+### 20.4 Types (`DS:0x134C`)
+
+| Type | Handler | Walking frames (`MOREMEN.PL8`) | Ages every | Freed at age | What it is |
+|---|---|---|---|---|---|
+| 0 | `0x23CA1` | 0-11 | 16 ticks | 10 | forum citizen |
+| 1 | `0x23CFE` | 12-23 | 16 | 20 | forum citizen |
+| 2 | `0x23D5C` | 24-35 | 16 | 40 | forum citizen |
+| 3 | `0x23DBA` | -- | -- | -- | (returns at once) |
+| 4 | `0x23DBB` | 36-47 | 16 | 50 | barracks patrol |
+| 5-7 | `0x23E19`, `0x23E77`, `0x23ED5` | 48-59, 60-71, 72-83 | 64 | 120 | invaders |
+| 8 | `0x23F33` | 0-11 | 16 | 30 | workshop trader |
+| 9 | `0x23FC5` | -- | -- | -- | (returns at once) |
+| 10 | `0x23FC6` | 0-11 | 16 | 20 | rioter |
+| 11 | `0x24023` | `DS:0x6BD8` | 64 | 120 | province army (probably hostile) |
+| 12 | `0x24089` | `0x2C`-`0x2F` by facing | -- | -- | becomes type 11 on status bit 8 |
+| 13 | `0x24133` | `+2A` x 4 + (32-period counter >> 1 & 3) | -- | -- | the player's army on the province map |
+
+Every city type's handler does the same three things:
+
+1. **Runs its state.**
+2. **Sets the walking frame** (`0x25196`).
+   - The base comes from the table, plus a facing set x 3: facings 0, 1 and 7 add 3; 2 adds 9; 3-5 add 0; 6 adds 6.
+   - Then a stride from `+0F & 6`: 0 or 4 adds 1, 2 adds 0, 6 adds 2.
+3. **Ages the walker.** When the period's counter is 0, age goes up by 1, and at the limit the state becomes 2.
+   - Type 8 at its limit also lowers its workshop's sales, `+0E`, to no less than -2.
+   - Steps 2 and 3 run even when the state has just freed the record, so an empty slot can carry a frame and an age of 1.
+
+### 20.5 States (`DS:0x1384`)
+
+| State | Handler | Table | Behaviour |
+|---|---|---|---|
+| 0 | `0x2417B` | -- | nothing |
+| 1 | `0x2417C` | roads | skips odd ticks of the 32-period counter when the cell is shared; walks; at each cell inside the one-cell margin, C9D4 `|= 0x12` over the 3x3 |
+| 2 | `0x242EF` | -- | free |
+| 3 | `0x242FA` | ground | walks; when stopped, state 2; at a cell, by obstacle class: 1 or 2 demolish (`0x124F8`, direction 8), 4 breach a wall (`0x243B5`), 8 tile `0x1D` |
+| 4 | `0x24563` | roads | skips odd ticks when the cell is **not** shared; walks; at a cell with C9D4 `0x08`, state 2 and the workshop's sales `+0E` + 1 (up to 2) |
+| 5 | `0x245FF` | ground | walks; when stopped, state 6, timer 0, destination += `3496:1DF4`[random `0288` & 7] clamped to 0-99; at a cell, class 1 or 2 demolish, class 8 tile `0x1D` |
+| 6 | `0x2478B` | -- | frame `0x2A`/`0x2B` (the type handler overwrites it); timer + 1, and past 8 state 5 with the path cleared |
+| 7 | `0x247DA` | roads | walks; at each cell inside the margin, land value - 2 over the 3x3; every fifth cell looks for a hostile (types 5, 6, 7, 10) within 160 px (`0x2520E`), then state 8 |
+| 8 | `0x24A6B` | ground | the target gone or not hostile: look again, or state 2; destination = the target's cell; walks; at a cell, any hostile within 16 px (`0x26D9D`) goes to state 2 |
+| 9 | `0x24B66` | province | walks; arriving on province tile `0x4A` frees it, launches invaders (`0x2D891`) and lowers `DS:0x6C3C`; otherwise state 15. Random events on the way change tiles `0x4C`/`0x79`/`0x7A` and post messages |
+| 10, 13 | `0x24ECE`, `0x2514C` | province | walks |
+| 11 | `0x24EF4` | province | walks, swapping the destination with `+2C`/`+2D` on arrival; a type 11 within 64 px starts state 12 |
+| 12 | `0x24FF7` | province | the battle with that type 11 (`0x26EF1`, `0x22116`) |
+| 14 | `0x25172` | -- | frame = `+2A` x 4 |
+| 15 | `0x24EA4` | -- | timer + 1, and past 16 free |
+
+- **The wall breach (`0x243B5`)** only happens when the random walk `0286` is at most 6:
+  - `0x92`, `0x94` and `0xA0` become `0xA2`, unless a `0x9A`-`0x9F` piece is left or right of them; then only when the walk is at most 1.
+  - `0x93`, `0x95` and `0xA1` become `0xA3`, with the same test above and below.
+  - `0x9E` and `0x9F` would need a walk below 1, which never happens.
+
+### 20.6 Spawners
+
+- **Forums, `0x2D2F5`** (steps 0 and 50).
+  - Record at `DS:0x5BA4`, 16 bytes: +0 column, +2 row, +4 grade, +6 timer, +8 active, +A facing.
+  - Each active forum's timer counts down. Below 0 it reloads from `3496:1878` by grade (7, 6, 5, 5, 4, 3, 2, 2), and the facing advances.
+  - If the population units `DS:0x6C10` exceed 10, it looks for a road around the footprint: 2x2 for grades 0-2, 3x3 for 3-6, 4x4 for 7.
+  - It spawns type 0 (random & 15 below 6), 1 (up to 12) or 2, aimed at the map-edge point for its facing, in state 1. The edge points (`3496:1A10`) are (50,0), (99,0), (99,50), (99,99), (50,99), (0,99), (0,50), (0,0).
+- **Workshops, `0x2CE7C`** (step 25 + record).
+  - Record at `DS:0x585C`, 24 bytes: +0 column, +2 row, +4 goods, +6 timer, +8 active, +A facing, +C population nearby, +E sales, +10 level, +12 last level, +14 industry.
+  - First `0x2D19A` sums the population units of housing in the 9x9 window from (column - 3, row - 3), clipped to the map, and sets industry to 2 if heavy industry `0xF3` is in it.
+  - **The level** is the sum of:
+    - `3496:1880`[`DS:0x6CA6` x 8 + goods];
+    - population / 16 - 4;
+    - `DS:0x6BF4`, sales and industry;
+    - a band of `DS:0x6BFC`: below -30 +2, below -10 +1, up to 0 nothing, then -1 to -8 at 1, 3, 5, 8, 12, 16, 20 and 30, up to 199;
+    - -1 each for more than 1, 3 and 5 workshops of the same goods.
+
+    It is clamped to 0-7 and stored, with the old level in +12.
+  - When the timer passes 0 (reloading 4, so every fifth visit) the facing advances. With population units above 10, a trader (type 8, state 4) leaves from a road around the 3x3.
+- **Barracks, `0x2CD1C`** (step 75 + record).
+  - Record at `DS:0x5B2C`, 12 bytes: +0 column, +2 row, +4 timer, +6 active, +8 facing.
+  - The timer reloads 6, so every seventh visit a patrol (type 4, state 7) leaves.
+- **The road search** (`0x2D4BF`/`0x2D558`/`0x2D5F1`).
+  - Rings of 12, 16 or 20 cells (tables `3496:1A20`, `1A90`, `1B10`), clockwise from the outer top-left corner, listed with a wrap so any start index works.
+  - It starts at random & 15, and takes the first cell `0x2D68A` accepts.
+  - That test accepts `0x36`-`0x43` and `0x5E`-`0x61`. Its `0x82`-`0x89` clause compares a sign-extended byte and never passes.
+- **Collapsed houses, `0x2DB49`.** After the house becomes `0xA7`, a rioter (type 10) spawns on the cell, facing south with the cell below as its destination, in state 5. Then, only if the spawn succeeded: sound 5, a message, `DS:0x6C3C` -= 2 (not below 0), and `DS:0x6C84` = 2.
+- **Invaders, `0x2D891`** (from state 9): type `DS:0x6BDA` + 5, state 3, aimed at (`DS:0x6DAF`, `DS:0x6DAD`).
+- **Province actors.** The 18-month routine `0x2D6F4` places types 11 and 12 on province tiles `0x51` + r and `0x59` + r, in state 9. `0x1548A` places the player's army, type 13, in state 10.
+
+### 20.7 In Gaius, and what's open
+
+- **`systems::actors`** has the allocator, the release routine, the update, city states 1-8 and 15, the three spawners and the rioter spawn. `systems::month::run_step` on a whole save calls them in the engine's order. `gaius_viewer` steps the month so walkers move.
+- **Not transcribed:**
+  - the province types 11-13 and states 9-14, which move on the province map that `CityState` doesn't hold;
+  - sounds and messages.
+- **Tests** (`test_actors_*`): a road walk, a corner, spawn limits, the forum and workshop spawns with the level formula, a soldier removing a rioter, and a rioter demolishing a house. On the four real saves, three months of steps keep every type counter in step with its walkers and keep road walkers on roads.
+- **Not yet checked against the engine.** Nothing in the four saves pins a walker's path; two saves a few steps apart would.
+- **Open:**
+  - what `DS:0x6CA6`, `DS:0x6BFC`, `DS:0x6C3C` and `DS:0x6C84` mean to the player;
+  - what sends an invasion;
+  - the province states.

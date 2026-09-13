@@ -86,14 +86,12 @@ struct Actor {
     // +0x08: the record's own index in the table, which the draw list stores
     // (0x6DA6); it matches the slot in every active record of four real saves.
     uint16_t index() const { return static_cast<uint16_t>(raw[0x08] | (raw[0x09] << 8)); }
-    // raw_x/raw_y (+0x12/+0x13) are the current cell for PROVINCE actors, but
-    // NOT for city actors. In four real saves the province actor's raw (21,23)
-    // agrees with both packed_xy (941 = 23*40+21) and screen/16 (336,368). City
-    // actors instead hold values like (99,99) and (50,0) here, while packed_xy
-    // and screen_x/16 agree with each other (col 81 <-> screen_x 1296). So for
-    // a city actor's position use packed_xy (or screen_x/y / 16); what
-    // raw_x/raw_y mean for city actors -- an origin or destination? -- is
-    // unresolved.
+    // raw_x/raw_y (+0x12/+0x13) are the current cell for PROVINCE actors: in
+    // four real saves the province actor's raw (21,23) agrees with both
+    // packed_xy (941 = 23*40+21) and screen/16 (336,368). For CITY actors they
+    // are the destination (resolved 2026-09-13, systems/actors.hpp): spawners
+    // aim walkers at map-edge points such as (99,99) and (50,0). So for a city
+    // actor's position use packed_xy (or screen_x/y / 16).
     uint8_t raw_x() const { return raw[0x12]; }                                                 // +0x12
     uint8_t raw_y() const { return raw[0x13]; }                                                 // +0x13
     uint16_t packed_xy() const { return static_cast<uint16_t>(raw[0x18] | (raw[0x19] << 8)); }  // +0x18

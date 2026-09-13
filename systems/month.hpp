@@ -7,7 +7,8 @@
 // at 2EF9:1425. See docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 17.
 //
 // A month is 106 steps (DS:0x6D9D):
-//   0-99    systems::housing::develop_row for row = step. At step 80 the
+//   0-99    systems::housing::develop_row for row = step, then the walker
+//           spawners (systems::actors::run_spawners); at step 80 the
 //           per-row routine 0x2E209 draws one random number.
 //   100     reset_tick, and derive_network_flags in one month of 18
 //   101     population units (DS:0x6C10) and water
@@ -16,8 +17,12 @@
 // then the calendar advances: month DS:0x6C1C wraps at 12 into year
 // DS:0x6C32, and the 18-month counter DS:0x6D9B wraps at 18.
 //
-// Not modeled, each for a stated reason: the other per-row routines
-// (0x2D2F5, 0x2CE7C, 0x2CD1C, 0x2CD10) and monthly routines (0x2E0BE,
+// Before every step the main loop (0xFA13) draws a random number and, on a
+// whole save, ticks the walkers (systems::actors::update); the grid-only
+// run_step has no actor table and only draws.
+//
+// Not modeled, each for a stated reason: the per-row routine 0x2CD10 and
+// the monthly routines (0x2E0BE,
 // 0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F, and 0x2DF7D's event rolls) aren't
 // read yet; nor are the step-101 routine 0x28215, the yearly routine 0x28238
 // (not yet checked for random draws) or the 18-month routine 0x2D6F4. The
@@ -25,10 +30,13 @@
 //
 // The random draws. The land-value growth each housing row applies is
 // DS:0x6BF6 + (2EF9:0286 & 3) - 1, as a signed byte, and 2EF9:0286 only
-// changes when the generator draws -- 5 times a month in the simulation
-// path above, so rows 0-80 of a month share one value and rows 81-99 the
-// next. The generator's state isn't in the save and is also advanced by
-// terrain generation and UI screens, so a real session's sequence can't be
+// changes when the generator draws: once per frame in the main loop, and
+// five more times a month in the steps above (step 80, four at step 105).
+// At the fastest speed every frame is a step (row 10 of the speed gate at
+// 3496:0000 passes every frame); at slower speeds the frames between steps
+// draw too, which Gaius doesn't model -- it draws once per step. The
+// generator's state isn't in the save and is also advanced by terrain
+// generation and UI screens, so a real session's sequence can't be
 // recovered; Gaius starts it from the values in the executable image.
 
 #pragma once
@@ -63,6 +71,7 @@ struct SimState {
     int month_counter_18 = 0;        // DS:0x6D9B
     int land_value_growth_base = 0;  // DS:0x6BF6
     int population_units = 0;        // DS:0x6C10
+    int ticks = 0;                   // the frame counters DS:0x6D34-0x6D44, as one count
     Random random;
     service::ServiceState service;
 };

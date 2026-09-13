@@ -46,6 +46,9 @@
 
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include <array>
 #include <cstdint>
 
@@ -58,7 +61,8 @@ namespace gaius::systems::housing {
 // returns true. Called by grades 0xC8-0xCB with thresholds 20/30/40/48. When it
 // fires, the engine also conditionally spawns an actor, lowers DS:0x6C3C by 2
 // and sets DS:0x6C84 to 2 -- not modeled, since there is no actor system yet.
-bool land_value_allows(model::CityMap& city, int x, int y, int threshold);
+bool land_value_allows(model::CityMap& city, int x, int y, int threshold,
+                       std::vector<std::pair<int, int>>* collapsed = nullptr);
 
 // Population units per cell for tiles 0xC8-0xD7: the table at 3496:007E. Per
 // cell, not per building -- larger houses span more cells.
@@ -80,6 +84,9 @@ struct DevelopmentContext {
     // C9D4.20. In the engine it is DS:0x6BF6 + (random & 3) - 1, drawn once per
     // row; the RNG isn't transcribed, so the caller supplies the value.
     int land_value_growth = 0;
+    // Where set, each house that collapses (land_value_allows) is appended, so
+    // the caller can spawn its rioter (actors::spawn_rioter) after the row.
+    std::vector<std::pair<int, int>>* collapsed = nullptr;
 };
 
 // Routine 0x294CF for one row -- see the file header.

@@ -31,6 +31,7 @@
 #include "model/city_state.hpp"
 #include "render/city_render.hpp"
 #include "stb_image.h"
+#include "systems/actors.hpp"
 #include "systems/construction.hpp"
 #include "systems/housing.hpp"
 #include "systems/month.hpp"
@@ -1758,17 +1759,18 @@ void test_month_random_sequence() {
     }
 }
 
-// 106 steps a month; month wraps into year; the 18-month counter; and
-// exactly five random draws a month (step 80, and four at step 105).
+// 106 steps a month; month wraps into year; the 18-month counter; and 111
+// random draws a month: the main loop's one before each step, plus step 80's
+// and four at step 105.
 void test_month_calendar_and_draws() {
-    std::printf("test_month_calendar_and_draws (0x29476 calendar, 5 draws a month)\n");
+    std::printf("test_month_calendar_and_draws (0x29476 calendar, 111 draws a month)\n");
     using namespace gaius::systems::month;
     auto f = fresh();
     SimState sim;
     sim.month = 11;
     sim.year = -1;
     Random expect = sim.random;
-    for (int i = 0; i < 5; ++i) expect.advance();
+    for (int i = 0; i < kStepsPerMonth + 5; ++i) expect.advance();
 
     int steps = 0;
     do {
@@ -1785,10 +1787,10 @@ void test_month_calendar_and_draws() {
     CHECK(sim.month == 5 && sim.year == 1);
 }
 
-// Rows 0-80 share one growth value, rows 81-99 the next: the draw at step 80
-// happens after that step's housing row.
-void test_month_growth_changes_after_step_80() {
-    std::printf("test_month_growth_changes_after_step_80 (0x294CF growth vs the step-80 draw)\n");
+// A housing row's growth uses the generator's walk after its own step's draw
+// (the main loop's, before the step); step 80 draws once more after its row.
+void test_month_growth_draws() {
+    std::printf("test_month_growth_draws (0x294CF growth vs the per-step and step-80 draws)\n");
     using namespace gaius::systems::month;
     auto f = fresh();
     for (int row : {80, 81}) {
@@ -1798,17 +1800,282 @@ void test_month_growth_changes_after_step_80() {
     SimState sim;
     sim.land_value_growth_base = 3;
     sim.step = 80;
-    Random after = sim.random;
-    after.advance();
+    Random r;
+    r.advance();  // step 80's frame draw
+    const int growth_80 = 3 + (r.walk & 3) - 1;
+    Random skipped = r;
+    skipped.advance();  // what step 81 would see without step 80's own draw
+    const int growth_81_without = 3 + (skipped.walk & 3) - 1;
+    r.advance();  // 0x2E209, after row 80
+    r.advance();  // step 81's frame draw
+    const int growth_81 = 3 + (r.walk & 3) - 1;
+    CHECK(growth_81 != growth_81_without);
 
-    run_step(f->city, sim);  // row 80, then the draw
-    run_step(f->city, sim);  // row 81
-    const int growth_80 = 3 + (Random{}.walk & 3) - 1;
-    const int growth_81 = 3 + (after.walk & 3) - 1;
-    CHECK(growth_80 != growth_81);
+    run_step(f->city, sim);
+    run_step(f->city, sim);
     CHECK(f->city.land_value[80][5] == growth_80);
     CHECK(f->city.land_value[81][5] == growth_81);
-    CHECK(sim.random.walk == after.walk);
+    CHECK(sim.random.walk == r.walk && sim.random.lfsr == r.lfsr);
+}
+
+namespace {
+
+// A city of one tile everywhere, with room for the global words.
+struct ActorWorld {
+    CityState s;
+    explicit ActorWorld(uint8_t ground) {
+        for (auto& row : s.city.tile) row.fill(ground);
+        s.global_words_128.assign(256, 0);
+        s.final_state.assign(68, 0);
+    }
+};
+
+int raw_byte(const CityState& s, int slot, int off) { return s.objects[static_cast<size_t>(slot)].raw[static_cast<size_t>(off)]; }
+
+void put_word(std::vector<uint8_t>& t, size_t o, int v) {
+    t[o] = static_cast<uint8_t>(v & 0xFF);
+    t[o + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+}
+
+int get_word(const std::vector<uint8_t>& t, size_t o) { return static_cast<int16_t>(t[o] | (t[o + 1] << 8)); }
+
+}  // namespace
+
+// 0x5C39 / 0x5DC7: first free slot, the per-type counters and their limits,
+// the record fields a spawn sets, and 7BB4 bit 0x40 cleared on release.
+void test_actors_spawn_and_release() {
+    std::printf("test_actors_spawn_and_release (0x5C39 / 0x5DC7)\n");
+    using namespace gaius::systems::actors;
+    using gaius::model::global_word;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    CHECK(spawn(s, 0, 10, 20) == 0);
+    CHECK(s.objects[0].active() == 1 && s.objects[0].type() == 0 && s.objects[0].index() == 0);
+    CHECK(s.objects[0].screen_x() == 160 && s.objects[0].screen_y() == 320);
+    CHECK(s.objects[0].packed_xy() == 2010 && s.objects[0].raw_x() == 10 && s.objects[0].raw_y() == 20);
+    CHECK(global_word(s, 0x6C1A) == 1);
+    for (int i = 1; i < 30; ++i) spawn(s, i % 3, 10, 20);
+    CHECK(global_word(s, 0x6C1A) == 30);
+    CHECK(spawn(s, 2, 1, 1) == -1);  // types 0-2 are full
+    CHECK(spawn(s, 4, 1, 1) == 30);
+    CHECK(spawn(s, 13, 5, 6) == 31 && s.objects[31].packed_xy() == 6 * 40 + 5);
+    CHECK(spawn(s, 14, 1, 1) == -1);
+    s.city.operational_state[20][10] = 0x40;
+    release(s, 0);
+    CHECK(global_word(s, 0x6C1A) == 29 && s.objects[0].active() == 0 && s.objects[0].packed_xy() == 0);
+    CHECK(s.city.operational_state[20][10] == 0);
+    CHECK(spawn(s, 1, 3, 4) == 0);
+
+    CHECK(road_table()[0x36] == 0 && road_table()[0x82] == 0 && road_table()[0x1D] == 1);
+    CHECK(road_table()[0xC8] == 2 && road_table()[0xD8] == 3);
+    CHECK(ground_table()[0x1D] == 0 && ground_table()[0x2E] == 5 && ground_table()[0x92] == 4);
+    CHECK(ground_table()[0xA7] == 0 && ground_table()[0xA8] == 1);
+    s.city.tile[3][3] = 0x82;
+    s.city.tile[3][4] = 0x5E;
+    CHECK(!spawnable(s.city, 3, 3) && spawnable(s.city, 4, 3));
+    // The ring tables 3496:1A20 / 1A90 / 1B10.
+    CHECK(ring_offset(2, 0) == std::make_pair(-1, -1) && ring_offset(2, 5) == std::make_pair(2, 1));
+    CHECK(ring_offset(2, 11) == std::make_pair(-1, 0) && ring_offset(3, 8) == std::make_pair(3, 3));
+    CHECK(ring_offset(4, 15) == std::make_pair(-1, 4) && ring_offset(4, 19) == std::make_pair(-1, 0));
+}
+
+// 0x254DF: a citizen walks a road a pixel a tick, re-aiming at each cell
+// centre, marks C9D4 0x12 around each cell (0x2417C), and stops on arrival.
+void test_actors_walk_road() {
+    std::printf("test_actors_walk_road (0x254DF movement, state 1)\n");
+    using namespace gaius::systems::actors;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    for (int x = 10; x <= 30; ++x) s.city.tile[20][x] = 0x36;
+    CHECK(spawn(s, 2, 10, 20) == 0);
+    auto& raw = s.objects[0].raw;
+    raw[field::kDestX] = 30;
+    raw[field::kDestY] = 20;
+    raw[field::kState] = kCitizenWalk;
+    gaius::systems::month::Random r;
+    update(s, r, 1);
+    CHECK(s.objects[0].screen_x() == 161 && (raw[field::kStatus] & kStatusCentre));
+    for (int tick = 2; tick <= 321; ++tick) update(s, r, tick);
+    CHECK(s.objects[0].active() == 1);
+    CHECK(s.objects[0].screen_x() == 480 && s.objects[0].screen_y() == 320);
+    CHECK(raw[field::kStatus] == kStatusStopped);
+    CHECK(s.city.operational_state[20][30] == 0x40 && s.city.operational_state[20][29] == 0);
+    CHECK((s.city.service_flags[21][9] & 0x12) == 0x12 && (s.city.service_flags[19][30] & 0x12) == 0x12);
+    CHECK(s.city.service_flags[19][31] == 0);
+    CHECK(s.objects[0].frame() == 24 + 9 + 1);  // type 2, facing east, stride 1
+}
+
+// 0x254DF around a corner: the direct facing is blocked, so the walker turns
+// until a step passes, and takes the diagonal once it opens.
+void test_actors_walk_around_obstacle() {
+    std::printf("test_actors_walk_around_obstacle (0x254DF / 0x25909 blocked steps)\n");
+    using namespace gaius::systems::actors;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    for (int x = 10; x <= 15; ++x) s.city.tile[20][x] = 0x36;
+    for (int y = 10; y <= 20; ++y) s.city.tile[y][15] = 0x36;
+    CHECK(spawn(s, 2, 10, 20) == 0);
+    auto& raw = s.objects[0].raw;
+    raw[field::kDestX] = 15;
+    raw[field::kDestY] = 10;
+    raw[field::kState] = kCitizenWalk;
+    gaius::systems::month::Random r;
+    for (int tick = 1; tick <= 224; ++tick) update(s, r, tick);
+    CHECK(!(raw[field::kStatus] & kStatusStopped));
+    update(s, r, 225);  // 4 cells east, 1 north-east, 9 north
+    CHECK(s.objects[0].screen_x() == 240 && s.objects[0].screen_y() == 160);
+    CHECK(raw[field::kStatus] == kStatusStopped);
+}
+
+// 0x2D2F5: a forum's timer runs out at step 0; a citizen of the kind the
+// random number picks starts on the first road of the ring around it.
+void test_actors_forum_spawner() {
+    std::printf("test_actors_forum_spawner (0x2D2F5)\n");
+    using namespace gaius::systems::actors;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    s.table_480.assign(480, 0);
+    put_word(s.table_480, 0, 20);
+    put_word(s.table_480, 2, 20);
+    put_word(s.table_480, 8, 1);
+    gaius::model::set_global_word(s, 0x6C10, 50);
+    s.city.tile[21][22] = 0x36;  // ring index 5 of the 2x2 forum
+    const gaius::systems::month::Random r;  // low 7 bits 49: ring start 1, kind 0
+    run_spawners(s, r, 1);
+    CHECK(s.objects[0].active() == 0);
+    run_spawners(s, r, 0);
+    CHECK(s.objects[0].active() == 1 && s.objects[0].type() == 0);
+    CHECK(s.objects[0].screen_x() == 22 * 16 && s.objects[0].screen_y() == 21 * 16);
+    CHECK(s.objects[0].raw_x() == 99 && s.objects[0].raw_y() == 0);  // the edge for facing 1
+    CHECK(raw_byte(s, 0, field::kFacing) == 1 && s.objects[0].state() == kCitizenWalk);
+    CHECK(get_word(s.table_480, 6) == 7 && get_word(s.table_480, 0x0A) == 1);
+    run_spawners(s, r, 50);
+    CHECK(s.objects[1].active() == 0 && get_word(s.table_480, 6) == 6);
+}
+
+// 0x2CE7C / 0x2D19A: a workshop's level from its goods, nearby housing and
+// industry, sales and the city's globals; then a trader leaves for an edge.
+void test_actors_workshop() {
+    std::printf("test_actors_workshop (0x2CE7C level and trader)\n");
+    using namespace gaius::systems::actors;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    auto& t = s.table_720;
+    t.assign(720, 0);
+    put_word(t, 0, 40);
+    put_word(t, 2, 40);
+    put_word(t, 4, 2);  // goods 2: base level 1 in row 0
+    put_word(t, 8, 1);
+    put_word(t, 0x0E, 1);  // sales
+    put_word(t, 0x10, 3);  // last month's level
+    s.table_8.assign(8, 0);
+    s.table_8[2] = 2;  // two workshops of these goods: -1
+    gaius::model::set_global_word(s, 0x6BF4, 3);
+    gaius::model::set_global_word(s, 0x6BFC, 4);  // -2
+    gaius::model::set_global_word(s, 0x6C10, 50);
+    s.city.tile[38][38] = 0xF3;  // heavy industry: +2
+    for (int y = 42; y <= 43; ++y)
+        for (int x = 37; x <= 44; ++x) s.city.tile[y][x] = 0xCE;  // 16 cells x 6 units: 96 >> 4 = 6, -4 -> +2
+    s.city.tile[39][40] = 0x36;
+    CHECK(workshop_level(s, 0) == 6);  // 1 + 2 + 3 + 1 + 2 - 2 - 1
+    CHECK(get_word(t, 0x0C) == 96 && get_word(t, 0x14) == 2);
+    run_spawners(s, gaius::systems::month::Random{}, 25);
+    CHECK(get_word(t, 0x10) == 6 && get_word(t, 0x12) == 3);
+    CHECK(get_word(t, 6) == 4 && get_word(t, 0x0A) == 1);
+    CHECK(s.objects[0].active() == 1 && s.objects[0].type() == 8 && s.objects[0].state() == kTrade);
+    CHECK(s.objects[0].screen_x() == 40 * 16 && s.objects[0].screen_y() == 39 * 16);
+}
+
+// 0x24A6B / 0x26D9D: a chasing soldier that comes within 16 px of a hostile
+// sends it to state 2, and it is freed later the same tick.
+void test_actors_soldier_removes_rioter() {
+    std::printf("test_actors_soldier_removes_rioter (state 8)\n");
+    using namespace gaius::systems::actors;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    CHECK(spawn(s, 4, 10, 10) == 0);
+    CHECK(spawn(s, 10, 11, 10) == 1);
+    s.objects[0].raw[field::kState] = kChase;
+    s.objects[0].raw[field::kHome] = 1;
+    gaius::systems::month::Random r;
+    update(s, r, 1);
+    CHECK(s.objects[1].active() == 0 && gaius::model::global_word(s, 0x6C16) == 0);
+    CHECK(s.objects[0].active() == 1 && s.objects[0].screen_x() == 161);
+}
+
+// 0x2DB49 / 0x245FF: a collapsed house's rioter heads south; the house in its
+// way is demolished to rubble the first tick.
+void test_actors_rioter_demolishes() {
+    std::printf("test_actors_rioter_demolishes (0x2DB49 spawn, state 5)\n");
+    using namespace gaius::systems::actors;
+    using gaius::model::global_word;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    s.city.tile[11][10] = 0xC8;
+    gaius::model::set_global_word(s, 0x6C3C, 5);
+    spawn_rioter(s, 10, 10);
+    CHECK(s.objects[0].type() == 10 && s.objects[0].state() == kRiot);
+    CHECK(s.objects[0].raw_x() == 10 && s.objects[0].raw_y() == 11 && raw_byte(s, 0, field::kFacing) == 4);
+    CHECK(global_word(s, 0x6C3C) == 3 && global_word(s, 0x6C84) == 2);
+    gaius::systems::month::Random r;
+    update(s, r, 1);
+    CHECK(s.city.tile[11][10] >= 0xA7 && s.city.tile[11][10] <= 0xAA);
+    CHECK(raw_byte(s, 0, field::kFacing) == 5);  // turned south-west past the house
+}
+
+// Three months of walkers on each real save: every counter moves exactly with
+// its walkers, and walkers on roads stay on roads.
+void test_actors_real_saves() {
+    std::printf("test_actors_real_saves (spawners and walkers over three months)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    for (const char* name : {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"}) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        struct Band {
+            uint16_t ds;
+            int lo, hi;
+        };
+        const Band bands[] = {{0x6C1A, 0, 2}, {0x6C18, 3, 4}, {0x6C14, 8, 9}};
+        auto active = [&](const Band& b) {
+            int n = 0;
+            for (const auto& a : st->objects)
+                if (a.active() && a.type() >= b.lo && a.type() <= b.hi) ++n;
+            return n;
+        };
+        std::array<int, 3> offset{};
+        for (size_t i = 0; i < 3; ++i) offset[i] = gaius::model::global_word(*st, bands[i].ds) - active(bands[i]);
+        auto sim = month::sim_state_from_save(*st);
+        int most = 0, spawned = 0;
+        bool on_roads = true;
+        for (int m = 0; m < 3; ++m) {
+            do {
+                month::run_step(*st, sim);
+                int n = 0;
+                for (const auto& a : st->objects) {
+                    if (!a.active() || a.type() >= 11) continue;
+                    ++n;
+                    const int state = a.state();
+                    if (state == actors::kCitizenWalk || state == actors::kTrade || state == actors::kPatrol) {
+                        const int cell = a.packed_xy();
+                        if (actors::road_table()[st->city.tile[cell / 100][cell % 100]] != 0) on_roads = false;
+                    }
+                }
+                if (n > most) most = n;
+                if (n > 0) ++spawned;
+            } while (sim.step != 0);
+        }
+        for (size_t i = 0; i < 3; ++i)
+            CHECK(gaius::model::global_word(*st, bands[i].ds) - active(bands[i]) == offset[i]);
+        CHECK(on_roads);
+        std::printf("  %s: up to %d city walkers at once, walkers out on %d of %d steps\n", name, most, spawned,
+                    3 * gaius::systems::month::kStepsPerMonth);
+    }
 }
 
 // 0x28215's four routines, recomputed from each real save's own inputs.
@@ -2663,8 +2930,16 @@ int main() {
     test_construction_road_rebuild_real_saves();
     test_month_random_sequence();
     test_month_calendar_and_draws();
-    test_month_growth_changes_after_step_80();
+    test_month_growth_draws();
     test_month_state_from_saves();
+    test_actors_spawn_and_release();
+    test_actors_walk_road();
+    test_actors_walk_around_obstacle();
+    test_actors_forum_spawner();
+    test_actors_workshop();
+    test_actors_soldier_removes_rioter();
+    test_actors_rioter_demolishes();
+    test_actors_real_saves();
     test_month_economy_matches_saves();
     test_render_building_metrics();
     test_render_walkers();

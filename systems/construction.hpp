@@ -286,4 +286,10 @@ bool place_workshop(model::CityState& state, int goods, int x, int y);
 // what that actually does.
 bool clear_area(model::CityState& state, month::Random& random, int x, int y);
 
+// 0x124F8 with direction 8 on a whole save: removes the record of a forum,
+// workshop or barracks anchored there, then turns the building's footprint
+// into rubble. Invaders and rioters (systems::actors) call it on what blocks
+// them -- houses included, which Clear Area would instead clear to ground.
+void demolish(model::CityState& state, month::Random& random, int x, int y);
+
 }  // namespace gaius::systems::construction

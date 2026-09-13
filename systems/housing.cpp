@@ -96,9 +96,11 @@ void fountain_shrink(CityMap& city, int x, int y) {  // 0x2BB48, tiles 0xBB/0xBC
 
 }  // namespace
 
-bool land_value_allows(model::CityMap& city, int x, int y, int threshold) {
+bool land_value_allows(model::CityMap& city, int x, int y, int threshold,
+                       std::vector<std::pair<int, int>>* collapsed) {
     const int lv = city.land_value[y][x];
     if (lv > threshold) {
+        if (collapsed) collapsed->emplace_back(x, y);
         city.tile[y][x] = 0xA7;
         city.coverage[y][x] = 0;
         city.operational_state[y][x] = 0;
@@ -138,22 +140,22 @@ int develop_building(model::CityMap& city, int x, int y, uint8_t flags, const De
     switch (s.tile(0)) {
         // ---- 1x1 grades ----
         case 0xC8:  // 0x296DA
-            if (land_value_allows(city, x, y, 20)) return 0;
+            if (land_value_allows(city, x, y, 20, ctx.collapsed)) return 0;
             if (a < 0) s.set(0, 0x1D, 0);
             else if (a > 0) s.set(0, 0xC9, 0);
             return 0;
         case 0xC9:  // 0x2973E
-            if (land_value_allows(city, x, y, 30)) return 0;
+            if (land_value_allows(city, x, y, 30, ctx.collapsed)) return 0;
             if (a < 1) s.set(0, 0xC8, 0);
             else if (a > 1 && has(kWater)) s.set(0, 0xCA, 0);
             return 0;
         case 0xCA:  // 0x297AC
-            if (land_value_allows(city, x, y, 40)) return 0;
+            if (land_value_allows(city, x, y, 40, ctx.collapsed)) return 0;
             if (a < 2 || !has(kWater)) s.set(0, 0xC9, 0);
             else if (a > 2) s.set(0, 0xCB, 0);
             return 0;
         case 0xCB:  // 0x2981A
-            if (land_value_allows(city, x, y, 48)) return 0;
+            if (land_value_allows(city, x, y, 48, ctx.collapsed)) return 0;
             if (a < 3 || !has(kWater)) {
                 s.set(0, 0xCA, 0);
                 return 0;

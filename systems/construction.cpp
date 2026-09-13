@@ -476,7 +476,7 @@ namespace {
 
 // 0x124F8 with direction 8 (none): walk to the anchor, then turn the
 // footprint to rubble.
-void demolish(model::CityMap& city, month::Random& random, int x, int y) {
+void demolish_cells(model::CityMap& city, month::Random& random, int x, int y) {
     while (x > 0 && (city.operational_state[y][x] & 0x03)) --x;
     while (y > 0 && (city.operational_state[y][x] & 0x0C)) --y;
     const int index = city.tile[y][x] - 0xC8;
@@ -514,7 +514,7 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y) {
     } else if (t >= 0x92 && t <= 0xC9) {
         t = 0x1D;
     } else if (t >= 0xCA) {
-        demolish(city, random, x, y);
+        demolish_cells(city, random, x, y);
     } else {
         return false;
     }
@@ -635,24 +635,36 @@ bool place_workshop(model::CityState& state, int goods, int x, int y) {
     return true;
 }
 
+namespace {
+
+// 0x124F8's per-kind cleanup: find the anchor, then remove its record.
+void remove_record(model::CityState& state, int x, int y) {
+    const model::CityMap& city = state.city;
+    int ax = x, ay = y;
+    while (ax > 0 && (city.operational_state[ay][ax] & 0x03)) --ax;
+    while (ay > 0 && (city.operational_state[ay][ax] & 0x0C)) --ay;
+    const uint8_t t = city.tile[ay][ax];
+    if (t >= 0xE0 && t <= 0xE7) {
+        remove_forum(state, ax, ay);
+    } else if (t == 0xF5 || t == 0xF6) {
+        remove_workshop(state, ax, ay);
+    } else if (t == 0xEF) {
+        remove_barracks(state, ax, ay);
+    }
+}
+
+}  // namespace
+
 bool clear_area(model::CityState& state, month::Random& random, int x, int y) {
     if (!in_grid(x, y)) return false;
-    model::CityMap& city = state.city;
-    if (city.tile[y][x] >= 0xCA) {
-        // 0x124F8: find the anchor, then the per-kind cleanup, then rubble.
-        int ax = x, ay = y;
-        while (ax > 0 && (city.operational_state[ay][ax] & 0x03)) --ax;
-        while (ay > 0 && (city.operational_state[ay][ax] & 0x0C)) --ay;
-        const uint8_t t = city.tile[ay][ax];
-        if (t >= 0xE0 && t <= 0xE7) {
-            remove_forum(state, ax, ay);
-        } else if (t == 0xF5 || t == 0xF6) {
-            remove_workshop(state, ax, ay);
-        } else if (t == 0xEF) {
-            remove_barracks(state, ax, ay);
-        }
-    }
-    return clear_area(city, random, x, y);
+    if (state.city.tile[y][x] >= 0xCA) remove_record(state, x, y);
+    return clear_area(state.city, random, x, y);
+}
+
+void demolish(model::CityState& state, month::Random& random, int x, int y) {
+    if (!in_grid(x, y)) return;
+    remove_record(state, x, y);
+    demolish_cells(state.city, random, x, y);
 }
 
 }  // namespace gaius::systems::construction
