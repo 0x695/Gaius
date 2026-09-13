@@ -21,6 +21,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
             if (event.key.keysym.sym == SDLK_ESCAPE) return Command{CommandType::Quit};
             if (event.key.keysym.sym == SDLK_F11) return Command{CommandType::ToggleWindowMode};
             if (event.key.keysym.sym == SDLK_TAB) return Command{CommandType::CycleTool};
+            if (event.key.keysym.sym == SDLK_SPACE) return Command{CommandType::ToggleTime};
             return std::nullopt;
 
         // --- Mouse: left=Select, right=Secondary, middle=Pan ---
@@ -109,6 +110,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
             if (event.cbutton.button == SDL_CONTROLLER_BUTTON_A) return Command{CommandType::Select};
             if (event.cbutton.button == SDL_CONTROLLER_BUTTON_B) return Command{CommandType::Secondary};
             if (event.cbutton.button == SDL_CONTROLLER_BUTTON_X) return Command{CommandType::CycleTool};
+            if (event.cbutton.button == SDL_CONTROLLER_BUTTON_Y) return Command{CommandType::ToggleTime};
             return std::nullopt;
         }
 

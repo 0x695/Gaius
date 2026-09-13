@@ -21,6 +21,8 @@
 //   right-click / two-finger tap / gamepad B                -> cycle save
 //     layer (save-file mode only; no-op for an EMPIRE2 scenario)
 //   Tab / gamepad X                                         -> cycle build tool
+//   Space / gamepad Y                                       -> pause / resume time (a month every 2 s;
+//                                                              save-file mode)
 //   left-click / tap / gamepad A                            -> place current
 //     build tool at the clicked cell (save-file mode only)
 //   F11                                                     -> cycle window mode
@@ -39,6 +41,7 @@
 //   gaius_viewer <CAESARxx.SAV> --assets <game dir>       (draw the city with the game's sprites; by default
 //                                                          they're looked for beside the save and one folder up)
 //   gaius_viewer <CAESARxx.SAV> --test-layer 0..4         (headless: pick a data layer directly)
+//   gaius_viewer <CAESARxx.SAV> --months N [--paused]     (run N months before the first frame; start paused)
 //   gaius_viewer <CAESARxx.SAV> --test-build T X Y        (headless: place tool T at cell X,Y)
 
 #include <SDL.h>
@@ -53,6 +56,7 @@
 
 #include "apps/viewer/save_view.hpp"
 #include "render/city_render.hpp"
+#include "systems/month.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
@@ -204,8 +208,12 @@ int main(int argc, char** argv) {
     std::vector<TestClick> test_clicks;  // logical-space clicks, for headless UI tests
     int ui_scale_override = -1;          // -1 = use the size heuristic
     std::string assets_dir;
+    int run_months = 0;
+    bool start_paused = false;
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
+        if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
+        if (std::strcmp(argv[i], "--paused") == 0) start_paused = true;
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -311,7 +319,19 @@ int main(int argc, char** argv) {
     const int city_cell_px = have_sprites ? render::kCellPx : kCityCellPx;
     bool show_sprites = have_sprites && test_layer < 0;
     formats::IndexedImage city_image;
-    bool city_image_dirty = true;  // re-rendered whenever build mode changes the grid
+    bool city_image_dirty = true;  // re-rendered whenever build mode or time changes the grid
+
+    // The simulation clock (systems::month), seeded from the save.
+    systems::month::SimState sim;
+    if (save_mode) sim = systems::month::sim_state_from_save(state);
+    bool time_running = save_mode && !start_paused;
+    constexpr Uint32 kMonthMs = 2000;
+    auto advance_month = [&]() {
+        systems::month::run_month(state.city, sim);
+        city_image_dirty = true;
+        std::printf("month %d, year %d: population %d\n", sim.month + 1, sim.year,
+                    4 * sim.population_units);
+    };
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -343,6 +363,8 @@ int main(int argc, char** argv) {
             std::printf("--test-build: place %s at (%d,%d): %s\n", systems::construction::command_name(tool), b.x, b.y,
                         ok ? "OK" : "rejected");
         }
+        for (int m = 0; m < run_months; ++m) advance_month();
+        std::printf("time: %s (Space / gamepad Y)\n", time_running ? "running, a month every 2 s" : "paused");
     }
 
     try {
@@ -408,6 +430,7 @@ int main(int argc, char** argv) {
             handle_select_logical(c.x, c.y);
         }
 
+        Uint32 last_month_ms = SDL_GetTicks();
         while (running) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
@@ -441,6 +464,12 @@ int main(int argc, char** argv) {
                             }
                             std::printf("layer: %s\n",
                                         show_sprites ? "city view (the game's sprites)" : viewer::layer_label(layer));
+                        }
+                        break;
+                    case platform::CommandType::ToggleTime:
+                        if (save_mode) {
+                            time_running = !time_running;
+                            std::printf("time: %s\n", time_running ? "running" : "paused");
                         }
                         break;
                     case platform::CommandType::CycleTool:
@@ -482,6 +511,14 @@ int main(int argc, char** argv) {
                         break;
                     default:
                         break;
+                }
+            }
+
+            if (time_running) {
+                const Uint32 now = SDL_GetTicks();
+                if (now - last_month_ms >= kMonthMs) {
+                    advance_month();
+                    last_month_ms = now;
                 }
             }
 

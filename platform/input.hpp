@@ -35,6 +35,9 @@ enum class CommandType {
                   // build mode -- exactly the kind of extension this enum's original
                   // comment anticipated ("room to add ... without changing this enum's
                   // meaning for existing commands").
+    ToggleTime,   // pause / resume the simulation clock: Space, gamepad Y/North. The
+                  // clock runs by default, so a device without either (touch) still
+                  // sees the city evolve; pausing is enrichment, not a gate.
     Hover,        // pointer moved with no button held. Mouse-only by nature: touch has
                   // no hover state and gamepad has no pointer, so those devices simply
                   // never emit this. UI that uses it must therefore treat it as

@@ -32,6 +32,7 @@
 #include "stb_image.h"
 #include "systems/construction.hpp"
 #include "systems/housing.hpp"
+#include "systems/month.hpp"
 #include "systems/service.hpp"
 #include "ui/font.hpp"
 #include "ui/game_font.hpp"
@@ -1537,6 +1538,100 @@ void test_pl8_matches_real_screenshots() {
 //
 // Golden against these specific fixtures, the same way test_exepack_golden_
 // decode is golden against the analyzed US-build CSR.EXE.
+// 2EF9:1425 from the image's initial state, computed independently.
+void test_month_random_sequence() {
+    std::printf("test_month_random_sequence (2EF9:1425 from the image's initial state)\n");
+    struct Expect {
+        int walk, low7, prev_low7, draw;
+    };
+    const Expect expected[] = {
+        {58, 27, 49, 16411}, {63, 13, 27, 24589}, {69, 6, 13, 28678}, {72, 3, 6, 14339}, {73, 1, 3, 23553},
+    };
+    gaius::systems::month::Random r;
+    for (const Expect& e : expected) {
+        r.advance();
+        CHECK(r.walk == e.walk && r.low7 == e.low7 && r.prev_low7 == e.prev_low7 && r.draw == e.draw);
+        CHECK(r.lfsr == e.draw);
+    }
+}
+
+// 106 steps a month; month wraps into year; the 18-month counter; and
+// exactly five random draws a month (step 80, and four at step 105).
+void test_month_calendar_and_draws() {
+    std::printf("test_month_calendar_and_draws (0x29476 calendar, 5 draws a month)\n");
+    using namespace gaius::systems::month;
+    auto f = fresh();
+    SimState sim;
+    sim.month = 11;
+    sim.year = -1;
+    Random expect = sim.random;
+    for (int i = 0; i < 5; ++i) expect.advance();
+
+    int steps = 0;
+    do {
+        run_step(f->city, sim);
+        ++steps;
+    } while (sim.step != 0);
+    CHECK(steps == kStepsPerMonth);
+    CHECK(sim.month == 0 && sim.year == 0);
+    CHECK(sim.month_counter_18 == 1);
+    CHECK(sim.random.walk == expect.walk && sim.random.lfsr == expect.lfsr);
+
+    for (int m = 1; m < 18; ++m) run_month(f->city, sim);
+    CHECK(sim.month_counter_18 == 0);
+    CHECK(sim.month == 5 && sim.year == 1);
+}
+
+// Rows 0-80 share one growth value, rows 81-99 the next: the draw at step 80
+// happens after that step's housing row.
+void test_month_growth_changes_after_step_80() {
+    std::printf("test_month_growth_changes_after_step_80 (0x294CF growth vs the step-80 draw)\n");
+    using namespace gaius::systems::month;
+    auto f = fresh();
+    for (int row : {80, 81}) {
+        f->city.tile[row][5] = 0xC8;
+        f->city.service_flags[row][5] = 0x20;  // growth applies only with C9D4.20
+    }
+    SimState sim;
+    sim.land_value_growth_base = 3;
+    sim.step = 80;
+    Random after = sim.random;
+    after.advance();
+
+    run_step(f->city, sim);  // row 80, then the draw
+    run_step(f->city, sim);  // row 81
+    const int growth_80 = 3 + (Random{}.walk & 3) - 1;
+    const int growth_81 = 3 + (after.walk & 3) - 1;
+    CHECK(growth_80 != growth_81);
+    CHECK(f->city.land_value[80][5] == growth_80);
+    CHECK(f->city.land_value[81][5] == growth_81);
+    CHECK(sim.random.walk == after.walk);
+}
+
+void test_month_state_from_saves() {
+    std::printf("test_month_state_from_saves (calendar globals from four real saves)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    struct Case {
+        const char* name;
+        int month, year;
+    };
+    const Case cases[] = {{"CAESARXX.SAV", 9, -11}, {"CAESARWX.SAV", 1, -7}, {"CAESARVX.SAV", 4, -2}, {"CAESARUX.SAV", 6, -1}};
+    for (const Case& c : cases) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / c.name;
+        if (!fs::exists(p)) {
+            skip(std::string(c.name) + " not found");
+            continue;
+        }
+        const CityState st = load(save::load(p.string()));
+        auto sim = gaius::systems::month::sim_state_from_save(st);
+        std::printf("  %s: month %d, year %d, population units %d\n", c.name, sim.month, sim.year, sim.population_units);
+        CHECK(sim.month == c.month && sim.year == c.year);
+        CHECK(sim.population_units == gaius::systems::housing::population_units(st.city) ||
+              std::string(c.name) == "CAESARVX.SAV");  // VX: one upgrade after the count
+    }
+}
+
 // The building metrics table (3496:14B2) against HOUSES.PL8: frame i is
 // width x (height + extra) of tile 0xC8 + i, for tiles 0xC8-0xF2. (Frame 43,
 // an 8x16 sprite, isn't one: tile 0xF3 draws from HOUSES2.PL8.)
@@ -2215,6 +2310,10 @@ int main() {
     test_pal256_corpus();
     test_pl8_corpus_sanity();
     test_pl8_matches_real_screenshots();
+    test_month_random_sequence();
+    test_month_calendar_and_draws();
+    test_month_growth_changes_after_step_80();
+    test_month_state_from_saves();
     test_render_building_metrics();
     test_render_city_matches_screenshots();
     test_save_corpus_real();

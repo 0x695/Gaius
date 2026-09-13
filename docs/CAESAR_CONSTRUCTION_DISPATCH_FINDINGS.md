@@ -393,3 +393,38 @@ If the cell's land value exceeds the threshold: tile `0xA7`, and A2C4, 7BB4 and 
 Validated against real saves: part indices on every building, population units (three exact, one explained), water (10000/10000), and -- through `rebuild_services` -- coverage and C9D4 bits `01`, `04`, `08`, `20`, `40` and `80` (10000/10000 each). The development handlers have no direct ground truth in four snapshots taken months apart, so the transcription is pinned by exact-write unit tests instead.
 
 Still open: the RNG in segment `2EF9`, which drives land-value growth and the `0xA8`-`0xB1` routine; the pipe tracer `0x2CBF1`; `0334:28F9` and the actor spawn; the five other per-row routines and six monthly routines; what `DS:0x6C3C` measures.
+
+## 17. The step dispatcher, the calendar and the random number generator (2026-09-13)
+
+Read directly, and implemented in `systems/month.hpp`/`.cpp`.
+
+### 17.1 The step dispatcher (`0x2936A`)
+
+Every step starts by calling the calendar check (`0x29472` falls into `0x29476`). If `DS:0x6D97` is set, it clears it and runs `0x2D6F4`. After that:
+
+- **Steps 0-99** (`0x29447`): `0x294CF` (housing, row = step), then `0x2D2F5`, `0x2CE7C`, `0x2CD1C`, `0x2E209` and `0x2CD10`.
+- **Steps 100-105**, through a jump table at `0x29466`:
+  - **100:** `0x2C8D3` (reset) and `0x2DA0D` (derive network flags, only while `DS:0x6D9B` is 0).
+  - **101:** `0x2C93F` (population and water) and `0x28215`.
+  - **102:** zero the five scan counters `DS:0x6E04`-`0x6E0C`, then scan from row 0.
+  - **103** and **104:** scan from rows 25 and 50.
+  - **105:** scan from row 75, then publish the counters to `DS:0x6BF0`, `0x6BF2`, `0x6BEE` (÷4), `0x6BEA` (÷16) and `0x6BEC` (÷4), then call `0x2E0BE`, `0x2DC72`, `0x2DEC8`, `0x2DD21`, `0x2DE0F` and `0x2DF7D`.
+
+### 17.2 The calendar (`0x29476`)
+
+When the step counter `DS:0x6D9D` reaches 106, it resets to 0 and the month `DS:0x6C1C` advances. At 12 the month resets, the year `DS:0x6C32` advances, `DS:0x6C7C` is set to 80 and `0x28238` runs. Then, every month, `DS:0x6D9B` advances; at 18 it resets, sets `DS:0x6D97` = 1 (so `0x2D6F4` runs on the next step) and advances `DS:0x6D99`, which wraps at 2 into `DS:0x6D95`. The step and 18-month counters aren't in the save.
+
+### 17.3 The random number generator (`2EF9:1425`)
+
+State at `2EF9:0286`-`028E`. The image's initial values are 55, 49, 12, 12, 55, and nothing reseeds it: `028E` is written only by the generator itself.
+
+- `2EF9:13F0` steps a 16-bit shift register: with `s` = `028E`, feedback = bit 0 xor bit 7, and the new `s` = `((s & 0x7FFF) | feedback << 15) >> 1`.
+- `2EF9:1425` copies `0288` into `028A`, steps the register, stores the result in `028C` and its low 7 bits in `0288`, then adds the low 3 bits to `0286`, subtracting 99 whenever that exceeds 99.
+
+`0286` is therefore a random walk over 1-99. The housing pass never calls the generator; it reads `0286`, and each row's land-value growth is `DS:0x6BF6 + (0286 & 3) - 1` as a signed byte.
+
+The generator has 45 call sites. In the monthly simulation path exactly five draw each month:
+- `0x2E209`, only at step 80 — after that step's housing row, so rows 0-80 share one growth value and rows 81-99 the next.
+- `0x2DF7D`, four draws at step 105. Each one rolls `0286` against a threshold (`DS:0x6BE0`, `0x6BE2`, `0x6BE4`, `0x6BDE`) and, if it passes and a count is nonzero, halves `028C` until it fits that count to pick a target. That looks like the monthly event roll, but it isn't modeled.
+
+The other call sites are terrain generation (`0x6F0D`-`0x7079`), UI screens (`0x29158`, `0x2922F`, `0x27DFB`) and similar. `0x2898E` is only reached from `0x290C1`, and whether the yearly routine `0x28238` draws is still unchecked. Because terrain generation and screens draw too, a real session's sequence can't be recovered from a save.
