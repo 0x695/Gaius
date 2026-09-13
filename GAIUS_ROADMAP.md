@@ -152,7 +152,7 @@ This phase is explicitly **RE-heavy, not just engineering**. Treat it as a joint
 
 **RE blockers (this phase *is* the blocker-closer):** this is Appendix C items "Recover construction far-pointer table," "Identify construction command numeric IDs," "Map all construction commands to placement handlers," "Recover exact footprints." **All four are now closed**, in the sixth pass, by the far-pointer-table scan described above: the table is `DS:127C` at flat `0x75ACC`; the numeric IDs are confirmed against ~30 toolbar handlers that assign them as literals; 17 of 23 placing commands are mapped to their handlers with exact seed tile, footprint and terrain gate. The residue was precise and small — the drag auto-tiling neighbour rules (Road/Wall/Plaza/Clear Area) and the two variant-selection tables (Forum/Workshop), both closed on 2026-09-13 — and is tracked as its own item in `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 14 rather than left implicit here. Sections 3-6 of that doc keep the five ruled-out search strategies from passes 2-3 on the record, because the *reason* they failed (far pointers store segment+offset; every search was looking for flat offsets) is the transferable lesson for the next table anyone hunts in this binary.
 
-### Still open in Phases 0-5 (as of 2026-09-13)
+### Still open in Phases 0-5 (as of 2026-09-14)
 
 Every checklist item above is done. What remains is validation, a few untranscribed pieces and polish:
 
@@ -162,11 +162,12 @@ Every checklist item above is done. What remains is validation, a few untranscri
   - A later city, to exercise the higher housing grades.
 - **Simulation.**
   - The random draws of frames between steps at slower game speeds; Gaius draws once per step.
+  - The yearly routine's other calls (`0x282A1`, `0x283D3`, `0x284AA` before the history writes, `0x28C43`, `0x29023`, `0x2933B` after), and the step-105, 18-month and province routines. They're ratings, messages and province events, so they belong to Phases 6-7, but the yearly history values Gaius records may differ until the first three are read.
 - **Save model.** The save loader isn't reverse engineered, and what several global words mean to the player isn't established (the histories' `DS:0x6BC6`, `0x6BC4` and `0x6BB6`; the economy's `0x6C04` and `0x6C06`).
 - **Build mode.**
   - Construction costs. The forum grade costs (`3496:15A0`) are transcribed and shown in the toolbar when choosing a grade, but nothing is charged: there's no treasury until Phase 7.
   - A touch drag gesture for roads and walls.
-- **Viewer.** `MINIFONT.PL1` is decoded since 2026-09-14: 1 bit per pixel, as its extension says. (Water, fire and the animated buildings draw as in the engine since 2026-09-13.) Overlay map modes belong to Phase 7.
+- **Viewer.** Nothing left for Phases 0-5. Water, fire and the animated buildings draw as in the engine (2026-09-13), and `MINIFONT.PL1` is decoded (2026-09-14: 1 bit per pixel, as its extension says). The overlay map modes belong to Phase 7.
 - **Platform.**
   - Android builds only for the `x86_64` emulator, and `gaius_viewer` isn't ported to it (asset loading needs `AAssetManager`).
   - Touch gestures beyond single-finger drag and tap are undesigned.
