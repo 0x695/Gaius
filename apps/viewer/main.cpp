@@ -542,7 +542,8 @@ int main(int argc, char** argv) {
 
             if (save_mode && show_sprites) {
                 if (city_image_dirty) {
-                    render::render_city(state.city, sprites, 0, 0, viewer::kCityW, viewer::kCityH, city_image);
+                    render::render_city(state.city, sprites, 0, 0, viewer::kCityW, viewer::kCityH, city_image, {},
+                                        &state.objects);
                     city_image_dirty = false;
                 }
                 render_sprite_view(city_image, sprites.palette, cam, frame);

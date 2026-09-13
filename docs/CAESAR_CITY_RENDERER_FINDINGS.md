@@ -13,7 +13,7 @@ Addresses are flat offsets into the decompressed image, or `segment:offset` for 
 | `FIXTS.PL8` | `68F6:0000` (call at `0xFEED`, when `DS:0x6CAE` is 0) | terrain and every tile below `0xC8` |
 | `HOUSES.PL8` | `54E0:0000` (`0xFD0E`) | buildings: frame = tile − `0xC8` |
 | `HOUSES2.PL8` | `494C:0000` (`0xFD2D`, reloaded at `0xFDDD`/`0xFE92`) | building states and animation frames |
-| `MOREMEN.PL8` | `630D:0000` (`0xFF0C`) | not used by the tile renderer |
+| `MOREMEN.PL8` | `630D:0000` (`0xFF0C`) | walkers and other city actors, drawn between tile rows (section 8) |
 | `SHADE.256` | — | the city view's palette: a capture's DAC equals it in all 256 entries |
 
 With `DS:0x6CAE` set, `FIXT3.PL8` and `SPRITE2.PL8` load into `68F6` and `630D` instead. `FIXT3.PL8` frames turn up in the map and management captures, so this is probably the province view (STRONG INFERENCE).
@@ -81,9 +81,9 @@ A search of the captures with the decoded sheets finds 13 `HOUSES`, 13 `HOUSES2`
 ## 6. Open
 
 - Animation timing: which frame counters advance when (`DS:0x57EA`, `0x6D3A`, `0x6D3C`, `0x6D3E`).
-- The actor table at `DS:0x585C`, which drives the `0xF5`/`0xF6` bottom row and probably the walkers drawn over the map.
+- The table at `DS:0x585C` (the save's `table_720`), which drives the `0xF5`/`0xF6` bottom row. Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
 - The overlay map modes (`0x1FB94`, `SHADE.PL8`).
-- `MOREMEN.PL8`/`SPRITE2.PL8` (people and walkers), `FIXT3.PL8` and the province view.
+- What moves the actors (their types' behaviour), `SPRITE2.PL8`, `FIXT3.PL8` and the province view.
 - `HOUSES.PL8` frame 43 (8×16) and `HOUSES2.PL8` frames not listed above.
 
 ## 7. Text and the control panel
@@ -97,3 +97,23 @@ Loaded alongside the city sheets (`0xFBD3`-`0xFC58`): `P_BLOCKS.PL8` and `POINTE
 - **`100F:168E`, a second text routine.** Frame = `DS:1044[char − 0x20] − 1`: letters with case folded to frames 0–25, everything else frame 26; it advances by each frame's width. That's `ROMFONT.PL8`'s 27 frames of 16×17. The credits capture's "PROGRAMMING" matches (STRONG INFERENCE on which screens use it).
 - **Panel icons are `POINTERS.PL8` frames.** They're drawn at y = 180, every 24 px from x = 8. The main city panel shows frames 28, 7, 19, 8, 11, 12, 10, 16, 14, 17, 18; the building menu shows another set. The frame order isn't stored as a plain byte or word table, so mapping icons to commands needs the panel code, which isn't traced yet.
 - **`P_BLOCKS.PL8`** holds the frame, border and button pieces of the advisor and management screens: 31 of its 40 frames are found in those captures.
+
+## 8. Walkers and other city actors (2026-09-13)
+
+- **The actor table is at `DS:0x5D84`**: 70 records of 50 bytes, the save's `objects_70x50`, written from that address by the save writer. The draw code reads these fields:
+  - word +0: the sprite frame;
+  - words +2 and +4: world x and y in pixels;
+  - byte +6: active;
+  - byte +7: type;
+  - word +8: the record's own index.
+- **Draw order.** The city draw loop (`0x1FF72`) draws one tile row, then calls `0334:33F3` (flat `0x6733`) with that row's screen y + 8. After the last row it makes one more call.
+- **Which actors are drawn.** That routine collects the actors that meet all of these:
+  - active (+6 ≠ 0) and type below 11;
+  - x in `[(view column − 1)·16, (view column + 20)·16)`;
+  - y in a 16-pixel band, so that their feet (y + 8) lie in the row just drawn.
+  
+  `0x6DA6` inserts each into a list sorted by y, ties after equals, holding up to 100 entries. The list is then drawn in that order by `0x6931`. Types 11 and up are the province view's actors, drawn by the parallel builder at `0x6834`.
+- **Drawing one actor.** `0x6946` takes the frame from `MOREMEN.PL8` (segment `630D`, city view) and places it at x − view left·16, y − view top·16 − height + 8. So its bottom edge is 8 pixels below the record's y. It sets two flags for types 3-4 and 5-7 (probably sound cues), and `0x6B44`/`0x6C23` clip it. `0x6CD9` then blits it through `303E:15B7`, which skips index 0.
+- **The result.** Because the next tile row, and the rows its buildings rise above their footprints, are drawn after the walkers, people disappear behind buildings in front of them. `test_render_walkers` checks that composite.
+
+Implemented in `render::render_city` (pass a save's actor table). Moving the actors is simulation work that isn't transcribed yet. The actor types and what drives each record are the next RE target.

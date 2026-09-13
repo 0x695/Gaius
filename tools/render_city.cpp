@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
         const model::CityState state = model::load(formats::save::load(argv[1]));
         const render::CitySprites sprites = render::load_city_sprites(argv[2]);
         formats::IndexedImage img;
-        render::render_city(state.city, sprites, col, row, cols, rows, img);
+        render::render_city(state.city, sprites, col, row, cols, rows, img, {}, &state.objects);
 
         std::vector<uint8_t> rgb(static_cast<size_t>(img.width) * img.height * 3);
         for (size_t i = 0; i < img.pixels.size(); ++i) {

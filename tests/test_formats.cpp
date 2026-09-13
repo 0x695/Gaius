@@ -9,6 +9,7 @@
 //
 // Run with:  GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./gaius_tests
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -1745,6 +1746,82 @@ void test_month_state_from_saves() {
     }
 }
 
+// Walkers (0x6733/0x6946): an active actor's MOREMEN frame lands with its
+// bottom edge at y + 8, an inactive one isn't drawn, and a building in the
+// next row is drawn over it -- including the rows it rises above its
+// footprint.
+void test_render_walkers() {
+    std::printf("test_render_walkers (actor list and draw order, 0x6733 / 0x6946)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    gaius::render::CitySprites sprites;
+    try {
+        sprites = gaius::render::load_city_sprites(dir);
+    } catch (const FormatError& e) {
+        skip(std::string("city sprites not loadable: ") + e.what());
+        return;
+    }
+    const int frame = 2;
+    if (static_cast<int>(sprites.people.frames.size()) <= frame || sprites.people.frames[frame].pixels.empty()) {
+        skip("MOREMEN.PL8 frame 2 missing");
+        return;
+    }
+    const PL8Frame& sprite = sprites.people.frames[frame];
+
+    auto f = fresh();
+    for (auto& row : f->city.tile) row.fill(0xFF);  // draws nothing
+    std::array<Actor, kActorCount> actors{};
+    auto set = [](Actor& a, int fr, int x, int y, int active, int type) {
+        a.raw[0] = static_cast<uint8_t>(fr);
+        a.raw[2] = static_cast<uint8_t>(x & 0xFF);
+        a.raw[3] = static_cast<uint8_t>(x >> 8);
+        a.raw[4] = static_cast<uint8_t>(y & 0xFF);
+        a.raw[5] = static_cast<uint8_t>(y >> 8);
+        a.raw[6] = static_cast<uint8_t>(active);
+        a.raw[7] = static_cast<uint8_t>(type);
+    };
+    const int ax = 80, ay = 64;  // feet at y 72: row 4
+    set(actors[3], frame, ax, ay, 1, 8);
+
+    IndexedImage walker;
+    gaius::render::render_city(f->city, sprites, 0, 0, 20, 11, walker, {}, &actors);
+    int drawn = 0, wrong = 0;
+    for (int y = 0; y < sprite.height; ++y) {
+        for (int x = 0; x < sprite.width; ++x) {
+            const uint8_t p = sprite.pixels[static_cast<size_t>(y) * sprite.width + x];
+            if (p == 0) continue;
+            ++drawn;
+            const int oy = ay + 8 - sprite.height + y, ox = ax + x;
+            wrong += walker.pixels[static_cast<size_t>(oy) * walker.width + ox] != p;
+        }
+    }
+    CHECK(drawn > 0);
+    CHECK(wrong == 0);
+
+    actors[3].raw[6] = 0;  // inactive
+    IndexedImage none;
+    gaius::render::render_city(f->city, sprites, 0, 0, 20, 11, none, {}, &actors);
+    CHECK(std::all_of(none.pixels.begin(), none.pixels.end(), [](uint8_t p) { return p == 0; }));
+    actors[3].raw[6] = 1;
+
+    // A house (0xCF: 16x16, rising 12 rows) in row 5, below the walker's row.
+    f->city.tile[5][5] = 0xCF;
+    f->city.operational_state[5][5] = 0;
+    IndexedImage both, building;
+    gaius::render::render_city(f->city, sprites, 0, 0, 20, 11, both, {}, &actors);
+    gaius::render::render_city(f->city, sprites, 0, 0, 20, 11, building);
+    int covered = 0, mismatches = 0;
+    for (size_t i = 0; i < both.pixels.size(); ++i) {
+        const uint8_t expect = building.pixels[i] ? building.pixels[i] : walker.pixels[i];
+        mismatches += both.pixels[i] != expect;
+        covered += building.pixels[i] != 0 && walker.pixels[i] != 0;
+    }
+    std::printf("  walker pixels %d; covered by the house in front %d; composite mismatches %d\n", drawn, covered,
+                mismatches);
+    CHECK(covered > 0);
+    CHECK(mismatches == 0);
+}
+
 // The building metrics table (3496:14B2) against HOUSES.PL8: frame i is
 // width x (height + extra) of tile 0xC8 + i, for tiles 0xC8-0xF2. (Frame 43,
 // an 8x16 sprite, isn't one: tile 0xF3 draws from HOUSES2.PL8.)
@@ -2430,6 +2507,7 @@ int main() {
     test_month_growth_changes_after_step_80();
     test_month_state_from_saves();
     test_render_building_metrics();
+    test_render_walkers();
     test_render_city_matches_screenshots();
     test_save_corpus_real();
     test_save_corpus_globals();

@@ -55,6 +55,25 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 - Exactly 57126 (0xDF26) bytes, split into 20 confirmed contiguous blocks (global words, 70×50 object table, four 10000-byte city simulation layers, embedded EMPIRE2 map, several smaller unidentified tables, final state).
 - **Status: READ-ONLY, block table VALIDATED AGAINST REAL SAVES (2026-09-12/13).** Four saves of one city from a real US-build play session (fixtures live in `GAIUS_TEST_ASSETS/gaius_test_saves/`, never in the repo) are each exactly 57126 bytes; `model::load` -> `model::serialize` reproduces all four byte-for-byte; every Phase 5 building footprint appears in their tile grids as a full rectangle of exactly its transcribed size, which also confirms the row-major grid layout; and one reset-plus-dispatch pass with `systems::service` reproduces each save's A2C4 coverage layer and C9D4 service bits cell-for-cell (10000/10000). The save *loader* still hasn't been disassembled, so fields this project doesn't model are carried as opaque bytes rather than interpreted -- but the block boundaries are no longer merely trusted.
 - **`global_words_128` is NOT a descending DS range.** The save writer (flat `0x033F2`) makes 128 two-byte writes in an order with 15 discontinuities: it skips `DS:0x6CB8`, writes `DS:0x6C0E` twice (save+`0xC2` and save+`0xDC`), and steps upward in places. The old "descending from `DS:0x6CE2`" rule was wrong for 107 of the 128 words. The exact table is `formats::save::kGlobalWordDsAddress`. It is confirmed three independent ways: the treasury `DS:0x6CA2` (save+`0x3E`) falls 7182 -> 4692 -> 3210 -> 3144 across the session; the twice-saved word holds identical values in both copies; and two tick statistics, `DS:0x6BF2` and `DS:0x6BF0`, equal the tile grid's own building and road counts exactly in every save.
+- **Where every block lives at runtime (2026-09-13, DEFINITIVE — read from the save writer's write calls, flat `0x040DD`-`0x04516`).** After the 128 global words, in file order:
+
+  | Block | Runtime address | Size | What it is |
+  |---|---|---|---|
+  | `objects_70x50` | `DS:0x5D84` | 70×50 | the actor table: word +0 sprite frame, +2/+4 world x/y, byte +6 active, +7 type, word +8 own index (see `model::Actor`; the renderer at flat `0x6946` reads these) |
+  | `table_480` | `DS:0x5BA4` | 30×16 | temples: demolishing one clears its record (`0x1287C`) |
+  | `table_120` | `DS:0x5B2C` | 10×12 | the tile-`0xEF` buildings' records (`0x12A94`) |
+  | `table_720` | `DS:0x585C` | 30×24 | the tile-`0xF5`/`0xF6` buildings' records, which also drive their bottom-row sprites (`0x12963`, renderer `0x20613`) |
+  | `city_tiles_100x100` | `43A5:0000` | 10000 | |
+  | `cell_flags_c9d4`, `cell_value_a2c4`, `cell_flags_7bb4`, `cell_value_54a4` | `3496:C9D4`, `A2C4`, `7BB4`, `54A4` | 10000 each | |
+  | `empire2_1602` | `3496:2752` | 1602 | |
+  | `table_50` | `DS:0x581E` | 50 | |
+  | `table_8` | `DS:0x5816` | 8 | per-kind counters: demolishing a `0xF5`/`0xF6` decrements the one its record names |
+  | `table_10` | `DS:0x580C` | 10 | |
+  | `table_60_a`-`d` | `3496:01F0`, `022C`, `0268`, `02A4` | 60 each | |
+  | `table_72` | `3496:02E0` | 72 | |
+  | `final_state` | 34 words: `DS:0x6BB4`, `6BB2`, `6BB0`, `6BAE`, `6BAC`, `6BAA`, 12 bytes at `6B9E`, then `6CB8`, `6C02`, `6BFC`, `6C98`, `6C96`, `6C94`, `6C90`, `6C8E`, `6C8C`, `6C8A`, `6C88`, `6C86`, `6C84`, `6C82`, `6C80`, `6C7E`, `6C5C`, `6BEE`, `6BEC`, `6BEA`, `6BE8`, `6BE6` | 68 | globals, including the monthly scan counters (`6BEA`-`6BEE`) and the event targets `0x2DF7D` rolls (`6C88`) |
+
+  The blocks' meanings beyond these addresses are still mostly open, but each now has a place in memory that code can be searched for.
 - **The embedded EMPIRE2 block is scenario plus game state.** In these saves it is `EMPIRE2.047` with two bytes changed: the player city's province cell (col 21, row 23) has bit 7 set (`0x4A` -> `0xCA`), exactly where the province actor stands, and cell (col 0, row 17) goes `0x41` -> `0x78`, unexplained. One scenario, one session: STRONG INFERENCE, not yet a rule.
 - **Actor coordinates.** For city actors (types 0-10), `packed_xy` (+0x18) is the reliable position -- `screen_x / 16` agrees with its column. `raw_x/raw_y` (+0x12/+0x13) are not the current cell for city actors, though they are for province actors. See `model/city_state.hpp`.
 - **`cell_flags_7bb4`'s low nibble is a part index.** Every cell of a multi-cell building holds its position in the building, `4*dy + dx` (0 is the anchor), written by construction and by housing growth; the housing pass only develops anchors. It holds on every multi-cell building in four real saves.

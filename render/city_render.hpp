@@ -35,9 +35,10 @@
 //     what a real capture shows.
 //
 // Not modeled: animation beyond the phases in RenderPhase, the animated
-// variants of 0xEC/0xEE/0xF1/0xF4 (all gated on frame counters), walkers and
-// other actors, and the overlay map modes (routine 0x1FB94, drawn from
-// SHADE.PL8).
+// variants of 0xEC/0xEE/0xF1/0xF4 (all gated on frame counters), and the
+// overlay map modes (routine 0x1FB94, drawn from SHADE.PL8). Walkers are
+// drawn from a save's object table (below); moving them is simulation work
+// that isn't transcribed yet.
 
 #pragma once
 
@@ -57,6 +58,7 @@ struct CitySprites {
     formats::PL8Sheet terrain;    // FIXTS.PL8
     formats::PL8Sheet buildings;  // HOUSES.PL8
     formats::PL8Sheet variants;   // HOUSES2.PL8
+    formats::PL8Sheet people;     // MOREMEN.PL8, at 630D:0000 -- walkers and other city actors
     formats::Palette palette;     // SHADE.256
 };
 
@@ -80,7 +82,17 @@ struct RenderPhase {
 // (cols*16 x rows*16, palette indices into sprites.palette). Cells are drawn
 // in the engine's order -- rows top to bottom, each left to right -- so a
 // building's upper rows overlap the cells above it the same way.
+//
+// With `actors` (a save's object table) it also draws the city's walkers the
+// way the engine does: after each tile row, the list builder at flat 0x6733
+// collects the active actors of types 0-10 whose feet (y + 8) fall in that
+// row, sorts them by y (0x6DA6, ties in table order) and draws each one's
+// MOREMEN.PL8 frame (record word +0) with its bottom edge at y + 8 and index
+// 0 transparent (0x6946 -> 303E:15B7). The next row's buildings are drawn
+// over them afterwards, which is how people disappear behind a house. One
+// more row's worth is drawn after the last row, as the engine does.
 void render_city(const model::CityMap& city, const CitySprites& sprites, int col0, int row0, int cols, int rows,
-                 formats::IndexedImage& out, const RenderPhase& phase = {});
+                 formats::IndexedImage& out, const RenderPhase& phase = {},
+                 const std::array<model::Actor, model::kActorCount>* actors = nullptr);
 
 }  // namespace gaius::render

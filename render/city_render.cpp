@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "render/city_render.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <vector>
 
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
@@ -112,15 +114,40 @@ CitySprites load_city_sprites(const std::string& asset_dir) {
     s.terrain = formats::pl8::load(find_asset(asset_dir, "FIXTS.PL8"));
     s.buildings = formats::pl8::load(find_asset(asset_dir, "HOUSES.PL8"));
     s.variants = formats::pl8::load(find_asset(asset_dir, "HOUSES2.PL8"));
+    s.people = formats::pl8::load(find_asset(asset_dir, "MOREMEN.PL8"));
     s.palette = formats::pal256::load(find_asset(asset_dir, "SHADE.256"));
     return s;
 }
 
 void render_city(const model::CityMap& city, const CitySprites& sprites, int col0, int row0, int cols, int rows,
-                 formats::IndexedImage& out, const RenderPhase& phase) {
+                 formats::IndexedImage& out, const RenderPhase& phase,
+                 const std::array<model::Actor, model::kActorCount>* actors) {
     out.width = cols * kCellPx;
     out.height = rows * kCellPx;
     out.pixels.assign(static_cast<size_t>(out.width) * out.height, 0);
+
+    // 0x6733 after each tile row: actors whose feet (y + 8) are in `row`,
+    // inside the x window, drawn in order of y.
+    std::vector<const model::Actor*> in_row;
+    auto draw_actors_in_row = [&](int row) {
+        if (!actors) return;
+        in_row.clear();
+        for (const model::Actor& a : *actors) {
+            if (a.active() == 0 || a.type() >= 11) continue;
+            const int x = a.screen_x(), y = a.screen_y();
+            if (x < (col0 - 1) * kCellPx || x >= (col0 + cols) * kCellPx) continue;
+            if ((y + 8) / kCellPx != row) continue;
+            in_row.push_back(&a);
+        }
+        std::stable_sort(in_row.begin(), in_row.end(),
+                         [](const model::Actor* p, const model::Actor* q) { return p->screen_y() < q->screen_y(); });
+        for (const model::Actor* a : in_row) {
+            const formats::PL8Frame* f = frame_at(sprites.people, a->frame());
+            if (!f) continue;
+            blit(out, *f, 0, 0, f->width, f->height, a->screen_x() - col0 * kCellPx,
+                 a->screen_y() + 8 - f->height - row0 * kCellPx, true);
+        }
+    };
 
     for (int r = 0; r < rows; ++r) {
         const int row = row0 + r;
@@ -144,7 +171,9 @@ void render_city(const model::CityMap& city, const CitySprites& sprites, int col
                 blit(out, *f, 0, 0, kCellPx, kCellPx, px, py, false);
             }
         }
+        draw_actors_in_row(row);
     }
+    draw_actors_in_row(row0 + rows);
 }
 
 }  // namespace gaius::render

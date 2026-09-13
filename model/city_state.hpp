@@ -74,10 +74,18 @@ enum class ActorCoordSpace { City, Province };
 struct Actor {
     std::array<uint8_t, kActorRecordSize> raw{};
 
+    // +0x00: the sprite frame drawn for this actor -- MOREMEN.PL8 in the city
+    // view, SPRITE2.PL8 in the province view (draw routine at flat 0x6946).
+    uint16_t frame() const { return static_cast<uint16_t>(raw[0x00] | (raw[0x01] << 8)); }
+    // +0x02/+0x04: world pixel position; the sprite's bottom edge is drawn at
+    // screen_y + 8 (0x6946).
     uint16_t screen_x() const { return static_cast<uint16_t>(raw[0x02] | (raw[0x03] << 8)); }  // +0x02
     uint16_t screen_y() const { return static_cast<uint16_t>(raw[0x04] | (raw[0x05] << 8)); }  // +0x04
     uint8_t active() const { return raw[0x06]; }                                                // +0x06 -- exact bit packing unconfirmed
     uint8_t type() const { return raw[0x07]; }                                                  // +0x07 -- actor class, NOT a building tile id
+    // +0x08: the record's own index in the table, which the draw list stores
+    // (0x6DA6); it matches the slot in every active record of four real saves.
+    uint16_t index() const { return static_cast<uint16_t>(raw[0x08] | (raw[0x09] << 8)); }
     // raw_x/raw_y (+0x12/+0x13) are the current cell for PROVINCE actors, but
     // NOT for city actors. In four real saves the province actor's raw (21,23)
     // agrees with both packed_xy (941 = 23*40+21) and screen/16 (336,368). City
@@ -107,9 +115,14 @@ struct CityState {
     std::array<Actor, kActorCount> objects{};
 
     // The remaining 13 of 20 confirmed save blocks (see
-    // formats::save::block_table()) have no proposed structure anywhere in
-    // the RE corpus -- carried through byte-for-byte, unmodeled, so the
-    // round trip stays exact without guessing at their content.
+    // formats::save::block_table()) are carried through byte-for-byte,
+    // unmodeled, so the round trip stays exact without guessing at their
+    // content. Their runtime addresses are known from the save writer
+    // (docs/FORMATS.md): table_480 = DS:0x5BA4 temple records (30x16),
+    // table_120 = DS:0x5B2C tile-0xEF records (10x12), table_720 =
+    // DS:0x585C tile-0xF5/0xF6 records (30x24), table_50/8/10 =
+    // DS:0x581E/5816/580C, table_60_a-d = 3496:01F0/022C/0268/02A4,
+    // table_72 = 3496:02E0, final_state = 34 globals.
     std::vector<uint8_t> global_words_128;
     std::vector<uint8_t> table_480;
     std::vector<uint8_t> table_120;
