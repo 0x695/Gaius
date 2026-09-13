@@ -38,7 +38,7 @@ cmake --build build -j
 GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
 ```
 
-Expect 2329/2329 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
+Expect 2346/2346 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
 
 ### What's implemented
 
@@ -71,7 +71,7 @@ Addenda in `docs/` document genuine reverse-engineering work done as a side effe
 4. **Done (2026-09-13): drag auto-tiling.** Road, Wall, Plaza and Clear Area are transcribed (`systems::construction::place_road` / `place_wall` / `place_plaza` / `clear_area`, findings section 18) and in the viewer's tool ring. Still open around them: continuous left-drag in the viewer (it places one cell per click), and the runtime object tables demolition updates (`DS:5BA4`/`585C`/`5B2C`).
 5. **Done (2026-09-13): Forum and Workshop** (`place_forum`/`place_workshop`, findings section 19.1). The viewer places grade 0 / goods 0; a chooser isn't in the toolbar yet.
 6. **Done (2026-09-13): the water network** -- the exact water pass with its pipe tracer (findings section 19.2). A save with reservoirs and working fountains would still be the real test.
-7. **Asset pipeline:** the city view, walkers, the game font and the toolbar icons all draw from the game's own files (`render/`, `ui/game_font`, `ui::command_icon_frame` -- renderer findings sections 7-8). Water and fire animate on the engine's frame counters (renderer findings section 6). Still open: the building animations, the overlay map modes, `MINIFONT.PL1`, and a Forum-grade / goods chooser. Mouse left-drag now lays roads and walls cell by cell (`platform::CommandType::SelectMove`); a touch drag gesture for building is still the masterplan's open design question.
+7. **Asset pipeline:** the city view, walkers, the game font and the toolbar icons all draw from the game's own files (`render/`, `ui/game_font`, `ui::command_icon_frame` -- renderer findings sections 7-8). Water and fire animate on the engine's frame counters (renderer findings section 6). The animated buildings draw too. Still open: the overlay map modes, `MINIFONT.PL1`, and a Forum-grade / goods chooser. Mouse left-drag now lays roads and walls cell by cell (`platform::CommandType::SelectMove`); a touch drag gesture for building is still the masterplan's open design question.
 
 More saves remain the cheapest validation: one with reservoirs and working fountains would test water end to end, and one from later in a city's life would exercise the higher housing grades.
 

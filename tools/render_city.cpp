@@ -67,7 +67,13 @@ int main(int argc, char** argv) {
         }
         const render::CitySprites sprites = render::load_city_sprites(args[2]);
         formats::IndexedImage img;
-        render::render_city(state->city, sprites, col, row, cols, rows, img, {}, &state->objects);
+        render::RenderPhase phase;  // animations as of `steps` steps in
+        phase.ticks = steps;
+        phase.population_units = model::global_word(*state, 0x6C10);
+        phase.coverage_base = model::global_word(*state, 0x6BF8);
+        phase.workshop_records = &state->table_720;
+        phase.barracks_records = &state->table_120;
+        render::render_city(state->city, sprites, col, row, cols, rows, img, phase, &state->objects);
 
         std::vector<uint8_t> rgb(static_cast<size_t>(img.width) * img.height * 3);
         for (size_t i = 0; i < img.pixels.size(); ++i) {

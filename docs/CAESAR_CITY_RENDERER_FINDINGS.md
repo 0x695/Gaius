@@ -52,16 +52,17 @@ Special cases that switch to `HOUSES2.PL8`:
 
 | Tile | Frame |
 |---|---|
-| `0xE8` bath house | 0 if `7BB4` bit `0x10` (watered), else 1; frame 32 of `HOUSES.PL8` on alternate animation ticks |
-| `0xEA` bath house 2×2 | 2 if watered, else 3 |
+| `0xE8` bath house | 0 if `7BB4` bit `0x10` (watered), else 1; a watered one draws `HOUSES.PL8` frame 32 instead while `DS:0x6D3E` bit 8 is set |
+| `0xEA` bath house 2×2 | 2 if watered, else 3; a watered one draws `HOUSES.PL8` frame 34 while `DS:0x6D3E` bit 8 is set |
 | `0xF3` | 4 |
-| `0xF4` market | 5; `0x18`-`0x1A` while trading (`DS:0x6D3C & 0x30`, `DS:0x6BF8` > 0, population ≥ 30) |
-| `0xF5` / `0xF6` (workshops) | top two rows: 6 / 7 (48×34, height forced to 32, 2 extra rows) |
-| `0xF5` / `0xF6` bottom row (`7BB4` bit `0x08`) | no extra rows. The cell looks for an actor in the 30-entry, 24-byte table at `DS:0x585C` standing two rows up and up to two columns left. Left two cells draw 32×16 frame 8 + (actor byte `+0x10` & 7); right cell (`7BB4` bit `0x02`) draws 16×16 frame 16 + actor word `+0x04`. With no actor both read 0: frames 8 and 16. |
-| `0xF1` | `HOUSES2` `0x29`-`0x2B` while `DS:0x6D3A` ≥ 70 and population ≥ 200; otherwise the default |
-| `0xEC`, `0xEE` | animated variants gated on `DS:0x6D3E & 6`; otherwise the default |
+| `0xF4` market | 5; `0x18` + (`DS:0x6D3C & 0x30`) >> 4, so `0x19`-`0x1B`, while that is nonzero, `DS:0x6BF8` > 0 and population units ≥ 30 |
+| `0xF5` / `0xF6` (workshops) | top two rows: 6 / 7 (48×34, height forced to 32, 2 extra rows); while `DS:0x6D3E & 6` is nonzero and the workshop's production level (+`0x10`, found as for the bottom row but one or no rows up) exceeds 2, `0x21` / `0x24` + (`0x6D3E & 6`) >> 1 |
+| `0xF5` / `0xF6` bottom row (`7BB4` bit `0x08`) | no extra rows. The cell looks up the workshop record (`DS:0x585C`, the save's `table_720`) whose anchor is two rows up and up to two columns left. The left two cells draw 32×16 frame 8 + (production level `+0x10` & 7); the right cell (`7BB4` bit `0x02`) draws 16×16 frame 16 + goods `+0x04`. With no record found, the index runs on to 30, past the table, into the barracks records at `DS:0x5B2C`. |
+| `0xF1` coliseum | while `DS:0x6D3A` ≥ 70 and population units ≥ 200: `0x29` below 75, `0x2A` below 80, `0x2B` below 124, `0x2A` below 126, then `0x29`; otherwise the default |
+| `0xEC` school | `0x1E` + (`DS:0x6D3E & 6`) >> 1 while that is nonzero, the cell's coverage exceeds 12 and population units exceed 100; otherwise the default |
+| `0xEE` prefecture | `0x1B` + (`DS:0x6D3E & 6`) >> 1 while that is nonzero and at least 4 of the cell's 8 neighbours are housing; otherwise the default |
 
-The `0xF5`/`0xF6` bottom row reads a runtime actor table that isn't in the save. The renderer draws the no-actor frames.
+All of it is implemented in `render::render_city`: `RenderPhase` carries the step count, the population units, `DS:0x6BF8` and the two record tables. `test_render_building_animation` checks every case against synthetic sheets.
 
 ## 5. Proof against the running game
 
@@ -85,8 +86,7 @@ A search of the captures with the decoded sheets finds 13 `HOUSES`, 13 `HOUSES2`
   - **Water.** The draw loop (`0x1FF5A`) advances the water phase `DS:0x57EA` by one, mod 3, on each frame it draws while `0x6D3E` is odd.
   - **Fire.** Burning tiles blink on bit 2 of `0x6D3A`.
   - **In Gaius.** `gaius_viewer` drives `RenderPhase` from the simulation's step count the same way.
-  - **Still open.** The building animations gated on `0x6D3E`: school `0xEC` above 100 population units, prefecture `0xEE`, and the `7BB4` bit `0x10` variants.
-- The workshop records at `DS:0x585C` (the save's `table_720`), which drive the `0xF5`/`0xF6` bottom row. Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
+- ~~The workshop records at `DS:0x585C`~~ **Resolved:** they are the save's `table_720`, and drive the `0xF5`/`0xF6` rows (section 4). Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
 - The overlay map modes (`0x1FB94`, `SHADE.PL8`).
 - What moves the actors (their types' behaviour), `SPRITE2.PL8`, `FIXT3.PL8` and the province view.
 - `HOUSES.PL8` frame 43 (8×16) and `HOUSES2.PL8` frames not listed above.

@@ -29,11 +29,10 @@
 //   Escape / window close                                   -> quit
 //
 // Build mode (Phase 5) places through systems::construction, which carries
-// the real seed tiles and footprints recovered from the executable. The
-// drag-based commands (Road/Wall/Plaza/Clear Area) are deliberately absent
-// from the tool ring -- their auto-tiling rules aren't reverse engineered
-// to implementable precision yet, and faking them would be worse than
-// leaving them out. See systems/construction.hpp.
+// the real seed tiles, footprints and drag auto-tiling recovered from the
+// executable; a mouse left-drag lays roads and walls cell by cell. Time runs
+// through systems::month (walkers, fire and all), and the city view animates
+// on the engine's frame counters. See systems/construction.hpp.
 //
 // Usage:
 //   gaius_viewer <EMPIRE2.0xx | CAESARxx.SAV>
@@ -608,6 +607,14 @@ int main(int argc, char** argv) {
                 const int blink = ((sim.ticks % 128) >> 2) & 1;
                 if (blink != render_phase.blink) {
                     render_phase.blink = blink;
+                    city_image_dirty = true;
+                }
+                if (render_phase.ticks != sim.ticks || !render_phase.workshop_records) {
+                    render_phase.ticks = sim.ticks;
+                    render_phase.population_units = model::global_word(state, 0x6C10);
+                    render_phase.coverage_base = model::global_word(state, 0x6BF8);
+                    render_phase.workshop_records = &state.table_720;
+                    render_phase.barracks_records = &state.table_120;
                     city_image_dirty = true;
                 }
                 if (city_image_dirty) {

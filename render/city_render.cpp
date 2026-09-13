@@ -51,48 +51,109 @@ bool animates_with_water(int t) {
     return (t >= 0x4A && t <= 0x5D) || (t >= 0x62 && t <= 0x75) || (t >= 0x8A && t <= 0x91);
 }
 
+// Workshop and barracks records as the engine addresses them: DS:0x585C +
+// record x 24 + offset, where record 30 runs on into the barracks table at
+// DS:0x5B2C. Missing bytes read as 0.
+int record_word(const RenderPhase& phase, int record, int offset) {
+    auto byte = [&](size_t i) -> int {
+        if (i < 720) return (phase.workshop_records && i < phase.workshop_records->size()) ? (*phase.workshop_records)[i] : 0;
+        i -= 720;
+        return (phase.barracks_records && i < phase.barracks_records->size()) ? (*phase.barracks_records)[i] : 0;
+    };
+    const size_t o = static_cast<size_t>(record) * 24 + static_cast<size_t>(offset);
+    return static_cast<int16_t>(byte(o) | (byte(o + 1) << 8));
+}
+
+// The workshop search in 0x20204: the first active record whose row is row_a
+// or row_b and whose column is col, col - 1 or col - 2; 30, past the table,
+// when there is none.
+int find_workshop(const RenderPhase& phase, int col, int row_a, int row_b) {
+    for (int i = 0; i < 30; ++i) {
+        if (record_word(phase, i, 8) == 0) continue;
+        const int r = record_word(phase, i, 2);
+        if (r != row_a && r != row_b) continue;
+        const int c = record_word(phase, i, 0);
+        if (c == col || c == col - 1 || c == col - 2) return i;
+    }
+    return 30;
+}
+
 // Routine 0x20204 for one cell of a building tile.
-void draw_building_cell(formats::IndexedImage& out, const CitySprites& s, int tile, uint8_t flags, int px, int py) {
+void draw_building_cell(formats::IndexedImage& out, const CitySprites& s, const model::CityMap& city, int col, int row,
+                        int tile, uint8_t flags, int px, int py, const RenderPhase& phase) {
     const int index = tile - 0xC8;
     if (index < 0 || index >= static_cast<int>(kBuildingMetrics.size())) return;
     int extra = kBuildingMetrics[static_cast<size_t>(index)].extra;
     int part = flags & 0x0F;
     const formats::PL8Sheet* sheet = &s.buildings;
     int frame = index;
+    const int c32 = phase.ticks % 32, c64 = phase.ticks % 64, c128 = phase.ticks % 128;
+    const int stride = (c32 & 6) >> 1;  // 1-3 whenever a DS:0x6D3E animation runs
+    auto variant = [&](int f) {
+        sheet = &s.variants;
+        frame = f;
+    };
 
     switch (tile) {
         case 0xE8:
-            sheet = &s.variants;
-            frame = (flags & 0x10) ? 0 : 1;
+        case 0xEA: {
+            // Bath houses: by water; a watered one shows its HOUSES frame
+            // while DS:0x6D3E bit 8 is set.
+            const bool watered = (flags & 0x10) != 0;
+            if (!(watered && (c32 & 8))) variant((tile == 0xE8 ? 0 : 2) + (watered ? 0 : 1));
             break;
-        case 0xEA:
-            sheet = &s.variants;
-            frame = (flags & 0x10) ? 2 : 3;
+        }
+        case 0xEC:  // school
+            if (static_cast<int8_t>(city.coverage[static_cast<size_t>(row)][static_cast<size_t>(col)]) > 12 && (c32 & 6) &&
+                phase.population_units > 100)
+                variant(0x1E + stride);
+            break;
+        case 0xEE:  // prefecture: busy among houses
+            if (c32 & 6) {
+                int homes = 0;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int y = row + dy, x = col + dx;
+                        if ((dx == 0 && dy == 0) || y < 0 || y >= model::kCityH || x < 0 || x >= model::kCityW) continue;
+                        const uint8_t t = city.tile[static_cast<size_t>(y)][static_cast<size_t>(x)];
+                        if (t >= 0xC8 && t <= 0xD7) ++homes;
+                    }
+                }
+                if (homes >= 4) variant(0x1B + stride);
+            }
+            break;
+        case 0xF1:  // coliseum
+            if (c128 >= 70 && phase.population_units >= 200)
+                variant(c128 < 75 ? 0x29 : c128 < 80 ? 0x2A : c128 < 124 ? 0x2B : c128 < 126 ? 0x2A : 0x29);
             break;
         case 0xF3:
-            sheet = &s.variants;
-            frame = 4;
+            variant(4);
             break;
-        case 0xF4:
-            sheet = &s.variants;
-            frame = 5;
+        case 0xF4:  // market, trading
+            variant(5);
+            if ((c64 & 0x30) && phase.coverage_base > 0 && phase.population_units >= 30) variant(0x18 + ((c64 & 0x30) >> 4));
             break;
         case 0xF5:
         case 0xF6:
             sheet = &s.variants;
             if (flags & 0x08) {
-                // Bottom row: actor-driven frames; with no actor the lookup
-                // reads 0 (see the header).
+                // Bottom row: the production level on the left two cells, the
+                // goods on the right one.
+                const int w = find_workshop(phase, col, row - 2, row - 2);
                 extra = 0;
                 if (flags & 0x02) {
                     part = 0;
-                    frame = 16;
+                    frame = 0x10 + record_word(phase, w, 0x04);
                 } else {
                     part &= 1;
-                    frame = 8;
+                    frame = 8 + (record_word(phase, w, 0x10) & 7);
                 }
             } else {
                 frame = tile == 0xF5 ? 6 : 7;
+                if (c32 & 6) {
+                    const int w = find_workshop(phase, col, row, row - 1);
+                    if (record_word(phase, w, 0x10) > 2) frame = (tile == 0xF5 ? 0x21 : 0x24) + stride;
+                }
             }
             break;
         default:
@@ -159,14 +220,14 @@ void render_city(const model::CityMap& city, const CitySprites& sprites, int col
             const uint8_t flags = city.operational_state[row][col];
             int t = city.tile[row][col];
             if (t >= 0xC8) {
-                draw_building_cell(out, sprites, t, flags, px, py);
+                draw_building_cell(out, sprites, city, col, row, t, flags, px, py, phase);
                 continue;
             }
             if (t >= 0x36 && t <= 0x43 && (flags & 0x10)) t = 0x41;
             if (animates_with_water(t)) t += phase.water;
             if (t == 0xA8 || t == 0xAB || t == 0xAE || t == 0xB1) t += phase.blink;
             if (t >= 0xC8) {
-                draw_building_cell(out, sprites, t, flags, px, py);
+                draw_building_cell(out, sprites, city, col, row, t, flags, px, py, phase);
             } else if (const formats::PL8Frame* f = frame_at(sprites.terrain, t)) {
                 blit(out, *f, 0, 0, kCellPx, kCellPx, px, py, false);
             }

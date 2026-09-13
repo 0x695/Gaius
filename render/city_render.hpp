@@ -29,22 +29,21 @@
 //     The frame is HOUSES tile - 0xC8, except: bath houses 0xE8/0xEA use
 //     HOUSES2 0/1 and 2/3 (watered / dry, from 7BB4 bit 0x10), 0xF3 HOUSES2 4,
 //     0xF4 HOUSES2 5, and 0xF5/0xF6 HOUSES2 6/7 for their top two rows. Their
-//     bottom row (7BB4 bit 0x08) draws frames picked from a runtime actor
-//     table the save doesn't hold; with no actor the engine's lookup yields 0,
-//     so this draws HOUSES2 8 (left two cells) and 16 (right cell), which is
-//     what a real capture shows.
+//     bottom row (7BB4 bit 0x08) shows the workshop's production level and
+//     goods from its record (the save's table_720). Schools, prefectures,
+//     markets, coliseums, bath houses and workshops also animate on the frame
+//     counters -- the full rules are in the renderer findings, section 4.
 //
-// Not modeled: animation beyond the phases in RenderPhase, the animated
-// variants of 0xEC/0xEE/0xF1/0xF4 (all gated on frame counters), and the
-// overlay map modes (routine 0x1FB94, drawn from SHADE.PL8). Walkers are
-// drawn from a save's object table (below); moving them is simulation work
-// that isn't transcribed yet.
+// Not modeled: the overlay map modes (routine 0x1FB94, drawn from SHADE.PL8).
+// Walkers are drawn from a save's object table (below); systems::actors moves
+// them.
 
 #pragma once
 
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "formats/common/types.hpp"
 #include "model/city_state.hpp"
@@ -71,15 +70,28 @@ CitySprites load_city_sprites(const std::string& asset_dir);
 using systems::construction::BuildingMetrics;
 using systems::construction::kBuildingMetrics;
 
-// The engine's frame counters, for the few tiles that animate. Zero is a
-// valid still frame.
 // The draw loop's animation state. Water (DS:0x57EA) advances by one, mod 3,
 // on each drawn frame while the 32-step counter DS:0x6D3E is odd; the blink is
 // bit 2 of the 128-step counter DS:0x6D3A. Both counters advance once per
 // simulation step (systems::month::SimState::ticks).
+//
+// The building animations in 0x20204 read the same counters and some city
+// state, which is carried here too: see docs/CAESAR_CITY_RENDERER_FINDINGS.md
+// section 4. Left at their defaults, nothing animates and the workshops'
+// bottom rows read zeros.
 struct RenderPhase {
     int water = 0;  // 0..2 (DS:0x57EA)
     int blink = 0;  // 0..1 ((DS:0x6D3A >> 2) & 1)
+    // Steps since the counters started: DS:0x6D3E = ticks % 32, DS:0x6D3C =
+    // ticks % 64, DS:0x6D3A = ticks % 128.
+    int ticks = 0;
+    int population_units = 0;  // DS:0x6C10
+    int coverage_base = 0;     // DS:0x6BF8
+    // The workshop records (DS:0x585C, the save's table_720), and the barracks
+    // records that follow them in memory (DS:0x5B2C, table_120), which a
+    // workshop cell reads when it finds no record of its own.
+    const std::vector<uint8_t>* workshop_records = nullptr;
+    const std::vector<uint8_t>* barracks_records = nullptr;
 };
 
 // Renders cells [col0, col0 + cols) x [row0, row0 + rows) into `out`

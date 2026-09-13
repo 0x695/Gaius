@@ -2129,6 +2129,88 @@ void test_month_state_from_saves() {
 // bottom edge at y + 8, an inactive one isn't drawn, and a building in the
 // next row is drawn over it -- including the rows it rises above its
 // footprint.
+// 0x20204's animated and record-driven building frames, drawn from synthetic
+// sheets whose frames are each filled with their own number: HOUSES frame i
+// with 100 + i, HOUSES2 frame i with i + 1. No game assets needed.
+void test_render_building_animation() {
+    std::printf("test_render_building_animation (0x20204 animated frames and workshop records)\n");
+    using namespace gaius::render;
+    CitySprites s;
+    auto solid = [](int v) {
+        gaius::formats::PL8Frame fr;
+        fr.width = 64;
+        fr.height = 80;
+        fr.pixels.assign(64 * 80, static_cast<uint8_t>(v));
+        return fr;
+    };
+    for (int i = 0; i < 50; ++i) s.buildings.frames.push_back(solid(100 + i));
+    for (int i = 0; i < 0x30; ++i) s.variants.frames.push_back(solid(i + 1));
+
+    auto f = fresh();
+    auto square = [&](uint8_t tile, int x, int y, int w, int h) {
+        for (int dy = 0; dy < h; ++dy)
+            for (int dx = 0; dx < w; ++dx) {
+                f->city.tile[y + dy][x + dx] = tile;
+                f->city.operational_state[y + dy][x + dx] = static_cast<uint8_t>(4 * dy + dx);
+            }
+    };
+    square(0xEC, 2, 2, 2, 2);  // school
+    f->city.coverage[2][2] = 13;
+    square(0xEE, 10, 10, 1, 1);  // prefecture with four houses around
+    for (const auto& [x, y] : std::initializer_list<std::pair<int, int>>{{9, 9}, {10, 9}, {11, 9}, {9, 10}})
+        square(0xC8, x, y, 1, 1);
+    square(0xF4, 20, 20, 2, 2);  // market
+    square(0xF1, 30, 30, 3, 2);  // coliseum
+    square(0xE8, 50, 10, 1, 1);  // bath house, watered
+    f->city.operational_state[10][50] |= 0x10;
+    square(0xF5, 40, 40, 3, 3);  // workshop with a record
+    square(0xF6, 60, 40, 3, 3);  // workshop without one
+    std::vector<uint8_t> workshops(720, 0), barracks(120, 0);
+    workshops[0] = 40;
+    workshops[2] = 40;
+    workshops[4] = 3;   // goods
+    workshops[8] = 1;   // active
+    workshops[16] = 5;  // production level
+    barracks[4] = 2;    // read as record 30's goods
+    barracks[16] = 4;   // read as record 30's level
+
+    auto draw = [&](int ticks) {
+        RenderPhase p;
+        p.ticks = ticks;
+        p.population_units = 250;
+        p.coverage_base = 1;
+        p.workshop_records = &workshops;
+        p.barracks_records = &barracks;
+        gaius::formats::IndexedImage img;
+        render_city(f->city, s, 0, 0, 100, 100, img, p);
+        return img;
+    };
+    auto at = [](const gaius::formats::IndexedImage& img, int col, int row) {
+        return static_cast<int>(img.pixels[static_cast<size_t>(row * kCellPx + 8) * img.width + col * kCellPx + 8]);
+    };
+
+    const auto still = draw(0);
+    CHECK(at(still, 2, 2) == 100 + 0x24);    // school: its HOUSES frame
+    CHECK(at(still, 10, 10) == 100 + 0x26);  // prefecture
+    CHECK(at(still, 20, 20) == 5 + 1);       // market at rest
+    CHECK(at(still, 30, 30) == 100 + 0x29);  // coliseum
+    CHECK(at(still, 50, 10) == 0 + 1);       // watered bath house
+    CHECK(at(still, 40, 40) == 6 + 1);       // workshop top, at rest
+    CHECK(at(still, 40, 42) == 8 + 5 + 1);   // level 5
+    CHECK(at(still, 42, 42) == 0x10 + 3 + 1);  // goods 3
+    CHECK(at(still, 60, 42) == 8 + 4 + 1);   // no record: the barracks bytes
+    CHECK(at(still, 62, 42) == 0x10 + 2 + 1);
+
+    const auto moving = draw(2);  // DS:0x6D3E & 6 = 2: stride 1
+    CHECK(at(moving, 2, 2) == 0x1E + 1 + 1);
+    CHECK(at(moving, 10, 10) == 0x1B + 1 + 1);
+    CHECK(at(moving, 40, 40) == 0x21 + 1 + 1);  // level 5, above 2
+    CHECK(at(moving, 60, 40) == 0x24 + 1 + 1);  // no record: the barracks byte reads as level 4
+    CHECK(at(draw(8), 50, 10) == 100 + 0x20);   // bit 8: the HOUSES frame
+    CHECK(at(draw(16), 20, 20) == 0x19 + 1);    // DS:0x6D3C & 0x30 = 0x10
+    CHECK(at(draw(100), 30, 30) == 0x2B + 1);   // DS:0x6D3A = 100
+}
+
 void test_render_walkers() {
     std::printf("test_render_walkers (actor list and draw order, 0x6733 / 0x6946)\n");
     std::string dir = test_assets_dir();
@@ -3048,6 +3130,7 @@ int main() {
     test_month_economy_matches_saves();
     test_render_building_metrics();
     test_render_walkers();
+    test_render_building_animation();
     test_render_city_matches_screenshots();
     test_save_corpus_real();
     test_save_corpus_globals();
