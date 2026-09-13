@@ -276,6 +276,16 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
 // terrain rule and part indices as place() -- and return false where it
 // refuses. The record goes into the first free slot; with none free, the
 // building is placed without one, as in the engine.
+// The eight workshop goods, by the goods index a record stores (+4): the
+// order of the names in the executable's string table (flat 0x78F46 in the
+// decoded US image), which matches the manual's list.
+inline constexpr std::array<const char*, 8> kWorkshopGoodsNames = {
+    "Glass", "Tin", "Pottery", "Copper", "Wine", "Ivory", "Wheat", "Spices"};
+
+// 3496:15A0: what each Forum grade costs, in denarii. Not charged yet -- there
+// is no treasury until Phase 7.
+inline constexpr std::array<int, 8> kForumGradeCost = {60, 100, 140, 200, 250, 300, 350, 500};
+
 bool place_forum(model::CityState& state, int grade, int x, int y);
 bool place_workshop(model::CityState& state, int goods, int x, int y);
 

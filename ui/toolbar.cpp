@@ -156,7 +156,8 @@ int Toolbar::hit_test(int lx, int ly) const {
 }
 
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
-            int h, const GameFont* font, const formats::PL8Sheet* icons, const formats::Palette* icon_palette) {
+            int h, const GameFont* font, const formats::PL8Sheet* icons, const formats::Palette* icon_palette,
+            const char* selected_label) {
     if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * h * 3) return;
 
     const Rect p = bar.panel();
@@ -175,12 +176,13 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
     const char* label = (label_for >= 0 && label_for < bar.count())
                             ? systems::construction::command_name(bar.tool(label_for))
                             : "SELECT A BUILDING";
+    const char* shown = (selected_label && label_for == selected) ? selected_label : label;
     if (font) {
-        int tw = game_text_width(label, m.glyph_scale);
-        draw_game_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), label, m.glyph_scale, *font);
+        int tw = game_text_width(shown, m.glyph_scale);
+        draw_game_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), shown, m.glyph_scale, *font);
     } else {
-        int tw = text_width(label, m.glyph_scale);
-        draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), label, m.glyph_scale, kLabelText);
+        int tw = text_width(shown, m.glyph_scale);
+        draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), shown, m.glyph_scale, kLabelText);
     }
 
     for (int i = 0; i < bar.count(); ++i) {

@@ -21,6 +21,7 @@
 //   right-click / two-finger tap / gamepad B                -> cycle save
 //     layer (save-file mode only; no-op for an EMPIRE2 scenario)
 //   Tab / gamepad X                                         -> cycle build tool
+//   V / gamepad right shoulder / tap the selected button    -> next Forum grade or Workshop goods
 //   Space / gamepad Y                                       -> pause / resume time (a month about every 2 s;
 //                                                              save-file mode)
 //   left-click / tap / gamepad A                            -> place current
@@ -364,6 +365,31 @@ int main(int argc, char** argv) {
     // rubble from the simulation's random number generator.
     systems::construction::DragState drag;
     int drag_last_x = -1, drag_last_y = -1;  // the last cell a click or drag placed on
+    // The variant choices the original makes in sub-menus: DS:0x6D89 (Forum
+    // grade) and DS:0x6D87 (Workshop goods).
+    int forum_grade = 0, workshop_goods = 0;
+    auto tool_label = [&]() -> std::string {
+        namespace construction = systems::construction;
+        const auto tool = kBuildTools[tool_index];
+        if (tool == construction::CommandId::Forum)
+            return "Forum grade " + std::to_string(forum_grade + 1) + ", " +
+                   std::to_string(construction::kForumGradeCost[static_cast<size_t>(forum_grade)]) + " Dn";
+        if (tool == construction::CommandId::Workshop)
+            return std::string("Workshop: ") + construction::kWorkshopGoodsNames[static_cast<size_t>(workshop_goods)];
+        return construction::command_name(tool);
+    };
+    auto cycle_variant = [&]() {
+        const auto tool = kBuildTools[tool_index];
+        if (tool == systems::construction::CommandId::Forum) {
+            forum_grade = (forum_grade + 1) % 8;
+        } else if (tool == systems::construction::CommandId::Workshop) {
+            workshop_goods = (workshop_goods + 1) % 8;
+        } else {
+            return false;
+        }
+        std::printf("tool: %s\n", tool_label().c_str());
+        return true;
+    };
     auto place_tool = [&](systems::construction::CommandId tool, int x, int y) {
         namespace construction = systems::construction;
         switch (tool) {
@@ -371,8 +397,8 @@ int main(int argc, char** argv) {
             case construction::CommandId::Wall: return construction::place_wall(state.city, drag, x, y);
             case construction::CommandId::Plaza: return construction::place_plaza(state.city, x, y);
             case construction::CommandId::ClearArea: return construction::clear_area(state, sim.random, x, y);
-            case construction::CommandId::Forum: return construction::place_forum(state, 0, x, y);
-            case construction::CommandId::Workshop: return construction::place_workshop(state, 0, x, y);
+            case construction::CommandId::Forum: return construction::place_forum(state, forum_grade, x, y);
+            case construction::CommandId::Workshop: return construction::place_workshop(state, workshop_goods, x, y);
             default: return construction::place(state.city, tool, x, y);
         }
     };
@@ -455,6 +481,7 @@ int main(int argc, char** argv) {
             drag_last_x = drag_last_y = -1;
             int hit = toolbar.hit_test(lx, ly);
             if (hit >= 0) {
+                if (hit == tool_index && cycle_variant()) return;  // tapping the selected button again
                 tool_index = hit;
                 std::printf("tool: %s\n", systems::construction::command_name(kBuildTools[tool_index]));
                 return;
@@ -518,6 +545,9 @@ int main(int argc, char** argv) {
                             time_running = !time_running;
                             std::printf("time: %s\n", time_running ? "running" : "paused");
                         }
+                        break;
+                    case platform::CommandType::CycleVariant:
+                        if (save_mode) cycle_variant();
                         break;
                     case platform::CommandType::CycleTool:
                         if (save_mode) {
@@ -595,6 +625,7 @@ int main(int argc, char** argv) {
                 if (now - last_step_ms >= kStepMs) last_step_ms = now;  // behind: drop the backlog
             }
 
+            const std::string tool_text = save_mode ? tool_label() : std::string();
             if (save_mode && show_sprites) {
                 // The draw loop's animation (renderer findings section 6): the
                 // water phase advances on each drawn frame while the 32-step
@@ -625,7 +656,7 @@ int main(int argc, char** argv) {
                 render_sprite_view(city_image, sprites.palette, cam, frame);
                 ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
                            have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
-                           have_sprites ? &sprites.palette : nullptr);
+                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str());
             } else if (save_mode) {
                 viewer::render_city_map_layer(state.city, layer, city_cell_px, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
@@ -636,7 +667,7 @@ int main(int argc, char** argv) {
                 // keeps clicks there from reaching the occluded cells.
                 ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
                            have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
-                           have_sprites ? &sprites.palette : nullptr);
+                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str());
             } else {
                 render_empire_frame(map, cam, frame);
             }

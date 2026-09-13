@@ -971,6 +971,8 @@ void test_construction_command_table_fixtures() {
     CHECK(std::string(command_name(CommandId::Temple)) == "Temple");
     CHECK(std::string(command_name(CommandId::CohortGoHome)) == "Cohort Go Home");
     CHECK(static_cast<int>(CommandId::CohortGoHome) == 33);
+    CHECK(std::string(kWorkshopGoodsNames[0]) == "Glass" && std::string(kWorkshopGoodsNames[7]) == "Spices");
+    CHECK(kForumGradeCost[0] == 60 && kForumGradeCost[7] == 500);
 }
 
 // Golden-data check: decodes the real US-build CSR.EXE and confirms all 34
@@ -1008,6 +1010,22 @@ void test_construction_command_table_corpus() {
         if (found == std::string::npos) break;  // avoid a cascade of failures if one entry is genuinely wrong
         CHECK(found - search_from < 20);         // each entry should follow closely, not be found far downstream
         search_from = found + 1;
+    }
+
+    // The goods names, in index order, from their string table.
+    size_t goods_from = 0x78F40;
+    for (const char* goods : kWorkshopGoodsNames) {
+        size_t found = image.find(goods, goods_from);
+        CHECK(found != std::string::npos && found - goods_from < 40);
+        if (found == std::string::npos) break;
+        goods_from = found + 1;
+    }
+    // The forum grade costs at 3496:15A0.
+    constexpr size_t kCosts = 0x34960 + 0x15A0;
+    for (size_t i = 0; i < kForumGradeCost.size(); ++i) {
+        CHECK(kCosts + 2 * i + 1 < image.size() &&
+              (static_cast<uint8_t>(image[kCosts + 2 * i]) | (static_cast<uint8_t>(image[kCosts + 2 * i + 1]) << 8)) ==
+                  kForumGradeCost[i]);
     }
 }
 
@@ -3069,6 +3087,23 @@ void test_ui_font_rendering() {
     CHECK(tiny.size() == 10);
 }
 
+// render's selected_label: it replaces the selected tool's name, and only that.
+void test_ui_toolbar_variant_label() {
+    std::printf("test_ui_toolbar_variant_label (the selected tool's label override)\n");
+    using namespace gaius::ui;
+    constexpr CommandId tools[] = {CommandId::Forum, CommandId::Workshop};
+    const Toolbar bar(tools, 2, metrics_for(Breakpoint::Desktop), 320, 200);
+    auto color = [](uint8_t) { return gaius::formats::RGB{10, 20, 30}; };
+    auto draw = [&](int hovered, const char* label) {
+        std::vector<uint8_t> rgb(320 * 200 * 3, 0);
+        render(bar, 0, hovered, color, rgb, 320, 200, nullptr, nullptr, nullptr, label);
+        return rgb;
+    };
+    CHECK(draw(-1, nullptr) != draw(-1, "Forum grade 3, 140 Dn"));
+    CHECK(draw(-1, "Forum") == draw(-1, nullptr));  // same text, same pixels
+    CHECK(draw(1, nullptr) == draw(1, "Forum grade 3, 140 Dn"));  // hovering another tool shows its name
+}
+
 void test_ui_toolbar_render() {
     std::printf("test_ui_toolbar_render\n");
     using namespace gaius::ui;
@@ -3132,6 +3167,7 @@ int main() {
     test_ui_hit_test_matches_drawn_buttons();
     test_ui_font_rendering();
     test_ui_toolbar_render();
+    test_ui_toolbar_variant_label();
     test_ui_game_font_table();
     test_ui_command_icons_match_screenshot();
     test_ui_game_font_matches_screenshot();

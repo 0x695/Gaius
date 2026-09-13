@@ -113,7 +113,9 @@ private:
 // button; otherwise it shows the building's footprint.
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
             int h, const GameFont* font = nullptr, const formats::PL8Sheet* icons = nullptr,
-            const formats::Palette* icon_palette = nullptr);
+            const formats::Palette* icon_palette = nullptr, const char* selected_label = nullptr);
+// `selected_label`, when given, replaces the selected tool's name in the label
+// row (e.g. "Forum grade 3, 140 Dn"); a hovered tool still shows its own name.
 
 // The POINTERS.PL8 frame the original's control panel shows for a command, or
 // -1 if it has no button. Read from the panel's button tables (DS:0x1178,

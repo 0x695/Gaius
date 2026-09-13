@@ -164,8 +164,7 @@ Every checklist item above is done. What remains is validation, a few untranscri
   - The random draws of frames between steps at slower game speeds; Gaius draws once per step.
 - **Save model.** The save loader isn't reverse engineered, and what several global words mean to the player isn't established (the histories' `DS:0x6BC6`, `0x6BC4` and `0x6BB6`; the economy's `0x6C04` and `0x6C06`).
 - **Build mode.**
-  - A Forum-grade and workshop-goods chooser; the viewer places grade 0 and goods 0.
-  - Construction costs. The forum cost table `3496:15A0` is located, but there's no treasury until Phase 7.
+  - Construction costs. The forum grade costs (`3496:15A0`) are transcribed and shown in the toolbar when choosing a grade, but nothing is charged: there's no treasury until Phase 7.
   - A touch drag gesture for roads and walls.
 - **Viewer.** `MINIFONT.PL1` isn't decoded. (Water, fire and the animated buildings draw as in the engine since 2026-09-13.) Overlay map modes belong to Phase 7.
 - **Platform.**

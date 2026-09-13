@@ -35,6 +35,9 @@ enum class CommandType {
                   // build mode -- exactly the kind of extension this enum's original
                   // comment anticipated ("room to add ... without changing this enum's
                   // meaning for existing commands").
+    CycleVariant, // next variant of the selected tool (Forum grade, Workshop goods): V,
+                  // gamepad right shoulder. Touch reaches the same thing by tapping the
+                  // selected toolbar button again, so it's not a keyboard-only path.
     ToggleTime,   // pause / resume the simulation clock: Space, gamepad Y/North. The
                   // clock runs by default, so a device without either (touch) still
                   // sees the city evolve; pausing is enrichment, not a gate.
