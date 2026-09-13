@@ -166,7 +166,7 @@ Every checklist item above is done. What remains is validation, a few untranscri
 - **Build mode.**
   - Construction costs. The forum grade costs (`3496:15A0`) are transcribed and shown in the toolbar when choosing a grade, but nothing is charged: there's no treasury until Phase 7.
   - A touch drag gesture for roads and walls.
-- **Viewer.** `MINIFONT.PL1` isn't decoded. (Water, fire and the animated buildings draw as in the engine since 2026-09-13.) Overlay map modes belong to Phase 7.
+- **Viewer.** `MINIFONT.PL1` is decoded since 2026-09-14: 1 bit per pixel, as its extension says. (Water, fire and the animated buildings draw as in the engine since 2026-09-13.) Overlay map modes belong to Phase 7.
 - **Platform.**
   - Android builds only for the `x86_64` emulator, and `gaius_viewer` isn't ported to it (asset loading needs `AAssetManager`).
   - Touch gestures beyond single-finger drag and tap are undesigned.

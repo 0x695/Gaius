@@ -46,16 +46,30 @@ inline int game_glyph_frame(char c) {
 }
 
 struct GameFont {
-    formats::PL8Sheet sheet;   // FONT1.PL8
+    formats::PL8Sheet sheet;   // FONT1.PL8, or MINIFONT.PL1
     formats::Palette palette;  // the palette the glyph indices are drawn with
+    int advance = kGameGlyphPx;  // pixels per character: 8 for FONT1, 6 for MINIFONT
+    // MINIFONT.PL1 is 1 bit per pixel, so its glyphs carry no colour: when set,
+    // every non-zero pixel is drawn in `ink` instead of through the palette.
+    bool use_ink = false;
+    formats::RGB ink{};
 };
+
+// MINIFONT.PL1 (formats::pl8::load_pl1): 72 frames of 8x6, a 5x5 font of
+// capitals, digits and a little punctuation, laid out so the same DS:0F64
+// table maps characters to it (lower case folds onto the capitals). The engine
+// loads it at 54E0:C254 and advances 6 px per character. Drawn in `ink`.
+GameFont load_mini_font(const std::string& asset_dir, formats::RGB ink);
+
+// As game_text_width, at the font's own advance.
+int game_text_width(const char* text, int scale, const GameFont& font);
 
 // Loads FONT1.PL8 from `asset_dir` (upper- or lower-case name) and pairs it
 // with `palette`. Throws formats::FormatError if it's missing or malformed.
 GameFont load_game_font(const std::string& asset_dir, const formats::Palette& palette);
 
 // Width in logical pixels of `text` at `scale`: 8 per character, as the
-// engine advances.
+// engine advances for FONT1.
 int game_text_width(const char* text, int scale);
 
 // Draws `text` into an RGB24 buffer at logical (x, y), each glyph pixel

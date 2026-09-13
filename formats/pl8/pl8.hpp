@@ -63,4 +63,13 @@ namespace gaius::formats::pl8 {
 // read past the end of the file.
 PL8Sheet load(const std::string& path);
 
+// .PL1: the same container and descriptors, but 1 bit per pixel -- each row
+// is ceil(width / 8) bytes, most significant bit first (found 2026-09-14 in
+// MINIFONT.PL1: 72 frames of 8x6 at 6 bytes each, 580 + 432 = 1012 bytes,
+// which decode to a clean capitals-and-digits font). A set bit becomes pixel
+// value 1, a clear bit 0 (transparent). The extension names the depth: the
+// 4036-byte MINIFONT.PL8 of the international build is 580 + 72 x 48, the
+// same 72 frames at 8 bits per pixel.
+PL8Sheet load_pl1(const std::string& path);
+
 }  // namespace gaius::formats::pl8

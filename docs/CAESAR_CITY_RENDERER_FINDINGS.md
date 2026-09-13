@@ -97,7 +97,7 @@ Loaded alongside the city sheets (`0xFBD3`-`0xFC58`): `P_BLOCKS.PL8` and `POINTE
 
 - **`100F:1583`, the main text routine.**
   - Frame = `DS:0F64[char − 0x20] − 1`, where 0 means no glyph: a–z → frames 0–25, A–Z → 26–51, digits 1–9 → 52–60, and 0 → 61. `:` and `;` also map to 61, which is what the table holds.
-  - It advances 8 px for `FONT1`, 6 px for `MINIFONT`, and draws through `303E:13D6`.
+  - It advances 8 px for `FONT1`, 6 px for `MINIFONT`, and draws through `303E:13D6`. (`MINIFONT.PL1` turned out to be 1 bit per pixel -- `docs/FORMATS.md` -- so how its bits reach that 8-bit planar blitter isn't re-checked; the same `DS:0F64` table does map onto its glyphs.)
   - **DEFINITIVE:** glyphs found in the captures and read back through this table spell the game's messages ("The province's funds are now at or below 1,000 Denarii. Excessive spending may bankrupt you"). `test_ui_game_font_matches_screenshot` draws the building menu's "Housing" pixel for pixel. Implemented in `ui/game_font.hpp`.
 - **`100F:168E`, a second text routine.** Frame = `DS:1044[char − 0x20] − 1`: letters with case folded to frames 0–25, everything else frame 26; it advances by each frame's width. That's `ROMFONT.PL8`'s 27 frames of 16×17. The credits capture's "PROGRAMMING" matches (STRONG INFERENCE on which screens use it).
 - **Panel icons are `POINTERS.PL8` frames, and the button tables are decoded (2026-09-13).**

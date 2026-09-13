@@ -15,7 +15,9 @@ uint16_t read_u16be(const uint8_t* p) {
 }
 }  // namespace
 
-PL8Sheet load(const std::string& path) {
+namespace {
+
+PL8Sheet load_impl(const std::string& path, bool one_bit) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) throw FormatError("pl8: cannot open " + path);
 
@@ -58,6 +60,8 @@ PL8Sheet load(const std::string& path) {
         frame.y = read_u16le(d + 6);
 
         size_t pixel_count = static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height);
+        const size_t row_bytes = (static_cast<size_t>(frame.width) + 7) / 8;
+        const size_t stored_count = one_bit ? row_bytes * static_cast<size_t>(frame.height) : pixel_count;
 
         if (static_cast<size_t>(pixel_offset) > size) {
             throw FormatError("pl8: frame " + std::to_string(i) +
@@ -65,7 +69,7 @@ PL8Sheet load(const std::string& path) {
         }
 
         size_t available = size - pixel_offset;
-        if (available < pixel_count) {
+        if (available < stored_count) {
             // Observed pattern (HOUSES.PL8 frames 44-49): a run of trailing
             // descriptors whose pixel_offset sits EXACTLY at end-of-file
             // (available == 0) with a nonzero declared width/height that
@@ -80,8 +84,17 @@ PL8Sheet load(const std::string& path) {
                 throw FormatError("pl8: frame " + std::to_string(i) +
                                    " pixel data runs past end of file in " + path +
                                    " (offset=" + std::to_string(pixel_offset) +
-                                   ", needs " + std::to_string(pixel_count) +
+                                   ", needs " + std::to_string(stored_count) +
                                    ", only " + std::to_string(available) + " bytes available)");
+            }
+        } else if (one_bit) {
+            const uint8_t* stored = &data[pixel_offset];
+            frame.pixels.resize(pixel_count);
+            for (int y = 0; y < frame.height; ++y) {
+                for (int x = 0; x < frame.width; ++x) {
+                    const uint8_t byte = stored[static_cast<size_t>(y) * row_bytes + static_cast<size_t>(x) / 8];
+                    frame.pixels[static_cast<size_t>(y) * frame.width + x] = (byte >> (7 - x % 8)) & 1;
+                }
             }
         } else {
             // Stored as four streams, one after another; pixel i (row-major)
@@ -104,5 +117,11 @@ PL8Sheet load(const std::string& path) {
 
     return sheet;
 }
+
+}  // namespace
+
+PL8Sheet load(const std::string& path) { return load_impl(path, false); }
+
+PL8Sheet load_pl1(const std::string& path) { return load_impl(path, true); }
 
 }  // namespace gaius::formats::pl8

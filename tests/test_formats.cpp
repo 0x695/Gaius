@@ -1446,6 +1446,53 @@ void test_pal256_corpus() {
     }
 }
 
+// formats::pl8::load_pl1: PL8's container with 1 bit per pixel, a row per
+// ceil(width / 8) bytes, most significant bit first.
+void test_pl1_synthetic() {
+    std::printf("test_pl1_synthetic (1 bit per pixel frames)\n");
+    std::vector<uint8_t> buf = {61, 0, 2, 0};
+    auto desc = [&](uint16_t off, uint8_t w, uint8_t h) {
+        buf.insert(buf.end(), {static_cast<uint8_t>(off >> 8), static_cast<uint8_t>(off & 0xFF), w, h, 0, 0, 0, 0});
+    };
+    desc(20, 8, 2);
+    desc(22, 10, 1);
+    buf.insert(buf.end(), {0x80, 0x01, 0xFF, 0xC0});
+    std::string tmp = (fs::temp_directory_path() / "gaius_test.pl1").string();
+    { std::ofstream out(tmp, std::ios::binary); out.write(reinterpret_cast<char*>(buf.data()), buf.size()); }
+    const auto sheet = pl8::load_pl1(tmp);
+    CHECK(sheet.frames.size() == 2);
+    if (sheet.frames.size() == 2) {
+        const auto& a = sheet.frames[0];
+        CHECK(a.pixels.size() == 16 && a.pixels[0] == 1 && a.pixels[7] == 0 && a.pixels[8] == 0 && a.pixels[15] == 1);
+        const auto& b = sheet.frames[1];  // 10 wide: two bytes a row
+        CHECK(b.pixels.size() == 10 && b.pixels[7] == 1 && b.pixels[8] == 1 && b.pixels[9] == 1);
+    }
+    fs::remove(tmp);
+}
+
+// MINIFONT.PL1 as 1 bit per pixel: clean glyphs, through the DS:0F64 table.
+void test_minifont_corpus() {
+    std::printf("test_minifont_corpus (MINIFONT.PL1 glyphs)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    if (!fs::exists(fs::path(dir) / "MINIFONT.PL1")) { skip("MINIFONT.PL1 not found"); return; }
+    const auto font = gaius::ui::load_mini_font(dir, gaius::formats::RGB{255, 255, 255});
+    CHECK(font.sheet.frames.size() == 72);
+    auto row = [&](char c, int y) {
+        std::string s;
+        const int f = gaius::ui::game_glyph_frame(c);
+        if (f < 0 || f >= static_cast<int>(font.sheet.frames.size())) return s;
+        const auto& g = font.sheet.frames[static_cast<size_t>(f)];
+        for (int x = 0; x < g.width; ++x) s += g.pixels[static_cast<size_t>(y) * g.width + x] ? '#' : '.';
+        return s;
+    };
+    CHECK(row('A', 0) == ".###...." && row('A', 2) == "#####...");
+    CHECK(row('a', 0) == row('A', 0));  // lower case folds onto the capitals
+    CHECK(row('0', 1) == "#..##..." && row('7', 0) == "#####...");
+    CHECK(row('-', 2) == "#####..." && row('-', 0) == "........");
+    CHECK(gaius::ui::game_text_width("ABC", 1, font) == 18);
+}
+
 void test_pl8_corpus_sanity() {
     std::printf("test_pl8_corpus_sanity (HOUSES.PL8 documented worked example)\n");
     std::string dir = test_assets_dir();
@@ -3178,6 +3225,8 @@ int main() {
     test_empire2_corpus_roundtrip();
     test_vpx_golden_image();
     test_pal256_corpus();
+    test_pl1_synthetic();
+    test_minifont_corpus();
     test_pl8_corpus_sanity();
     test_pl8_matches_real_screenshots();
     test_construction_drag_rules();
