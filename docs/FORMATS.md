@@ -66,11 +66,11 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
   | `city_tiles_100x100` | `43A5:0000` | 10000 | |
   | `cell_flags_c9d4`, `cell_value_a2c4`, `cell_flags_7bb4`, `cell_value_54a4` | `3496:C9D4`, `A2C4`, `7BB4`, `54A4` | 10000 each | |
   | `empire2_1602` | `3496:2752` | 1602 | |
-  | `table_50` | `DS:0x581E` | 50 | |
+  | `table_50` | `DS:0x581E` | 50 | one flag per province already given (`0x289B0` sets the flag of the current province `DS:0x6CA6`) -- findings section 22 |
   | `table_8` | `DS:0x5816` | 8 | workshops per goods type (bytes) |
-  | `table_10` | `DS:0x580C` | 10 | |
-  | `table_60_a`-`d` | `3496:01F0`, `022C`, `0268`, `02A4` | 60 each | |
-  | `table_72` | `3496:02E0` | 72 | |
+  | `table_10` | `DS:0x580C` | 10 | population milestone flags: 200, 1000, 2000, 4000, 8000, 12000, 16000, 20000 people (`0x27BA1`); bytes 8-9 unused |
+  | `table_60_a`-`d` | `3496:01F0`, `022C`, `0268`, `02A4` | 60 each | yearly history, 15 (year, value) word pairs each: `DS:0x6BC6`, `DS:0x6BC4`, the treasury `DS:0x6CA2`, population units `DS:0x6C10` |
+  | `table_72` | `3496:02E0` | 72 | yearly history of `DS:0x6BB6`, 17 records used of 18 |
   | `final_state` | 34 words: `DS:0x6BB4`, `6BB2`, `6BB0`, `6BAE`, `6BAC`, `6BAA`, 12 bytes at `6B9E`, then `6CB8`, `6C02`, `6BFC`, `6C98`, `6C96`, `6C94`, `6C90`, `6C8E`, `6C8C`, `6C8A`, `6C88`, `6C86`, `6C84`, `6C82`, `6C80`, `6C7E`, `6C5C`, `6BEE`, `6BEC`, `6BEA`, `6BE8`, `6BE6` | 68 | globals, including the monthly scan counters (`6BEA`-`6BEE`) and the event targets `0x2DF7D` rolls (`6C88`) |
 
   The blocks' meanings beyond these addresses are still mostly open, but each now has a place in memory that code can be searched for.

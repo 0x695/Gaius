@@ -85,16 +85,59 @@ constexpr std::array<int, 8> kDx = {0, 1, 1, 1, 0, -1, -1, -1};
 constexpr std::array<int, 8> kDy = {-1, -1, 0, 1, 1, 1, 0, -1};
 // 3496:1878: ticks between a forum's walkers, by grade.
 constexpr std::array<int8_t, 8> kForumDelay = {7, 6, 5, 5, 4, 3, 2, 2};
-// 3496:1880: a workshop's base level by [DS:0x6CA6] * 8 + goods.
-constexpr std::array<int8_t, 64> kWorkshopBase = {
-    0,  -2, 1, -3, 0, 0, 2, 0,  //
-    0,  -2, 2, -3, 0, 0, 1, 0,  //
-    1,  -2, 1, -3, 1, 0, 0, 0,  //
-    2,  -2, 2, -3, 1, 0, 0, 0,  //
-    -2, -3, 0, 1,  0, 0, 2, 0,  //
-    -2, -2, 0, 0,  2, 0, 1, 0,  //
-    0,  -2, 1, -2, 2, 0, 0, 0,  //
-    -2, 0,  1, -2, 2, 0, 1, 0,
+// 3496:1880: a workshop's base level, 50 x 8 -- by the current province
+// (DS:0x6CA6, 0-49; findings section 22) and then the goods type.
+constexpr std::array<int8_t, 400> kWorkshopBase = {
+    0, -2, 1, -3, 0, 0, 2, 0,  // province 0
+    0, -2, 2, -3, 0, 0, 1, 0,  // province 1
+    1, -2, 1, -3, 1, 0, 0, 0,  // province 2
+    2, -2, 2, -3, 1, 0, 0, 0,  // province 3
+    -2, -3, 0, 1, 0, 0, 2, 0,  // province 4
+    -2, -2, 0, 0, 2, 0, 1, 0,  // province 5
+    0, -2, 1, -2, 2, 0, 0, 0,  // province 6
+    -2, 0, 1, -2, 2, 0, 1, 0,  // province 7
+    0, -2, 1, -3, 2, 0, 0, 0,  // province 8
+    0, 0, -2, 2, 0, 1, 0, 0,  // province 9
+    0, -2, -2, 1, 0, 0, 1, 0,  // province 10
+    -2, 1, 0, 0, 1, 0, 0, -2,  // province 11
+    -2, 0, 1, -2, 0, 1, 0, -2,  // province 12
+    -2, 1, 0, 1, 2, -2, 0, -2,  // province 13
+    0, -2, 0, 0, 1, -2, 1, -2,  // province 14
+    -2, 1, 0, 0, 2, -2, 0, -2,  // province 15
+    -2, 0, 1, 0, 0, -3, 1, -3,  // province 16
+    -2, 2, 0, 0, 0, -3, 1, -3,  // province 17
+    -2, -2, 2, -2, 1, -2, 1, -2,  // province 18
+    -2, 0, 0, 0, 1, -3, 1, -3,  // province 19
+    -3, 2, 0, 2, -3, -3, 0, -3,  // province 20
+    -3, 2, 0, 0, -3, -3, 1, -3,  // province 21
+    -3, 1, 1, 2, -3, -3, 0, -3,  // province 22
+    -3, 0, 1, 0, -3, -3, 1, -3,  // province 23
+    1, 0, 1, 0, -2, -3, 1, -3,  // province 24
+    0, -3, 1, 1, 1, -3, 0, -3,  // province 25
+    0, -2, 2, -3, 1, -3, 1, -3,  // province 26
+    -3, -2, 0, -3, 1, -3, 1, -3,  // province 27
+    -2, -3, -2, -3, 2, -2, 2, -2,  // province 28
+    0, -2, -2, -2, 1, -2, 1, -2,  // province 29
+    0, -3, 2, -3, 0, -2, 1, 0,  // province 30
+    -2, -3, 1, -3, 0, -2, 2, 0,  // province 31
+    -2, -3, 0, -3, 1, -3, 1, -2,  // province 32
+    0, -3, 0, -3, 1, 0, -2, 1,  // province 33
+    -2, -3, 1, -3, 0, 0, -2, 1,  // province 34
+    -3, -3, 1, -2, 0, 0, -2, 1,  // province 35
+    -3, -3, -2, -2, 1, 0, -2, 1,  // province 36
+    -3, -2, -2, 1, 0, 0, -2, 2,  // province 37
+    0, -3, -2, -2, 1, 0, 1, 1,  // province 38
+    -2, -3, -3, -2, -3, 1, 0, 2,  // province 39
+    1, -3, 0, -3, 1, 0, 1, 1,  // province 40
+    0, -3, -3, -2, -2, 2, -2, 2,  // province 41
+    2, -3, -3, -3, -2, 2, 1, 2,  // province 42
+    0, -3, -3, -3, -2, 1, 1, 1,  // province 43
+    -2, -3, -2, -2, -2, 2, 2, 1,  // province 44
+    -3, -3, -3, 0, -2, 1, 2, 1,  // province 45
+    -3, -3, -3, 1, -2, 1, 1, 1,  // province 46
+    -3, -3, -3, 2, 0, 1, 0, 1,  // province 47
+    -3, -3, -2, 1, 1, 0, 1, 1,  // province 48
+    -2, -3, -2, -2, 1, -2, 2, -2,  // province 49
 };
 
 bool hostile(int type) { return type == 5 || type == 6 || type == 7 || type == 10; }
@@ -615,7 +658,7 @@ int workshop_level(CityState& state, int record) {
     set_table_word(t, r + 0x14, industry);
 
     const int base_index = gw(state, 0x6CA6) * 8 + goods;
-    int level = (base_index >= 0 && base_index < 64) ? kWorkshopBase[static_cast<size_t>(base_index)] : 0;
+    int level = (base_index >= 0 && base_index < 400) ? kWorkshopBase[static_cast<size_t>(base_index)] : 0;
     level += (static_cast<int16_t>(population) >> 4) - 4;
     level += gw(state, 0x6BF4) + table_word(t, r + 0x0E) + industry;
     const int m = gw(state, 0x6BFC);

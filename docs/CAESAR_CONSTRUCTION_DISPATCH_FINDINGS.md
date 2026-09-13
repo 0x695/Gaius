@@ -796,3 +796,47 @@ Every handler the service scan (`0x2BBBB`) reaches for a counted tile first bump
 - **`systems::month`** publishes the counts and rolls the targets at step 105, and wires the events to `construction`.
 - **Tests:** `test_service_events`, `test_month_event_roll`, and the scan counts in `test_save_corpus_simulation`.
 - **Not modeled:** the messages, and the fourth roll's consumer.
+
+## 22. The save's remaining tables (2026-09-13)
+
+The five save blocks still carried as opaque bytes are identified from the code that writes them.
+
+### 22.1 `table_10`: population milestones
+
+- **What sets the flags.** `0x27BA1` runs at step 80 (through `0x2CD10`). The first time `DS:0x6C0E` (population, 4 × units) exceeds 200, 1000, 2000, 4000, 8000, 12000, 16000 or 20000, it sets that milestone's flag, `DS:0x580C` + 0 to 7.
+- **What else it does.** It posts a message (`0x27ACE`, strings from `DS:0x6EA6`-`0x6EC4`). Bytes 8 and 9 are unused.
+- **The saves agree.** Flag 0 (200 people) is set in the three saves above 200 people, and in none of them is flag 1.
+
+### 22.2 `table_50` and the current province
+
+- **Picking a province.** `0x2898E` (reached from `0x290C1`) draws random numbers until `walk >> 1`, an index from 0 to 49, has a clear flag in `DS:0x581E`, and stores it in `DS:0x6CA4`.
+- **Making it current.** `0x289B0` (from `0x292D3`) copies it to `DS:0x6CA6` and sets its flag.
+- **Listing them.** `0xD229` walks a list at `3496:172C`, shows each flagged entry, and highlights the current one.
+- **In the saves.** All four have index 47 current and flag 47 set.
+- **What the index is.** That it is the province is a strong inference, from the ~50 province names in the executable. The list routine's strings would confirm it.
+- **A correction to 20.6.** The workshop base table `3496:1880` is 50 x 8 (it ends exactly where the edge-point table `3496:1A10` starts): one row of eight goods per province. `systems::actors` had embedded only the first 64 bytes, so with province 47 every workshop's base read 0. Fixed.
+
+### 22.3 The yearly histories
+
+The calendar (`0x29472`) calls the yearly routine `0x28238` when the year turns. That routine:
+
+1. divides `DS:0x6C00` and `0x6BFE` by 12;
+2. calls `0334:6CB1`, `0x282A1`, `0x283D3` and `0x284AA` (not read);
+3. zeroes `0x6C00` and `0x6BFE`, and copies `0x6C56` to `0x6C54`;
+4. writes the five histories below;
+5. runs `0x289C0`, which moves `0x6C4E`, `0x6C4A` and `0x6C52` into `0x6C4C`, `0x6C48` and `0x6C50` and nudges `0x6C4A` toward a population-based figure;
+6. calls `0x28C43`, `0x29023` and `0x2933B`.
+
+Each history is a circular buffer of (year - 1, value) word pairs. Its index word is advanced before each write, so record 0 stays empty until the buffer wraps:
+
+| Block | Writer | Records | Index | Value |
+|---|---|---|---|---|
+| `table_60_a` (`3496:01F0`) | `0x28853` | 15 | `DS:0x6B36` | `DS:0x6BC6` |
+| `table_60_b` (`3496:022C`) | `0x28892` | 15 | `DS:0x6B34` | `DS:0x6BC4` |
+| `table_60_c` (`3496:0268`) | `0x288D1` | 15 | `DS:0x6B32` | the treasury `DS:0x6CA2` |
+| `table_60_d` (`3496:02A4`) | `0x28910` | 15 | `DS:0x6B30` | population units `DS:0x6C10` |
+| `table_72` (`3496:02E0`) | `0x2894F` | 17 of 18 | `DS:0x6B38` | `DS:0x6BB6` |
+
+- **In the saves.** `CAESARUX.SAV`'s index 12 holds year -2 in every buffer, with population units 146, treasury 3144, `0x6BC6` 71, `0x6BC4` 76 and `0x6BB6` -81.
+- **Not established.** What `0x6BC6` and `0x6BC4` (both 0-100) and `0x6BB6` (negative) mean to the player. They are probably ratings and a balance, the data behind the Forum's history graphs.
+- **In Gaius.** `systems::month` writes the five records when the year turns. The routines before them aren't transcribed, so a value one of those would change is recorded as it stood.

@@ -38,7 +38,7 @@ cmake --build build -j
 GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
 ```
 
-Expect 2346/2346 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
+Expect 2352/2352 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
 
 ### What's implemented
 

@@ -62,7 +62,7 @@ Phases are designed so that RE work and engine work can proceed in parallel: whe
 
 **RE blockers (soft — affect fidelity, not the round-trip):**
 - Save **loader** still not reverse engineered. Real saves now confirm the block boundaries and the round trip, but fields the model carries as opaque bytes are still uninterpreted. Separately, the save *writer* has been read: `global_words_128`'s exact address order is `formats::save::kGlobalWordDsAddress` (see `docs/FORMATS.md`).
-- 480/120/720-byte save tables (and `table_50/8/10/60_a-d/72`, `final_state`) are still unidentified — they round-trip as opaque blobs, unmodeled, in `model::CityState`. **Mostly resolved 2026-09-13:** the save writer maps every block to its runtime address (`docs/FORMATS.md`). `table_480` holds the forum records, `table_120` the barracks, `table_720` the workshops and `table_8` the workshop count per goods type, and `final_state`'s words are named by address; `systems::construction` and `systems::actors` read and write them. Still uninterpreted: `table_50`, `table_10`, `table_60_a-d`, `table_72`, and what many global words mean to the player.
+- 480/120/720-byte save tables (and `table_50/8/10/60_a-d/72`, `final_state`) are still unidentified — they round-trip as opaque blobs, unmodeled, in `model::CityState`. **Mostly resolved 2026-09-13:** the save writer maps every block to its runtime address (`docs/FORMATS.md`). `table_480` holds the forum records, `table_120` the barracks, `table_720` the workshops and `table_8` the workshop count per goods type, and `final_state`'s words are named by address; `systems::construction` and `systems::actors` read and write them. Resolved the same day: `table_10` holds population milestone flags, `table_50` the provinces already given (with `DS:0x6CA6` the current one), and `table_60_a-d`/`table_72` yearly history buffers, which `systems::month` now appends to (findings section 22). Still open: what many global words mean to the player.
 
 ---
 
@@ -162,7 +162,7 @@ Every checklist item above is done. What remains is validation, a few untranscri
   - A later city, to exercise the higher housing grades.
 - **Simulation.**
   - The random draws of frames between steps at slower game speeds; Gaius draws once per step.
-- **Save model.** The save loader isn't reverse engineered, and `table_50`, `table_10`, `table_60_a-d` and `table_72` are uninterpreted.
+- **Save model.** The save loader isn't reverse engineered, and what several global words mean to the player isn't established (the histories' `DS:0x6BC6`, `0x6BC4` and `0x6BB6`; the economy's `0x6C04` and `0x6C06`).
 - **Build mode.**
   - A Forum-grade and workshop-goods chooser; the viewer places grade 0 and goods 0.
   - Construction costs. The forum cost table `3496:15A0` is located, but there's no treasury until Phase 7.

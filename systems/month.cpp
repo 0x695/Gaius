@@ -224,8 +224,42 @@ void run_economy(model::CityState& state) {
     model::set_global_word(state, 0x6C00, g(0x6C00) + g(0x6C04));
 }
 
+namespace {
+
+// 0x28853-0x2894F, in the yearly routine 0x28238: each history buffer's index
+// advances (wrapping at 15, or 17 for table_72) and the record there becomes
+// (last year, the value). Findings section 22.
+void record_history(model::CityState& state, int year) {
+    struct History {
+        std::vector<uint8_t>* table;
+        uint16_t index_ds;
+        int records;
+        uint16_t value_ds;
+    };
+    const History histories[] = {
+        {&state.table_60_a, 0x6B36, 15, 0x6BC6}, {&state.table_60_b, 0x6B34, 15, 0x6BC4},
+        {&state.table_60_c, 0x6B32, 15, 0x6CA2}, {&state.table_60_d, 0x6B30, 15, 0x6C10},
+        {&state.table_72, 0x6B38, 17, 0x6BB6},
+    };
+    for (const History& h : histories) {
+        int i = model::global_word(state, h.index_ds) + 1;
+        if (i >= h.records) i = 0;
+        model::set_global_word(state, h.index_ds, i);
+        const size_t o = static_cast<size_t>(i) * 4;
+        if (h.table->size() < o + 4) h.table->resize(o + 4, 0);
+        const int value = model::global_word(state, h.value_ds);
+        (*h.table)[o] = static_cast<uint8_t>((year - 1) & 0xFF);
+        (*h.table)[o + 1] = static_cast<uint8_t>(((year - 1) >> 8) & 0xFF);
+        (*h.table)[o + 2] = static_cast<uint8_t>(value & 0xFF);
+        (*h.table)[o + 3] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    }
+}
+
+}  // namespace
+
 void run_step(model::CityState& state, SimState& sim) {
     const int step = sim.step;
+    const int year_before = sim.year;
     run_step_impl(state.city, sim, &state);
     if (step == 101) {
         model::set_global_word(state, 0x6C10, sim.population_units);
@@ -236,6 +270,11 @@ void run_step(model::CityState& state, SimState& sim) {
     }
     model::set_global_word(state, 0x6C1C, sim.month);
     model::set_global_word(state, 0x6C32, sim.year);
+    // The calendar (0x29472) calls the yearly routine 0x28238 when the year
+    // turns. Only its history writes are modeled; 0x282A1, 0x283D3 and
+    // 0x284AA, which run before them and may change the recorded values, and
+    // the routines after them aren't read yet.
+    if (sim.year != year_before) record_history(state, sim.year);
 }
 
 void run_month(model::CityState& state, SimState& sim) {

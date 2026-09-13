@@ -118,9 +118,11 @@ struct CityState {
     // content. Their runtime addresses are known from the save writer
     // (docs/FORMATS.md): table_480 = DS:0x5BA4 forum records (30x16),
     // table_120 = DS:0x5B2C barracks records (10x12), table_720 =
-    // DS:0x585C workshop records (30x24), table_8 = workshops per goods, table_50/8/10 =
-    // DS:0x581E/5816/580C, table_60_a-d = 3496:01F0/022C/0268/02A4,
-    // table_72 = 3496:02E0, final_state = 34 globals.
+    // DS:0x585C workshop records (30x24), table_8 = DS:0x5816 workshops per goods, table_50 =
+    // DS:0x581E provinces already given, table_10 = DS:0x580C population
+    // milestones, table_60_a-d = 3496:01F0/022C/0268/02A4 and table_72 =
+    // 3496:02E0 yearly histories, final_state = 34 globals (dispatch findings
+    // section 22).
     std::vector<uint8_t> global_words_128;
     std::vector<uint8_t> table_480;
     std::vector<uint8_t> table_120;

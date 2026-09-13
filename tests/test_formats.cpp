@@ -1978,6 +1978,9 @@ void test_actors_workshop() {
         for (int x = 37; x <= 44; ++x) s.city.tile[y][x] = 0xCE;  // 16 cells x 6 units: 96 >> 4 = 6, -4 -> +2
     s.city.tile[39][40] = 0x36;
     CHECK(workshop_level(s, 0) == 6);  // 1 + 2 + 3 + 1 + 2 - 2 - 1
+    gaius::model::set_global_word(s, 0x6CA6, 47);  // province 47, as in the real saves: base -3
+    CHECK(workshop_level(s, 0) == 2);
+    gaius::model::set_global_word(s, 0x6CA6, 0);
     CHECK(get_word(t, 0x0C) == 96 && get_word(t, 0x14) == 2);
     run_spawners(s, gaius::systems::month::Random{}, 25);
     CHECK(get_word(t, 0x10) == 6 && get_word(t, 0x12) == 3);
@@ -2733,6 +2736,38 @@ void test_month_event_roll() {
     CHECK(sim.random.lfsr == expect.lfsr && sim.random.walk == expect.walk);
 }
 
+// 0x28238's history writes when the year turns (findings section 22).
+void test_month_yearly_history() {
+    std::printf("test_month_yearly_history (0x28853-0x2894F at the turn of the year)\n");
+    using namespace gaius::systems::month;
+    using gaius::model::global_word;
+    using gaius::model::set_global_word;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    set_global_word(*st, 0x6BC6, 7);
+    set_global_word(*st, 0x6BC4, 8);
+    set_global_word(*st, 0x6CA2, 900);
+    set_global_word(*st, 0x6C10, 11);
+    set_global_word(*st, 0x6BB6, -5);
+    set_global_word(*st, 0x6B38, 16);  // table_72's index wraps after 17 records
+    SimState sim;
+    sim.year = -3;
+    sim.month = 11;
+    sim.step = 105;
+    run_step(*st, sim);
+    CHECK(sim.year == -2 && global_word(*st, 0x6C32) == -2);
+    auto rec = [](const std::vector<uint8_t>& t, int i, int w) {
+        const size_t o = static_cast<size_t>(i) * 4 + static_cast<size_t>(w) * 2;
+        return o + 1 < t.size() ? static_cast<int>(static_cast<int16_t>(t[o] | (t[o + 1] << 8))) : 9999;
+    };
+    CHECK(global_word(*st, 0x6B36) == 1 && rec(st->table_60_a, 1, 0) == -3 && rec(st->table_60_a, 1, 1) == 7);
+    CHECK(rec(st->table_60_b, 1, 1) == 8 && rec(st->table_60_c, 1, 1) == 900 && rec(st->table_60_d, 1, 1) == 11);
+    CHECK(global_word(*st, 0x6B38) == 0 && rec(st->table_72, 0, 0) == -3 && rec(st->table_72, 0, 1) == -5);
+    run_step(*st, sim);  // not a new year: nothing more recorded
+    CHECK(global_word(*st, 0x6B36) == 1);
+}
+
 void test_save_corpus_simulation() {
     std::printf("test_save_corpus_simulation (reset_tick + dispatch reproduces saved A2C4 and C9D4 service bits)\n");
     std::string dir = test_assets_dir();
@@ -3118,6 +3153,7 @@ int main() {
     test_month_calendar_and_draws();
     test_month_growth_draws();
     test_month_event_roll();
+    test_month_yearly_history();
     test_month_state_from_saves();
     test_actors_spawn_and_release();
     test_actors_walk_road();

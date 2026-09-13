@@ -119,6 +119,9 @@ void run_economy(model::CityState& state);
 // words (DS:0x6C10, DS:0x6C0E) are stored and run_economy() runs, and its
 // growth and coverage bases feed the months after; month and year are written
 // back to DS:0x6C1C / DS:0x6C32.
+//
+// When the year turns it also appends last year's values to the save's five
+// history buffers (table_60_a-d, table_72; findings section 22).
 void run_step(model::CityState& state, SimState& sim);
 void run_month(model::CityState& state, SimState& sim);
 
