@@ -12,8 +12,11 @@
 //           per-row routine 0x2E209 draws one random number.
 //   100     reset_tick, and derive_network_flags in one month of 18
 //   101     population units (DS:0x6C10) and water
-//   102-105 the four quarter scans (service dispatch, 25 rows each); step
-//           105's last monthly routine, 0x2DF7D, draws four random numbers
+//   102-105 the four quarter scans (service dispatch, 25 rows each; the scan
+//           counters zero at 102). At step 105 the counts are published
+//           (DS:0x6BF0, 0x6BF2, 0x6BEA, 0x6BEC, 0x6BEE) and 0x2DF7D rolls next
+//           month's road-wear, collapse and fire targets with four random
+//           draws (see service::ServiceState).
 // then the calendar advances: month DS:0x6C1C wraps at 12 into year
 // DS:0x6C32, and the 18-month counter DS:0x6D9B wraps at 18.
 //
@@ -23,10 +26,9 @@
 //
 // Not modeled, each for a stated reason: the per-row routine 0x2CD10 and
 // the monthly routines (0x2E0BE,
-// 0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F, and 0x2DF7D's event rolls) aren't
+// 0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F) aren't
 // read yet; nor are the step-101 routine 0x28215, the yearly routine 0x28238
-// (not yet checked for random draws) or the 18-month routine 0x2D6F4. The
-// housing pass's 0xA8-0xB1 decay-and-spread routine also isn't modeled.
+// (not yet checked for random draws) or the 18-month routine 0x2D6F4. 
 //
 // The random draws. The land-value growth each housing row applies is
 // DS:0x6BF6 + (2EF9:0286 & 3) - 1, as a signed byte, and 2EF9:0286 only
@@ -72,6 +74,12 @@ struct SimState {
     int land_value_growth_base = 0;  // DS:0x6BF6
     int population_units = 0;        // DS:0x6C10
     int ticks = 0;                   // the frame counters DS:0x6D34-0x6D44, as one count
+    // 0x2DF7D rolls an event when the generator's walk exceeds its threshold:
+    // DS:0x6BE0 road wear, 0x6BE2 collapse, 0x6BE4 fire (saved global words).
+    // 99, never, unless read from a save. What sets them isn't traced.
+    int road_wear_threshold = 99;
+    int collapse_threshold = 99;
+    int fire_threshold = 99;
     Random random;
     service::ServiceState service;
 };

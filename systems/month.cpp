@@ -8,6 +8,7 @@
 
 #include "formats/save/save.hpp"
 #include "systems/actors.hpp"
+#include "systems/construction.hpp"
 #include "systems/housing.hpp"
 
 namespace gaius::systems::month {
@@ -46,10 +47,46 @@ SimState sim_state_from_save(const model::CityState& state) {
     sim.land_value_growth_base = saved_word(state, 0x6BF6);
     sim.population_units = saved_word(state, 0x6C10);
     sim.service.housing_coverage_base = saved_word(state, 0x6BF8);
+    sim.road_wear_threshold = saved_word(state, 0x6BE0);
+    sim.collapse_threshold = saved_word(state, 0x6BE2);
+    sim.fire_threshold = saved_word(state, 0x6BE4);
     return sim;
 }
 
 namespace {
+
+// 0x2DF7D's pick: draw; if the walk beats the threshold and there's anything
+// counted, halve the draw (a signed word, arithmetic shift) up to 16 times
+// until it is no more than the count. A negative result never matches.
+int roll_target(Random& random, int threshold, int count) {
+    random.advance();
+    if (random.walk <= threshold || count == 0) return -1;
+    int v = static_cast<int16_t>(static_cast<uint16_t>(random.draw));
+    for (int i = 0; i < 16; ++i) {
+        v = v >= 0 ? v / 2 : -((-v + 1) / 2);
+        if (v <= count) return v;
+    }
+    return -1;
+}
+
+// Step 105: publish the scan counts (0x2936A), then 0x2DF7D.
+void finish_scans(SimState& sim, model::CityState* state) {
+    service::ServiceState& s = sim.service;
+    if (state) {
+        model::set_global_word(*state, 0x6BF0, s.road_count);
+        model::set_global_word(*state, 0x6BF2, s.building_count);
+        model::set_global_word(*state, 0x6BEE, s.market_count / 4);
+        model::set_global_word(*state, 0x6BEA, s.industry_count / 16);
+        model::set_global_word(*state, 0x6BEC, s.school_count / 4);
+        model::set_global_word(*state, 0x6C88, -1);
+    }
+    s.road_wear_target = roll_target(sim.random, sim.road_wear_threshold, s.road_count);
+    s.collapse_target = roll_target(sim.random, sim.collapse_threshold, s.building_count);
+    s.fire_target = roll_target(sim.random, sim.fire_threshold, s.building_count);
+    // The fourth roll sets DS:0x6C88 from DS:0x6C8A against DS:0x6BDE, which
+    // isn't saved and whose consumer isn't traced: drawn, never picked.
+    roll_target(sim.random, 99, 0);
+}
 
 void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state) {
     // The main loop (0xFA13): a random draw every frame, then the frame
@@ -67,6 +104,11 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
         ctx.land_value_growth = static_cast<int8_t>(
             static_cast<uint8_t>(sim.land_value_growth_base + (sim.random.walk & 3) - 1));
         if (state) ctx.collapsed = &collapsed;
+        ctx.random = &sim.random;
+        ctx.spread_fire = [&](int x, int y, int direction) {
+            if (state) construction::burn(*state, sim.random, x, y, direction);
+            else construction::burn(city, sim.random, x, y, direction);
+        };
         housing::develop_row(city, step, ctx);
         if (state) {
             // The engine spawns each rioter inside the row; nothing in the row
@@ -82,13 +124,22 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
         sim.population_units = housing::population_units(city);
         service::apply_water(city);
     } else if (step <= 105) {
+        if (step == 102) service::reset_scan_counters(sim.service);
+        sim.service.on_event = [&](service::CityEvent event, int x, int y) {
+            if (event == service::CityEvent::Collapse) {
+                if (state) construction::demolish(*state, sim.random, x, y);
+                else construction::demolish(city, sim.random, x, y);
+            } else {
+                if (state) construction::burn(*state, sim.random, x, y);
+                else construction::burn(city, sim.random, x, y);
+            }
+        };
         const int first_row = (step - 102) * 25;
         for (int y = first_row; y < first_row + 25; ++y) {
             for (int x = 0; x < model::kCityW; ++x) service::dispatch_tile(city, sim.service, x, y);
         }
-        if (step == 105) {
-            for (int i = 0; i < 4; ++i) sim.random.advance();  // 0x2DF7D
-        }
+        sim.service.on_event = nullptr;  // it refers to this call's arguments
+        if (step == 105) finish_scans(sim, state);
     }
 
     // 0x29476, which the engine runs before each step: the same order of work.

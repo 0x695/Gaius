@@ -1596,7 +1596,7 @@ void test_construction_drag_rules() {
     for (int dy = 0; dy < 2; ++dy) {
         for (int dx = 0; dx < 2; ++dx) {
             expect.advance();
-            CHECK(f->city.tile[70 + dy][70 + dx] == 0xA7 + (expect.walk & 3));
+            CHECK(f->city.tile[70 + dy][70 + dx] == 0xA7 + 3 * (expect.walk & 3));
             CHECK(f->city.operational_state[70 + dy][70 + dx] == 0);
         }
     }
@@ -1694,7 +1694,7 @@ void test_construction_forum_and_workshop() {
     gaius::systems::month::Random random;
     // Demolish the goods-5 workshop from a non-anchor cell.
     CHECK(clear_area(*st, random, 42, 41));
-    CHECK(st->city.tile[40][40] >= 0xA7 && st->city.tile[40][40] <= 0xAA);
+    CHECK(st->city.tile[40][40] >= 0xA7 && st->city.tile[40][40] <= 0xB0 && (st->city.tile[40][40] - 0xA7) % 3 == 0);
     CHECK(global_word(*st, 0x6C9E) == 1 && st->table_8[5] == 0);
     CHECK(word(st->table_720, 8) == 0 && word(st->table_720, 0) == 0);
 
@@ -2019,7 +2019,7 @@ void test_actors_rioter_demolishes() {
     CHECK(global_word(s, 0x6C3C) == 3 && global_word(s, 0x6C84) == 2);
     gaius::systems::month::Random r;
     update(s, r, 1);
-    CHECK(s.city.tile[11][10] >= 0xA7 && s.city.tile[11][10] <= 0xAA);
+    CHECK(s.city.tile[11][10] >= 0xA7 && s.city.tile[11][10] <= 0xB0 && (s.city.tile[11][10] - 0xA7) % 3 == 0);
     CHECK(raw_byte(s, 0, field::kFacing) == 5);  // turned south-west past the house
 }
 
@@ -2557,6 +2557,100 @@ void test_save_corpus_globals() {
 // saves: systems::service checked against the game itself, not against
 // transcribed parameters. tools/sim_check prints the same comparison with
 // per-quarter and per-tile breakdowns when something doesn't match.
+// The scan counters and the events they trigger (0x2BC26 and its siblings,
+// 0x2C4EA, 0x2C525, 0x2C54E), and a burning tile (0x29624).
+void test_service_events() {
+    std::printf("test_service_events (scan counters, road wear, collapse, fire)\n");
+    using namespace gaius::systems;
+    using gaius::systems::service::CityEvent;
+    auto f = fresh();
+    for (int x = 10; x <= 12; ++x) f->city.tile[10][x] = 0x36;
+    f->svc.road_wear_target = 2;
+    for (int x = 10; x <= 12; ++x) service::dispatch_tile(f->city, f->svc, x, 10);
+    CHECK(f->city.tile[10][11] == 0x1D && f->city.tile[10][12] == 0x36);
+    CHECK(f->svc.road_count == 3 && f->svc.road_wear_target == -1);
+
+    std::vector<std::array<int, 3>> events;
+    f->svc.on_event = [&](CityEvent e, int x, int y) { events.push_back({static_cast<int>(e), x, y}); };
+    for (int x = 20; x <= 22; ++x) f->city.tile[20][x] = 0xC8;
+    f->city.tile[20][23] = 0xF4;  // a market isn't a counted building
+    f->svc.collapse_target = 1;
+    f->svc.fire_target = 3;
+    for (int x = 20; x <= 23; ++x) service::dispatch_tile(f->city, f->svc, x, 20);
+    CHECK(events.size() == 2);
+    if (events.size() == 2) {
+        CHECK(events[0] == (std::array<int, 3>{static_cast<int>(CityEvent::Collapse), 20, 20}));
+        CHECK(events[1] == (std::array<int, 3>{static_cast<int>(CityEvent::Fire), 22, 20}));
+    }
+    CHECK(f->svc.building_count == 3 && f->svc.market_count == 1);
+    CHECK(f->svc.collapse_target == -1 && f->svc.fire_target == -1);
+    f->svc.on_event = nullptr;
+
+    // 0x126BA: the building one cell north of (21,21) catches fire.
+    month::Random random;
+    construction::burn(f->city, random, 21, 21, 0);
+    const int burnt = f->city.tile[20][21];
+    CHECK(burnt == 0xA8 || burnt == 0xAB || burnt == 0xAE || burnt == 0xB1);
+
+    // 0x29624: a burning tile burns out when 028A is above 90...
+    f->city.tile[30][30] = 0xA8;
+    f->city.tile[30][31] = 0xC8;
+    month::Random r;
+    r.prev_low7 = 95;
+    int spreads = 0, spread_dir = -1, spread_x = -1, spread_y = -1;
+    housing::DevelopmentContext ctx;
+    ctx.random = &r;
+    ctx.spread_fire = [&](int x, int y, int d) {
+        ++spreads;
+        spread_dir = d;
+        spread_x = x;
+        spread_y = y;
+    };
+    housing::develop_row(f->city, 30, ctx);
+    CHECK(f->city.tile[30][30] == 0xA7 && r.prev_low7 == 127 && spreads == 0);
+    // ...and otherwise spreads to the neighbour the walk picks, if it's a building.
+    f->city.tile[30][30] = 0xA8;
+    r.prev_low7 = 10;
+    r.walk = 58;  // & 7 = 2: east
+    housing::develop_row(f->city, 30, ctx);
+    CHECK(f->city.tile[30][30] == 0xA8 && r.prev_low7 == 42);
+    CHECK(spreads == 1 && spread_dir == 2 && spread_x == 30 && spread_y == 30);
+}
+
+// 0x2DF7D at step 105: four draws, and a target picked by halving the draw
+// until it fits the count.
+void test_month_event_roll() {
+    std::printf("test_month_event_roll (0x2DF7D at step 105)\n");
+    using namespace gaius::systems::month;
+    auto f = fresh();
+    for (int x = 0; x < 100; ++x) f->city.tile[80][x] = 0xC8;
+    SimState sim;
+    sim.step = 105;
+    sim.collapse_threshold = 0;
+    Random expect = sim.random;
+    expect.advance();  // the frame's draw
+    expect.advance();  // road wear: threshold 99, never
+    expect.advance();  // collapse
+    int target = -1;
+    if (expect.walk > 0) {
+        int v = static_cast<int16_t>(static_cast<uint16_t>(expect.draw));
+        for (int i = 0; i < 16; ++i) {
+            v = v >= 0 ? v / 2 : -((-v + 1) / 2);
+            if (v <= 100) {
+                target = v;
+                break;
+            }
+        }
+    }
+    expect.advance();  // fire
+    expect.advance();  // the fourth roll
+    run_step(f->city, sim);
+    CHECK(sim.service.building_count == 100);
+    CHECK(target > 0 && sim.service.collapse_target == target);
+    CHECK(sim.service.road_wear_target == -1 && sim.service.fire_target == -1);
+    CHECK(sim.random.lfsr == expect.lfsr && sim.random.walk == expect.walk);
+}
+
 void test_save_corpus_simulation() {
     std::printf("test_save_corpus_simulation (reset_tick + dispatch reproduces saved A2C4 and C9D4 service bits)\n");
     std::string dir = test_assets_dir();
@@ -2596,6 +2690,15 @@ void test_save_corpus_simulation() {
         }
         CHECK(coverage_match == 10000);
         for (int b = 0; b < 6; ++b) CHECK(bit_match[b] == 10000);
+        // The scan counters against what the engine published at its last step 105.
+        using gaius::model::global_word;
+        std::printf("  %s: roads %d (saved %d), building cells %d (saved %d), markets/4 %d (%d), industry/16 %d (%d), "
+                    "schools/4 %d (%d)\n",
+                    n, f->svc.road_count, global_word(*saved, 0x6BF0), f->svc.building_count, global_word(*saved, 0x6BF2),
+                    f->svc.market_count / 4, global_word(*saved, 0x6BEE), f->svc.industry_count / 16,
+                    global_word(*saved, 0x6BEA), f->svc.school_count / 4, global_word(*saved, 0x6BEC));
+        CHECK(f->svc.road_count == global_word(*saved, 0x6BF0));
+        CHECK(f->svc.building_count == global_word(*saved, 0x6BF2));
     }
 }
 
@@ -2927,10 +3030,12 @@ int main() {
     test_construction_drag_rules();
     test_construction_forum_and_workshop();
     test_service_fountain_supply();
+    test_service_events();
     test_construction_road_rebuild_real_saves();
     test_month_random_sequence();
     test_month_calendar_and_draws();
     test_month_growth_draws();
+    test_month_event_roll();
     test_month_state_from_saves();
     test_actors_spawn_and_release();
     test_actors_walk_road();

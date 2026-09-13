@@ -249,7 +249,8 @@ bool place_plaza(model::CityMap& city, int x, int y);
 // 0x5E/0x72 -> 0x56, 0x86/0x8E -> 0x5A); 0x27-0x49 and 0x92-0xC9 become open
 // ground 0x1D; a reservoir 0xA4 restores the tile it stored in 7BB4; and a
 // building (>= 0xCA) is demolished whole (0x124F8): from its anchor, every
-// footprint cell becomes rubble 0xA7 + (random & 3), one generator draw per
+// footprint cell becomes rubble 0xA7 + 3 * (random & 3) -- 0xA7, 0xAA, 0xAD or
+// 0xB0 -- one generator draw per
 // cell. This grid-only version leaves the building record tables alone; the
 // model::CityState overload below also removes the record.
 bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
@@ -290,6 +291,18 @@ bool clear_area(model::CityState& state, month::Random& random, int x, int y);
 // workshop or barracks anchored there, then turns the building's footprint
 // into rubble. Invaders and rioters (systems::actors) call it on what blocks
 // them -- houses included, which Clear Area would instead clear to ground.
-void demolish(model::CityState& state, month::Random& random, int x, int y);
+void demolish(model::CityState& state, month::Random& random, int x, int y, int direction = 8);
+
+// Both routines take a direction: (x, y) moves one cell that way first
+// (facings 0-7 clockwise from north; 8 stays), clamped at the top and left
+// edges. The grid-only versions leave the record tables alone.
+void demolish(model::CityMap& city, month::Random& random, int x, int y, int direction = 8);
+
+// 0x126BA: as demolish, but the footprint catches fire: tiles 0xA8 + 3 *
+// (random & 3), i.e. 0xA8, 0xAB, 0xAE or 0xB1, which the housing pass burns
+// out or spreads (housing::develop_row). Buildings collapse and burn through
+// the month's events (service::ServiceState) and spreading fire.
+void burn(model::CityState& state, month::Random& random, int x, int y, int direction = 8);
+void burn(model::CityMap& city, month::Random& random, int x, int y, int direction = 8);
 
 }  // namespace gaius::systems::construction

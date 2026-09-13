@@ -45,6 +45,8 @@
 
 #pragma once
 
+#include <functional>
+
 #include <array>
 #include <cstdint>
 
@@ -94,6 +96,9 @@ inline const std::array<C9D4BitInfo, 8> kC9D4BitTable = {{
 }};
 
 // Runtime-only per-tick state -- not part of model::CityState or the save.
+// The two events a building handler can hand to its caller (see ServiceState).
+enum class CityEvent { Collapse, Fire };
+
 struct ServiceState {
     ServiceState();
 
@@ -108,7 +113,36 @@ struct ServiceState {
     // save+0xD2) and holds 2 in all four real saves captured so far; what sets
     // it is not traced. The default is that observed value, not a derived one.
     int housing_coverage_base = 2;
+
+    // The scan counters routine 0x2BBBB's handlers bump, zeroed at step 102
+    // (reset_scan_counters): DS:0x6E0C road pieces 0x36-0x40, DS:0x6E0A
+    // building cells (0xC8-0xE8, 0xEA-0xF3, 0xF5-0xF6), DS:0x6E08 markets,
+    // DS:0x6E06 heavy industry, DS:0x6E04 schools and hospitals. They count
+    // cells, not buildings; step 105 publishes them (systems::month).
+    int road_count = 0;
+    int building_count = 0;
+    int market_count = 0;
+    int industry_count = 0;
+    int school_count = 0;
+
+    // The month's event targets, rolled by 0x2DF7D at step 105; -1 is none.
+    // When a counter reaches its target, that cell's handler runs the event
+    // instead of its usual effect, and the target resets to -1:
+    //   DS:0x6D02  the road piece wears back to open ground 0x1D (0x2C4EA)
+    //   DS:0x6D00  the building collapses into rubble (0x2C525)
+    //   DS:0x6CFE  the building catches fire (0x2C54E)
+    int road_wear_target = -1;
+    int collapse_target = -1;
+    int fire_target = -1;
+
+    // Collapse and fire demolish a whole building and draw random numbers, so
+    // the caller carries them out (systems::month wires in
+    // construction::demolish / burn). Without a handler they don't happen.
+    std::function<void(CityEvent event, int x, int y)> on_event;
 };
+
+// Step 102's zeroing of the scan counters (0x2936A).
+void reset_scan_counters(ServiceState& service);
 
 // Routine 0x2C8D3 (disassembled). For every cell: C9D4 &= 0x12, A2C4 = 0,
 // coverage_ceiling = 0x3F. Land value (54A4) is NOT touched -- it is never

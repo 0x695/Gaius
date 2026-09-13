@@ -46,8 +46,11 @@
 
 #pragma once
 
+#include <functional>
 #include <utility>
 #include <vector>
+
+#include "systems/month.hpp"
 
 #include <array>
 #include <cstdint>
@@ -87,6 +90,13 @@ struct DevelopmentContext {
     // Where set, each house that collapses (land_value_allows) is appended, so
     // the caller can spawn its rioter (actors::spawn_rioter) after the row.
     std::vector<std::pair<int, int>>* collapsed = nullptr;
+    // The generator, for the burning tiles 0xA8/AB/AE/B1 (0x29624); without it
+    // they stay as they are.
+    month::Random* random = nullptr;
+    // Called when a fire spreads: the building one cell from (x, y) in
+    // `direction` catches fire (construction::burn). Without it fires don't
+    // spread.
+    std::function<void(int x, int y, int direction)> spread_fire;
 };
 
 // Routine 0x294CF for one row -- see the file header.

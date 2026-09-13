@@ -220,9 +220,45 @@ void apply_temple_stage(model::CityMap& city, ServiceState& service, int x, int 
     }
 }
 
+void reset_scan_counters(ServiceState& service) {
+    service.road_count = 0;
+    service.building_count = 0;
+    service.market_count = 0;
+    service.industry_count = 0;
+    service.school_count = 0;
+}
+
 void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y) {
     const uint8_t tile = city.tile[y][x];
     if (tile <= 0x35) return;  // routine 0x2BBBB never dispatches these
+
+    // What every counted handler does first (0x2BC26, 0x2BDA2 and their
+    // siblings): bump its counters, then run a due event in place of its
+    // usual effect.
+    if (tile >= 0x36 && tile <= 0x40) {
+        if (++service.road_count == service.road_wear_target) {
+            city.tile[y][x] = 0x1D;  // 0x2C4EA
+            city.operational_state[y][x] = 0;
+            service.road_wear_target = -1;
+            return;
+        }
+    } else if (tile == 0xF4) {
+        ++service.market_count;
+    } else if ((tile >= 0xC8 && tile <= 0xF3 && tile != 0xE9) || tile == 0xF5 || tile == 0xF6) {
+        if (tile == 0xEC || tile == 0xED) ++service.school_count;
+        if (tile == 0xF3) ++service.industry_count;
+        const int n = ++service.building_count;
+        if (service.on_event && n == service.collapse_target) {
+            service.on_event(CityEvent::Collapse, x, y);
+            service.collapse_target = -1;
+            return;
+        }
+        if (service.on_event && n == service.fire_target) {
+            service.on_event(CityEvent::Fire, x, y);
+            service.fire_target = -1;
+            return;
+        }
+    }
     switch (tile) {
         case 0x36: case 0x37: case 0x38: case 0x39: case 0x3A: case 0x3B:
             apply_tile_36_3b(city, service, x, y);
@@ -405,6 +441,7 @@ void apply_water(model::CityMap& city) {
 }
 
 void rebuild_services(model::CityMap& city, ServiceState& service) {
+    reset_scan_counters(service);
     reset_tick(city, service);
     apply_water(city);
     for (int y = 0; y < model::kCityH; ++y)

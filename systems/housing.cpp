@@ -411,6 +411,28 @@ int develop_building(model::CityMap& city, int x, int y, uint8_t flags, const De
     }
 }
 
+// 0x29624: a burning tile. When the generator's previous low 7 bits
+// (2EF9:028A) exceed 90 it burns out a stage (0xA8 -> 0xA7, 0xAB -> 0xAA, ...);
+// otherwise, away from the map edge, the fire spreads to the neighbour
+// 3496:1DE4[random & 7] if that is a building. Both paths first add 32 to
+// 028A, mod 128.
+static void burning_tile(model::CityMap& city, int col, int row, const DevelopmentContext& ctx) {
+    if (!ctx.random) return;
+    month::Random& r = *ctx.random;
+    if (r.prev_low7 > 90) {
+        r.prev_low7 = (r.prev_low7 + 32) & 0x7F;
+        --city.tile[row][col];
+        return;
+    }
+    if (row == 0 || row >= 99 || col == 0 || col >= 99) return;
+    r.prev_low7 = (r.prev_low7 + 32) & 0x7F;
+    static constexpr int kDx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+    static constexpr int kDy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+    const int d = r.walk & 7;
+    if (city.tile[row + kDy[d]][col + kDx[d]] < 0xC8) return;
+    if (ctx.spread_fire) ctx.spread_fire(col, row, d);
+}
+
 void develop_row(model::CityMap& city, int row, const DevelopmentContext& ctx) {
     for (int col = 0; col < kCityW; ++col) {
         const uint8_t t = city.tile[row][col];
@@ -418,7 +440,7 @@ void develop_row(model::CityMap& city, int row, const DevelopmentContext& ctx) {
             city.land_value[row][col] = 0;
             if (t == 0xB9 || t == 0xBA) fountain_grow(city, col, row, ctx);
             else if (t >= 0xBB && t <= 0xBD) fountain_shrink(city, col, row);
-            // 0xA8/AB/AE/B1 (0x29624): random decay and spread -- not modeled.
+            else if (t == 0xA8 || t == 0xAB || t == 0xAE || t == 0xB1) burning_tile(city, col, row, ctx);
             continue;
         }
         if (t < 0xD7) {

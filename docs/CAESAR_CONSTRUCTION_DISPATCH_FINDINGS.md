@@ -314,7 +314,7 @@ A scan of the whole table, bounded at each handler's true end, found no other DS
 ### 15.6 Still open
 
 - Who calls `0x2DA7E` (the -8..+50 land-value step), and so how land value is actually bounded over time. -- answered in section 16: the housing development pass.
-- The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from.
+- The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from. **The routines are read in section 21**; where the thresholds come from is still open.
 - The housing grade-change routine; the identities of `0x94`/`95`, `0xA2`-`B2`, `0xB9`/`BB`/`BC` and `0xF5`/`F6`; what sets `C9D4.01` and `DS:0x6BF8`. -- the grade-change routine is answered in section 16.
 - What reads the C9D4 service bits.
 
@@ -341,7 +341,7 @@ Across the four saves the month reads 9, 1, 4, 6 and the year -11, -7, -2, -1 --
 
 For each cell of its row:
 
-- **Below `0xC8`:** land value is zeroed. A jump table at `0x295F8` sends `0xB9`/`0xBA` to `0x2BACE` (coverage > 10 and population > 50 -> `0xBD`, or `0xBB` if watered), `0xBB`-`0xBD` to `0x2BB48` (coverage < 10 -> `0xBA`, or `0xB9` if watered), and `0xA8`/`AB`/`AE`/`B1` to `0x29624`, which either decrements the tile or picks one of eight neighbours from a table at `3496:1DE4` and, if that neighbour is housing, calls `11C6:0A5A` -- both driven by the RNG in segment `2EF9`.
+- **Below `0xC8`:** land value is zeroed. A jump table at `0x295F8` sends `0xB9`/`0xBA` to `0x2BACE` (coverage > 10 and population > 50 -> `0xBD`, or `0xBB` if watered), `0xBB`-`0xBD` to `0x2BB48` (coverage < 10 -> `0xBA`, or `0xB9` if watered), and `0xA8`/`AB`/`AE`/`B1` to `0x29624`, which either decrements the tile or picks one of eight neighbours from a table at `3496:1DE4` and, if that neighbour is housing, calls `11C6:0A5A` -- both driven by the RNG in segment `2EF9`. Section 21.2 reads it: these are burning tiles.
 - **`0xC8`-`0xD6`:** one `evolve_land_value` step with growth `DS:0x6BF6 + (random & 3) - 1`, drawn once per row. **`0xD7` and up:** land value zeroed.
 - **Then**, if the cell's `7BB4 & 0x0F` is 0, the pass copies its C9D4 byte to `DS:0x6DC7` and calls `DS:1212[tile]`. Handlers that cover extra columns advance the column counter themselves.
 
@@ -425,7 +425,7 @@ State at `2EF9:0286`-`028E`. The image's initial values are 55, 49, 12, 12, 55, 
 
 The generator has 45 call sites. In the monthly simulation path five draw each month (and the main loop draws once per frame besides -- section 20.1):
 - `0x2E209`, only at step 80 — after that step's housing row, so rows 0-80 share one growth value and rows 81-99 the next.
-- `0x2DF7D`, four draws at step 105. Each one rolls `0286` against a threshold (`DS:0x6BE0`, `0x6BE2`, `0x6BE4`, `0x6BDE`) and, if it passes and a count is nonzero, halves `028C` until it fits that count to pick a target. That looks like the monthly event roll, but it isn't modeled.
+- `0x2DF7D`, four draws at step 105. Each one rolls `0286` against a threshold (`DS:0x6BE0`, `0x6BE2`, `0x6BE4`, `0x6BDE`) and, if it passes and a count is nonzero, halves `028C` until it fits that count to pick a target. It is the monthly event roll, read in section 21.1.
 
 The other call sites are terrain generation (`0x6F0D`-`0x7079`), UI screens (`0x29158`, `0x2922F`, `0x27DFB`) and similar. `0x2898E` is only reached from `0x290C1`, and whether the yearly routine `0x28238` draws is still unchecked. Because terrain generation and screens draw too, a real session's sequence can't be recovered from a save.
 
@@ -466,7 +466,7 @@ The exact sets are data in `systems/construction.cpp` (`kRoadRules`, `kWallRules
 - **Clear Area (`0x12B79`)** reverts crossings to water (`0x82`/`0x8A` → `0x4A`, `0x5E`/`0x72` → `0x56`, `0x86`/`0x8E` → `0x5A`). It turns `0x27`-`0x49` into `0x1D` (clearing `7BB4`) and `0x92`-`0xC9` into `0x1D`, and restores a reservoir's (`0xA4`) stored tile from its `7BB4`. On buildings (`≥ 0xCA`) it calls **`0x124F8(col, row, 8)`**:
   - It walks to the building's anchor through the `7BB4` part bits.
   - It takes the footprint size from `3496:14B2`.
-  - Each footprint cell, in row order, becomes rubble `0xA7 + (2EF9:0286 & 3)` after one random draw, with `7BB4` zeroed.
+  - Each footprint cell, in row order, becomes rubble `0xA7 + 3 x (2EF9:0286 & 3)` -- `0xA7`, `0xAA`, `0xAD` or `0xB0` -- after one random draw, with `7BB4` zeroed. (Corrected in section 21.2: this first read `0xA7 + (0286 & 3)`, because the lifter used then hid an `imul`.)
   - Temples (`0xE0`-`0xE7`), `0xF5`/`0xF6` and `0xEF` are first removed from runtime tables of 16-, 24- and 12-byte records (`DS:5BA4`, `DS:585C`, `DS:5B2C`, 30 entries each) by `0x1287C`, `0x12963` and `0x12A94`.
   - Those record sizes × 30 are 480, 720 and 360 bytes. The first two match the save's unidentified `table_480` and `table_720`: very likely the same data (STRONG INFERENCE).
   - This isn't modeled.
@@ -742,3 +742,57 @@ Every city type's handler does the same three things:
   - what `DS:0x6CA6`, `DS:0x6BFC`, `DS:0x6C3C` and `DS:0x6C84` mean to the player;
   - what sends an invasion;
   - the province states.
+
+## 21. Fire, collapse and road wear (2026-09-13)
+
+### 21.1 The scan counters and the month's events
+
+Every handler the service scan (`0x2BBBB`) reaches for a counted tile first bumps a counter. The dispatcher zeroes the counters at step 102 and publishes them at step 105:
+
+| Counter | Tiles | Published as |
+|---|---|---|
+| `DS:0x6E0C` | road pieces `0x36`-`0x40` | `DS:0x6BF0` |
+| `DS:0x6E0A` | building cells `0xC8`-`0xE8`, `0xEA`-`0xF3`, `0xF5`-`0xF6` | `DS:0x6BF2` |
+| `DS:0x6E08` | markets `0xF4` | `DS:0x6BEE` = count / 4 |
+| `DS:0x6E06` | heavy industry `0xF3` | `DS:0x6BEA` = count / 16 |
+| `DS:0x6E04` | schools and hospitals `0xEC`/`0xED` | `DS:0x6BEC` = count / 4 |
+
+- **They count cells, not buildings.** A 4x4 heavy industry adds 16, which is why the published words divide.
+- **Checked against the saves.** One reset and scan over each real save reproduces all five published words, in all four saves (`test_save_corpus_simulation`). In `CAESARVX.SAV` that's 141 road pieces, 251 building cells, 3 markets, 2 heavy industries and 2 schools or hospitals.
+- **The events.** Straight after the counter, the handler compares it with the month's targets. A handler that runs an event skips its usual effect.
+  - **Road wear.** A road piece whose count equals `DS:0x6D02` runs `0x2C4EA`: tile `0x1D`, `7BB4` 0, message `0x27CBA`, target -1.
+  - **Collapse.** A building cell whose count equals `DS:0x6D00` runs `0x2C525`: `0x124F8`(column, row, 8) demolishes the building, message `0x27D58`, target -1.
+  - **Fire.** Otherwise, a count equal to `DS:0x6CFE` runs `0x2C54E`: `0x126BA`(column, row, 8) sets the building on fire, message `0x27D09`, target -1.
+  - Markets are counted but never collapse or burn. Each message has its own cooldown of 5 (`DS:0x6C66`, `0x6C68`, `0x6C6A`).
+- **The roll, `0x2DF7D`**, is the last routine of step 105.
+  1. It sets the three targets and `DS:0x6C88` to -1.
+  2. Then, four times, it draws. If the walk `0286` exceeds a threshold and the count is nonzero, it takes the draw `028C` and shifts it right (arithmetic) up to 16 times until it's no more than the count; that value is the target.
+  3. The four rolls:
+     - road wear: threshold `DS:0x6BE0`, count `0x6BF0`;
+     - collapse: threshold `0x6BE2`, count `0x6BF2`;
+     - fire: threshold `0x6BE4`, count `0x6BF2`;
+     - the fourth: threshold `0x6BDE`, count `0x6C8A`, result in `0x6C88`.
+  4. The first three thresholds are saved global words. What sets them, and what reads `0x6C88`, isn't traced.
+
+### 21.2 Demolition, fire and burning tiles
+
+- **`0x124F8` and `0x126BA` have the same shape.**
+  1. Step one cell in the direction argument (facings 0-7 clockwise from north; 8 stays), clamped at 0.
+  2. Walk to the building's anchor and remove its forum, workshop or barracks record.
+  3. Draw once per footprint cell, and set the cell to base + 3 x (walk & 3), with `7BB4` zeroed.
+
+  `0x124F8` uses base `0xA7`, giving rubble `0xA7`, `0xAA`, `0xAD` or `0xB0`. `0x126BA` uses base `0xA8`, giving fire `0xA8`, `0xAB`, `0xAE` or `0xB1`, and plays sound 3.
+- **A correction to 18.3.** Section 18.3 read the rubble as `0xA7 + (walk & 3)`, because the lifter used then hid `imul dx`. Gaius's Clear Area had written `0xA7`-`0xAA`; it's fixed.
+- **Burning tiles, `0x29624`,** are reached from the housing pass through the jump table at `0x295F8`.
+  - **Burning out.** If `028A` (the previous draw's low 7 bits) exceeds 90, it adds 32 to `028A` (mod 128) and decrements the tile, so the fire drops to the rubble tile below it.
+  - **Spreading.** Otherwise, unless the cell is on the map's outer rows or columns, it adds 32 to `028A` and picks the neighbour `3496:1DE4`[walk & 7] (north, then clockwise). If that holds a building (`0xC8` and up), `0x126BA`(column, row, direction) sets it on fire.
+- **Rubble and fire tiles** (`0xA2`, `0xA3`, `0xA7`-`0xB2`) get the negative-coverage handler (section 15), and invaders and rioters can walk over the rubble (section 20.3).
+
+### 21.3 In Gaius
+
+- **`service::ServiceState`** holds the counters, the targets and an `on_event` callback; `dispatch_tile` bumps the counters and runs due events.
+- **`construction::demolish` and `burn`** come in grid and whole-save versions, each with a direction.
+- **`housing::DevelopmentContext`** carries `random` and `spread_fire`, which drive the burning tiles.
+- **`systems::month`** publishes the counts and rolls the targets at step 105, and wires the events to `construction`.
+- **Tests:** `test_service_events`, `test_month_event_roll`, and the scan counts in `test_save_corpus_simulation`.
+- **Not modeled:** the messages, and the fourth roll's consumer.

@@ -474,9 +474,21 @@ bool place_plaza(model::CityMap& city, int x, int y) {
 
 namespace {
 
-// 0x124F8 with direction 8 (none): walk to the anchor, then turn the
-// footprint to rubble.
-void demolish_cells(model::CityMap& city, month::Random& random, int x, int y) {
+// The head of 0x124F8 / 0x126BA: one cell in `direction`, clamped at 0.
+void step_toward(int direction, int* x, int* y) {
+    const int d = direction;
+    if (d == 0 || d == 1 || d == 7) --*y;
+    if (d == 4 || d == 3 || d == 5) ++*y;
+    if (d == 6 || d == 5 || d == 7) --*x;
+    if (d == 2 || d == 1 || d == 3) ++*x;
+    if (*x < 0) *x = 0;
+    if (*y < 0) *y = 0;
+}
+
+// The body of 0x124F8 (base 0xA7, rubble) and 0x126BA (base 0xA8, fire):
+// walk to the anchor, then turn the footprint into base + 3 * (random & 3),
+// one generator draw per cell.
+void wreck_cells(model::CityMap& city, month::Random& random, int x, int y, int base) {
     while (x > 0 && (city.operational_state[y][x] & 0x03)) --x;
     while (y > 0 && (city.operational_state[y][x] & 0x0C)) --y;
     const int index = city.tile[y][x] - 0xC8;
@@ -487,7 +499,7 @@ void demolish_cells(model::CityMap& city, month::Random& random, int x, int y) {
         for (int dx = 0; dx < w; ++dx) {
             random.advance();
             if (!in_grid(x + dx, y + dy)) continue;
-            city.tile[y + dy][x + dx] = static_cast<uint8_t>(0xA7 + (random.walk & 3));
+            city.tile[y + dy][x + dx] = static_cast<uint8_t>(base + 3 * (random.walk & 3));
             city.operational_state[y + dy][x + dx] = 0;
         }
     }
@@ -514,7 +526,7 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y) {
     } else if (t >= 0x92 && t <= 0xC9) {
         t = 0x1D;
     } else if (t >= 0xCA) {
-        demolish_cells(city, random, x, y);
+        wreck_cells(city, random, x, y, 0xA7);
     } else {
         return false;
     }
@@ -661,10 +673,28 @@ bool clear_area(model::CityState& state, month::Random& random, int x, int y) {
     return clear_area(state.city, random, x, y);
 }
 
-void demolish(model::CityState& state, month::Random& random, int x, int y) {
+void demolish(model::CityState& state, month::Random& random, int x, int y, int direction) {
+    step_toward(direction, &x, &y);
     if (!in_grid(x, y)) return;
     remove_record(state, x, y);
-    demolish_cells(state.city, random, x, y);
+    wreck_cells(state.city, random, x, y, 0xA7);
+}
+
+void demolish(model::CityMap& city, month::Random& random, int x, int y, int direction) {
+    step_toward(direction, &x, &y);
+    if (in_grid(x, y)) wreck_cells(city, random, x, y, 0xA7);
+}
+
+void burn(model::CityState& state, month::Random& random, int x, int y, int direction) {
+    step_toward(direction, &x, &y);
+    if (!in_grid(x, y)) return;
+    remove_record(state, x, y);
+    wreck_cells(state.city, random, x, y, 0xA8);
+}
+
+void burn(model::CityMap& city, month::Random& random, int x, int y, int direction) {
+    step_toward(direction, &x, &y);
+    if (in_grid(x, y)) wreck_cells(city, random, x, y, 0xA8);
 }
 
 }  // namespace gaius::systems::construction
