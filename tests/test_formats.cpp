@@ -9,6 +9,7 @@
 //
 // Run with:  GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./gaius_tests
 
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1166,6 +1167,17 @@ void test_pal256_expand_math() {
     uint8_t expected_b = static_cast<uint8_t>((16 << 2) | (16 >> 4));
     CHECK(pal.colors[1].g == expected_g);
     CHECK(pal.colors[1].b == expected_b);
+
+    // A channel byte above 63 isn't a 6-bit DAC value: rejected, not masked.
+    buf[767] = 64;
+    { std::ofstream out(tmp, std::ios::binary); out.write(reinterpret_cast<char*>(buf.data()), buf.size()); }
+    bool threw = false;
+    try {
+        pal256::load(tmp);
+    } catch (const FormatError&) {
+        threw = true;
+    }
+    CHECK(threw);
     fs::remove(tmp);
 }
 
@@ -1289,6 +1301,66 @@ void test_vpx_golden_image() {
 
     std::printf("  pixel mismatches: %zu / %zu\n", mismatches, total);
     CHECK(mismatches == 0);
+}
+
+// .256 against real files. There's no independent golden image for a
+// .256-paired picture, so this checks the decoder against the one palette
+// format that has one: PANEL1 and SHADE ship as both .256 and .P32 (proven by
+// test_vpx_golden_image). Compared at 6-bit DAC level -- a .P32 nibble times 4
+// -- since that's what the VGA card receives.
+void test_pal256_corpus() {
+    std::printf("test_pal256_corpus (all .256 files; PANEL1/SHADE vs .P32; PANEL1.VPX through both)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+
+    int found = 0;
+    for (const char* name : {"IMPRLOGO", "NEWFORUM", "PANEL1", "ROME1", "SHADE", "TEMPLE", "TITLE3", "WAR2"}) {
+        fs::path p = fs::path(dir) / (std::string(name) + ".256");
+        if (!fs::exists(p)) continue;
+        ++found;
+        bool loaded = true;
+        try {
+            CHECK(pal256::load(p.string()).filled_count == 256);
+        } catch (const FormatError& e) {
+            std::fprintf(stderr, "  %s\n", e.what());
+            loaded = false;
+        }
+        CHECK(loaded);
+    }
+    std::printf("  (%d/8 .256 files found)\n", found);
+    CHECK(found > 0);
+
+    auto dac6 = [](const RGB& c) { return std::array<int, 3>{c.r >> 2, c.g >> 2, c.b >> 2}; };
+    auto p32_dac6 = [](const RGB& c) { return std::array<int, 3>{c.r / 17 * 4, c.g / 17 * 4, c.b / 17 * 4}; };
+
+    // PANEL1: all 32 entries agree. SHADE: entries 0-19 agree; 20-31 are a
+    // different colour ramp in each file.
+    for (const auto& [name, agree] : {std::pair<const char*, int>{"PANEL1", 32}, {"SHADE", 20}}) {
+        fs::path p256 = fs::path(dir) / (std::string(name) + ".256");
+        fs::path p32p = fs::path(dir) / (std::string(name) + ".P32");
+        if (!fs::exists(p256) || !fs::exists(p32p)) continue;
+        Palette a = pal256::load(p256.string());
+        Palette b = p32::load(p32p.string());
+        int same = 0;
+        for (int i = 0; i < agree; ++i) same += dac6(a.colors[i]) == p32_dac6(b.colors[i]);
+        std::printf("  %s: %d/%d entries match the .P32\n", name, same, agree);
+        CHECK(same == agree);
+    }
+
+    // PANEL1.VPX, the real bottom control panel, rendered through both palettes.
+    fs::path vpx_path = fs::path(dir) / "PANEL1.VPX";
+    if (fs::exists(vpx_path) && fs::exists(fs::path(dir) / "PANEL1.P32") && fs::exists(fs::path(dir) / "PANEL1.256")) {
+        vpx::DecodeResult img = vpx::decode(vpx_path.string());
+        Palette a = pal256::load((fs::path(dir) / "PANEL1.256").string());
+        Palette b = p32::load((fs::path(dir) / "PANEL1.P32").string());
+        size_t total = static_cast<size_t>(img.image.width) * img.image.height, mismatches = 0;
+        for (size_t i = 0; i < total; ++i) {
+            const uint8_t idx = img.image.pixels[i];
+            if (idx >= 32 || dac6(a.colors[idx]) != p32_dac6(b.colors[idx])) ++mismatches;
+        }
+        std::printf("  PANEL1.VPX pixel mismatches, .256 vs .P32: %zu / %zu\n", mismatches, total);
+        CHECK(mismatches == 0);
+    }
 }
 
 void test_pl8_corpus_sanity() {
@@ -1849,6 +1921,7 @@ int main() {
     test_format_errors_are_thrown_not_swallowed();
     test_empire2_corpus_roundtrip();
     test_vpx_golden_image();
+    test_pal256_corpus();
     test_pl8_corpus_sanity();
     test_save_corpus_real();
     test_save_corpus_globals();

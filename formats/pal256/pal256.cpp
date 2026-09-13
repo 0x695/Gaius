@@ -27,10 +27,13 @@ Palette load(const std::string& path) {
 
     Palette pal;
     for (int i = 0; i < 256; ++i) {
-        uint8_t r6 = buf[i * 3 + 0] & 0x3F;
-        uint8_t g6 = buf[i * 3 + 1] & 0x3F;
-        uint8_t b6 = buf[i * 3 + 2] & 0x3F;
-        pal.colors[i] = RGB{expand6(r6), expand6(g6), expand6(b6)};
+        for (int c = 0; c < 3; ++c) {
+            if (buf[i * 3 + c] > 63) {
+                throw FormatError("pal256: color " + std::to_string(i) + " has channel value " +
+                                  std::to_string(buf[i * 3 + c]) + ", above the 6-bit DAC range (" + path + ")");
+            }
+        }
+        pal.colors[i] = RGB{expand6(buf[i * 3 + 0]), expand6(buf[i * 3 + 1]), expand6(buf[i * 3 + 2])};
     }
     pal.filled_count = 256;
     return pal;

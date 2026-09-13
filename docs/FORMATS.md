@@ -15,7 +15,13 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 ## `.256` — palette (`formats/pal256/`)
 
 - 768 bytes, 256 colors × 3 bytes, each channel a 6-bit VGA DAC value (0-63), expanded via `(v << 2) | (v >> 4)`.
-- **Status: DEFINITIVE, tested.** Unit-tested against synthetic fixtures. Not yet exercised against a real `.256` file end-to-end (no VPX+.256 golden-image pairing has been assembled yet — only VPX+.P32 for EMAP2). Follow-up: do the same golden-image validation with one of the `.256`-paired VPX files (e.g. `TITLE3.VPX`/`TITLE3.256`).
+- **Status: DEFINITIVE, validated against real files and the executable (2026-09-13).**
+  - **In `CSR.EXE`:** the generic loader (flat `0x10B0E`) reads the whole file into a buffer; `100F:0B50` records the buffer; `2EF9:0CF4` passes it untouched to BIOS INT 10h AX=1012h (set DAC block, BX=0, CX=256). So there is no header and no transform: the file *is* the DAC block. In a non-VGA mode the same routine programs only entries 0-15. The 8-bit expansion is a display convention, not something the executable does.
+  - **Real files:** all eight US-build `.256` files (`IMPRLOGO`, `NEWFORUM`, `PANEL1`, `ROME1`, `SHADE`, `TEMPLE`, `TITLE3`, `WAR2`) are 768 bytes with every byte in 0..63. The decoder now rejects a byte above 63 rather than masking it.
+  - **Cross-check with `.P32`** (itself proven by the EMAP2 golden image): `PANEL1.256`'s first 32 entries are exactly `PANEL1.P32`'s nibbles times 4, and `SHADE.256` matches `SHADE.P32` on entries 0-19. Rendering `PANEL1.VPX` through each gives the same DAC value at all 64,000 pixels. `test_pal256_corpus` checks all of this.
+  - **Visual:** `TITLE3.VPX` and `WAR2.VPX` rendered with their own `.256` files (`dump_vpx`) show the correct title and battle screens.
+  - There is no independent golden image for a `.256`-paired picture (the EMAP2 reference was produced by a tool, not captured from the game). A DOSBox screenshot of the title screen would be the pixel-exact reference, if one is ever wanted.
+- **Open, found while validating:** the `.P32` decoder expands a nibble as `n * 17` (15 -> 255), but `PANEL1.256` stores the same colours as `n * 4` in 6-bit (15 -> 60 -> 243). If the engine converts `.P32` the same way before its 32-entry DAC call (`2EF9:0CCA`), which is STRONG INFERENCE and not yet traced, then `.P32` colours are up to 12/255 too bright per channel. `EMAP2_decoded.png` was made with the same `n * 17` rule, so the golden test can't settle it.
 
 ## `.VPX` — graphics container (`formats/vpx/`)
 
@@ -74,7 +80,7 @@ All in `tools/`, all built and smoke-tested against real files:
 
 ## What's next (see `GAIUS_ROADMAP.md`)
 
-- Golden-image validation for `.256`-paired VPX files (currently only `.P32`-paired `EMAP2.VPX` has been validated this way).
+- Trace the engine's `.P32` -> 6-bit conversion, to settle whether `.P32` should expand as `n * 17` or through the 6-bit DAC as `n * 4` (see the `.256` section).
 - Locate/derive the correct in-game sprite palette for `HOUSES.PL8`/`SPRITE2.PL8`/etc.
 - Decode the font sheets' PL8 pixel variant (`FONT1`/`FONT2`/`ROMFONT`/`MINIFONT`) — see the split gap note above. This currently blocks using the original's real typeface anywhere in the UI; `ui/font.hpp` ships a clearly-labelled placeholder in the meantime.
 - Match the palette for `PANEL1A`-`PANEL1D.VPX` (the panel variants), which `PANEL1.256` does not cover.

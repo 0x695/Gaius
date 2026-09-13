@@ -14,7 +14,7 @@ Phases are designed so that RE work and engine work can proceed in parallel: whe
 
 - [x] `gaius/` repo, CMake build, VS Code config (mirror IGDK's Phase 0 setup).
 - [x] `formats/vpx` — port `caesar_vpx.py` decode logic to C++. Validated against `EMAP2.VPX` → **0/64000 pixel mismatches** against `EMAP2_decoded.png` in an automated golden-image test.
-- [x] `formats/p32`, `formats/pal256` — palette decoders. (`.p32` validated end-to-end via the VPX golden-image test; `.256` unit-tested but not yet golden-image-validated against a real file — see `docs/FORMATS.md`.)
+- [x] `formats/p32`, `formats/pal256` — palette decoders. (`.p32` validated end-to-end via the VPX golden-image test; `.256` validated 2026-09-13 against all eight real files, against the matching `.P32` files, and in `CSR.EXE`, which hands the file's bytes straight to the VGA DAC — see `docs/FORMATS.md`.)
 - [x] `formats/pl8` — sprite sheet reader. Verified against the documented `HOUSES.PL8` worked example. Along the way, resolved which container header word is the frame count (previously undocumented) and discovered/handled a trailing-placeholder-frame pattern — see `docs/FORMATS.md`.
 - [x] `formats/empire2` — ported. All 50 supplied `EMPIRE2.0xx` round-trip load→save byte-identical.
 - [x] `formats/save` — block table ported and verified contiguous/size-correct against the Python reference. Not yet validated against a real `.SAV` file — none has been captured yet; corpus test skips cleanly rather than failing.
