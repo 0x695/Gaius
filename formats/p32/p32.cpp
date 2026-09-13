@@ -8,8 +8,10 @@ namespace gaius::formats::p32 {
 
 namespace {
 uint8_t expand4(uint8_t nibble) {
-    // 0x0 -> 0, 0xF -> 255, per the recovered expansion rule.
-    return static_cast<uint8_t>(nibble * 17);
+    // The game programs the VGA DAC with nibble * 4 (0..60), then 6-bit -> 8-bit
+    // the same way as .256: 0x0 -> 0, 0xF -> 60 -> 243.
+    const uint8_t dac = static_cast<uint8_t>(nibble * 4);
+    return static_cast<uint8_t>((dac << 2) | (dac >> 4));
 }
 }  // namespace
 

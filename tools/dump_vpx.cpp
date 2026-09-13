@@ -3,7 +3,8 @@
 //
 // Decode a .VPX file and write it out as a PNG, optionally paired with a
 // palette (.P32 or .256). This is the Phase 0/1 "prove the pipeline"
-// tool: EMAP2.VPX + EMAP2.P32 should reproduce EMAP2_decoded.png.
+// tool: EMAP2.VPX + EMAP2.P32 should reproduce the game's map screen (and
+// EMAP2_decoded.png at nibble level -- that reference widens .P32 as n * 17).
 //
 // Usage:
 //   dump_vpx <input.vpx> <output.png> [palette.p32|palette.256]

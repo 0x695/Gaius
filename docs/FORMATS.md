@@ -9,8 +9,8 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 ## `.P32` — palette (`formats/p32/`)
 
 - 64 bytes, 32 packed 16-bit colors, little-endian.
-- Bits 0-3 = R, bits 4-7 = unused, bits 8-11 = B, bits 12-15 = G. Each nibble expands to 8-bit via `n * 17`.
-- **Status: DEFINITIVE, tested.** Unit-tested against synthetic fixtures with known expected RGB output, and validated end-to-end via the VPX golden-image test below (EMAP2.P32 produces the exact reference image).
+- Bits 0-3 = R, bits 4-7 = unused, bits 8-11 = B, bits 12-15 = G. Each nibble is a VGA DAC value of `n * 4` (0..60), widened to 8-bit like `.256`: `(dac << 2) | (dac >> 4)`, so 15 -> 243.
+- **Status: DEFINITIVE, tested against the running game (2026-09-13).** The `* 4` comes from DOSBox screenshots: the map and forum screens hold `EMAP2.P32`/`FORUM32.P32` in their DAC as exactly `n * 4` (32/32 each). `EMAP2.VPX` + `EMAP2.P32` matches the map screenshot at 6-bit level on every pixel outside the game's province-marker/status overlay (46,351/46,351). The decoder used `n * 17` (15 -> 255) until then; `EMAP2_decoded.png` was generated the same way, so the golden test now compares it at nibble level.
 
 ## `.256` — palette (`formats/pal256/`)
 
@@ -21,14 +21,14 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
   - **Cross-check with `.P32`** (itself proven by the EMAP2 golden image): `PANEL1.256`'s first 32 entries are exactly `PANEL1.P32`'s nibbles times 4, and `SHADE.256` matches `SHADE.P32` on entries 0-19. Rendering `PANEL1.VPX` through each gives the same DAC value at all 64,000 pixels. `test_pal256_corpus` checks all of this.
   - **Visual:** `TITLE3.VPX` and `WAR2.VPX` rendered with their own `.256` files (`dump_vpx`) show the correct title and battle screens.
   - **Against the running game (2026-09-13):** 18 DOSBox screenshots from real play (320×200, 8-bit indexed, each carrying the live DAC palette; kept in `GAIUS_TEST_ASSETS/gaius_test_screens/`, never in the repo). Every city-view screenshot's palette equals `SHADE.256` in **all 256 entries** — so `SHADE.256` is the city palette — and the forum screen's equals `NEWFORUM.256` in all 256. Screenshot tools disagree on 6→8-bit widening (some write `v << 2`, some `(v << 2) | (v >> 4)`), so comparisons are made at 6-bit level.
-- **`.P32` in the running game is nibble × 4.** The map screenshot's DAC holds `EMAP2.P32` as `n * 4` in entries 0-31 (32/32; the rest zero), and the forum screenshot holds `FORUM32.P32` the same way. So a `.P32` nibble of 15 is DAC 60, not 63, and the `.P32` decoder's `n * 17` expansion (15 -> 255) is up to 12/255 brighter than the game shows. **Not yet changed:** `EMAP2_decoded.png`, the golden reference, was produced with `n * 17`, so switching to `expand6(n * 4)` means re-deriving that test against the map screenshot instead.
+- **`.P32` in the running game is nibble × 4.** The map screenshot's DAC holds `EMAP2.P32` as `n * 4` in entries 0-31 (32/32; the rest zero), and the forum screenshot holds `FORUM32.P32` the same way. So a `.P32` nibble of 15 is DAC 60, not 63. The `.P32` decoder now expands that way (it had used `n * 17`, up to 12/255 too bright) — see the `.P32` section.
 
 ## `.VPX` — graphics container (`formats/vpx/`)
 
 - 4 blocks, each: 8-byte header (packed_size, decoded_size, fill_pair, field3) + RLE-compressed payload.
 - Per-command RLE: top 2 bits select explicit-byte / fill-A / fill-B / literal-run, bottom 6 bits + 1 = count.
 - Each block decodes to exactly 16000 bytes; the four streams interleave 1-byte-at-a-time into a 320×200 (64000-byte) indexed framebuffer — **not** four separate bit planes.
-- **Status: DEFINITIVE, tested against a real golden image.** `EMAP2.VPX` decoded + `EMAP2.P32` applied reproduces `EMAP2_decoded.png` with **zero pixel mismatches out of 64,000**.
+- **Status: DEFINITIVE, tested against a golden image and the running game.** `EMAP2.VPX` decoded + `EMAP2.P32` applied reproduces `EMAP2_decoded.png` with **zero pixel mismatches out of 64,000** (compared at nibble level — see `.P32`), and its colour indices equal a DOSBox screenshot of the map screen on 63,144 of 64,000 pixels, every difference falling inside the province markers and status text the game draws on top.
 
 ## `.PL8` — sprite sheet (`formats/pl8/`)
 
@@ -82,8 +82,6 @@ All in `tools/`, all built and smoke-tested against real files:
 
 ## What's next (see `GAIUS_ROADMAP.md`)
 
-- Trace the engine's `.P32` -> 6-bit conversion, to settle whether `.P32` should expand as `n * 17` or through the 6-bit DAC as `n * 4` (see the `.256` section).
-- Switch `.P32` expansion to the game's nibble × 4 and re-derive the EMAP2 golden test against the map screenshot (see the `.256` section).
 - Map font frames to characters (`FONT1`/`FONT2`/`ROMFONT`, now decodable) and swap them in for `ui/font.hpp`'s placeholder; decode `MINIFONT.PL1`, a separate format.
 - Tile → sprite mapping: the screenshots now show which `FIXTS`/`HOUSES` frames sit on which map cells, a direct handle on the renderer lookup tables.
 - Match the palette for `PANEL1A`-`PANEL1D.VPX` (the panel variants), which `PANEL1.256` does not cover.
