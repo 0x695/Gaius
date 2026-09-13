@@ -868,3 +868,48 @@ No two are less than a year apart, so the month-apart check of `run_month` is st
 - **Year 0 exists.** The year word `DS:0x6C32` runs -8, -1, 0, 4, ... 14, so it's a plain signed counter, not a BC/AD year with no zero.
 - **`CAESARXQ.SAV` has rubble** (nine cells of `0xA7`/`0xAA`/`0xAD`/`0xB0`, section 21), and its tiles count 32 population units more than the saved count.
 - **`DS:0x6BF8` isn't always 2.** It's -1 in `CAESARXW.SAV`, 2 in `XV`-`XT` and 0 from `XS` on; step 101's economy recomputes it correctly each time.
+
+## 24. A month against the original: six consecutive saves (2026-09-14)
+
+`CAESARUX.SAV` was loaded and played on, pausing to save six times in about 80 seconds of play:
+
+| Save | Month (year -1) | Real time | Step it was saved at |
+|---|---|---|---|
+| `CAESARUX.SAV` | 6 | earlier session | 1-12 |
+| `BAESARUX.SAV` | 7 | 01:33:21 | 76-83 |
+| `AAESARUX.SAV` | 8 | 01:33:41 | 57-64 |
+| `DAESARUX.SAV` | 9 | 01:33:59 | **4** |
+| `EAESARUX.SAV` | 9 | 01:34:12 | 76-83 |
+| `FAESARUX.SAV` | 10 | 01:34:26 | **31** |
+| `GAESARUX.SAV` | 10 | 01:34:37 | 58-73 |
+
+Nothing was built in between; the treasury stays 3144 throughout.
+
+### 24.1 Finding the step without the step counter
+
+Neither the step counter (`DS:0x6D9D`) nor the generator is saved. But several parts of the save change only on fixed steps and never draw:
+
+- the forum, workshop and barracks records' timers (`table_480`/`720`/`120` +6), which count down as the spawners run -- a forum's timer runs 5, 2, 0, 7, 6, 5, 4 across the saves, and the workshops are served in two groups on different steps;
+- the tile grid (housing development, one row per step): (17, 85-86) `0xCC` -> `0xCB` and (24, 74) `0xD0` -> `0xCF` between `UX` and `B`, then (24, 74) `0xCF` -> `0xCB` between `B` and `A`;
+- `DS:0x6C00`, which grows by `DS:0x6C04` (6 here) at step 101, and the population words set there.
+
+`tools/month_check` takes two saves, tries every start step for the first, runs `systems::month::run_step` forward and reports where the second save's tiles, those three record tables, month, population words and `DS:0x6C00` are reproduced exactly. Every pair has such windows. Chaining them -- one leg's end step, `(start + steps) % 106`, is the next leg's start -- and requiring land value to match too leaves the positions in the table: `D` is pinned to step 4 and `F` to step 31, the rest to windows of 8-16 steps.
+
+### 24.2 What matches
+
+Along that chain, for all six legs (`test_month_consecutive_saves`), `run_step` reproduces exactly:
+
+- every tile, including the three housing changes above, on the right step;
+- all three record tables, byte for byte;
+- the month, `DS:0x6C10`/`0x6C0E` and `DS:0x6C00`;
+- **all 10000 land-value cells**, where the saves themselves differ in 31-452.
+
+The coverage and service layers match too (they're rebuilt each month and unchanged in these saves), and so does the population arithmetic: `BAESARUX` and `AAESARUX` are 1 and 2 units below their tiles because the house at (24, 74) dropped a grade at step 24, after the count at step 101 of the month before.
+
+### 24.3 What this doesn't test
+
+- **The generator.** The land-value match doesn't depend on the generator's state: starting its shift register from 1, 55, 12345, 40000 or 65000 gives the same exact match. The random ±1 in the growth term evidently never moves these cells (they sit at their clamps), so the random draws' timing is still unchecked.
+- **The walkers.** The actor records never match (5-8 of 70 differ): walkers draw from the generator. Checking a walker's path needs a generator state, which saves don't carry.
+- **Development under random pressure.** Nothing burned, collapsed or wore out in these months.
+
+Also seen: `7BB4` bit `0x40` moves along the road at column 81 (rows 0-17) between every pair -- the mark a walker leaves on the cell it occupies.

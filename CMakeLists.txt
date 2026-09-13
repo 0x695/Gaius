@@ -67,6 +67,9 @@ target_link_libraries(bindiff_exe PRIVATE gaius_formats)
 add_executable(sim_check tools/sim_check.cpp)
 target_link_libraries(sim_check PRIVATE gaius_formats gaius_model gaius_systems)
 
+add_executable(month_check tools/month_check.cpp)
+target_link_libraries(month_check PRIVATE gaius_formats gaius_model gaius_systems)
+
 # --- model library (Phase 2: normalized data model, Layer 2) ---------------
 add_library(gaius_model STATIC
   model/city_state.cpp

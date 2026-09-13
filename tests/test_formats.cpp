@@ -69,11 +69,14 @@ void skip(const std::string& reason) {
 }
 
 // Every real save fixture in GAIUS_TEST_ASSETS/gaius_test_saves/, in play
-// order. Two sessions of one scenario (province 20, EMPIRE2.047): XX-UX
-// (2026-09-12, years -11 to -1) and XW-XQ (2026-09-14, years -8 to 14).
-constexpr std::array<const char*, 11> kRealSaves = {
+// order. Three sessions of one scenario (province 20, EMPIRE2.047): XX-UX
+// (2026-09-12, years -11 to -1), XW-XQ (2026-09-14, years -8 to 14), and UX
+// continued a month or less at a time as BAESARUX, AAESARUX, DAESARUX, EAESARUX,
+// FAESARUX and GAESARUX (2026-09-14, year -1).
+constexpr std::array<const char*, 17> kRealSaves = {
     "CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV", "CAESARXW.SAV", "CAESARXV.SAV",
-    "CAESARXU.SAV", "CAESARXT.SAV", "CAESARXS.SAV", "CAESARXR.SAV", "CAESARXQ.SAV"};
+    "CAESARXU.SAV", "CAESARXT.SAV", "CAESARXS.SAV", "CAESARXR.SAV", "CAESARXQ.SAV", "BAESARUX.SAV",
+    "AAESARUX.SAV", "DAESARUX.SAV", "EAESARUX.SAV", "FAESARUX.SAV", "GAESARUX.SAV"};
 
 std::string test_assets_dir() {
     const char* env = std::getenv("GAIUS_TEST_ASSETS");
@@ -1691,7 +1694,9 @@ void test_construction_road_rebuild_real_saves() {
     const Case cases[] = {{"CAESARXX.SAV", 40, 40}, {"CAESARWX.SAV", 90, 90}, {"CAESARVX.SAV", 141, 137}, {"CAESARUX.SAV", 153, 149},
                           {"CAESARXW.SAV", 76, 63},   {"CAESARXV.SAV", 162, 146}, {"CAESARXU.SAV", 162, 146},
                           {"CAESARXT.SAV", 210, 195}, {"CAESARXS.SAV", 213, 198}, {"CAESARXR.SAV", 213, 198},
-                          {"CAESARXQ.SAV", 214, 199}};
+                          {"CAESARXQ.SAV", 214, 199}, {"BAESARUX.SAV", 153, 149},     {"AAESARUX.SAV", 153, 149},
+                          {"DAESARUX.SAV", 153, 149},     {"EAESARUX.SAV", 153, 149},     {"FAESARUX.SAV", 153, 149},
+                          {"GAESARUX.SAV", 153, 149}};
     for (const Case& c : cases) {
         fs::path p = fs::path(dir) / "gaius_test_saves" / c.name;
         if (!fs::exists(p)) {
@@ -2179,6 +2184,66 @@ void test_month_economy_matches_saves() {
     }
 }
 
+// Six saves of one session, each a month or less after the last (2026-09-14):
+// CAESARUX.SAV continued as BAESARUX, AAESARUX, DAESARUX, EAESARUX, FAESARUX and
+// GAESARUX. Neither the step counter nor the generator is saved, but the
+// forum, workshop and barracks timers count down on fixed steps, so
+// tools/month_check finds where each save sits in its month (findings section
+// 24). Started from that step, run_step reproduces the next save's tiles,
+// records, month, population words and every land-value cell. The walkers
+// depend on the generator and aren't compared.
+void test_month_consecutive_saves() {
+    std::printf("test_month_consecutive_saves (run_step between six saves a month or less apart)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    struct Leg {
+        const char* from;
+        const char* to;
+        int start, steps;
+    };
+    // Each leg ends at the step the next one starts from: (start + steps) % 106.
+    const Leg legs[] = {{"CAESARUX.SAV", "BAESARUX.SAV", 1, 181}, {"BAESARUX.SAV", "AAESARUX.SAV", 76, 87},
+                        {"AAESARUX.SAV", "DAESARUX.SAV", 57, 53}, {"DAESARUX.SAV", "EAESARUX.SAV", 4, 72},
+                        {"EAESARUX.SAV", "FAESARUX.SAV", 76, 61}, {"FAESARUX.SAV", "GAESARUX.SAV", 31, 27}};
+    for (size_t i = 0; i < std::size(legs); ++i) {
+        const Leg& leg = legs[i];
+        if (i + 1 < std::size(legs)) CHECK((leg.start + leg.steps) % month::kStepsPerMonth == legs[i + 1].start);
+        fs::path a = fs::path(dir) / "gaius_test_saves" / leg.from;
+        fs::path b = fs::path(dir) / "gaius_test_saves" / leg.to;
+        if (!fs::exists(a) || !fs::exists(b)) {
+            skip(std::string(leg.to) + " not found");
+            continue;
+        }
+        auto st = std::make_unique<CityState>(load(save::load(a.string())));
+        const auto later = std::make_unique<CityState>(load(save::load(b.string())));
+        auto differences = [&]() {
+            int tiles = 0, land = 0;
+            for (int y = 0; y < gaius::model::kCityH; ++y) {
+                for (int x = 0; x < gaius::model::kCityW; ++x) {
+                    tiles += st->city.tile[y][x] != later->city.tile[y][x];
+                    land += st->city.land_value[y][x] != later->city.land_value[y][x];
+                }
+            }
+            int records = (st->table_480 != later->table_480) + (st->table_120 != later->table_120) +
+                          (st->table_720 != later->table_720);
+            int globals = 0;
+            for (uint16_t ds : {uint16_t{0x6C1C}, uint16_t{0x6C10}, uint16_t{0x6C0E}, uint16_t{0x6C00}})
+                globals += global_word(*st, ds) != global_word(*later, ds);
+            return std::array<int, 4>{tiles, records, globals, land};
+        };
+        const auto before = differences();
+        auto sim = month::sim_state_from_save(*st);
+        sim.step = leg.start;
+        for (int k = 0; k < leg.steps; ++k) month::run_step(*st, sim);
+        const auto after = differences();
+        std::printf("  %s -> %s: before tiles %d, record tables %d, globals %d, land value %d; after %d, %d, %d, %d\n",
+                    leg.from, leg.to, before[0], before[1], before[2], before[3], after[0], after[1], after[2], after[3]);
+        CHECK(before[1] + before[3] > 0);  // the pair really differs
+        CHECK(after[0] == 0 && after[1] == 0 && after[2] == 0 && after[3] == 0);
+    }
+}
+
 void test_month_state_from_saves() {
     std::printf("test_month_state_from_saves (calendar globals from eleven real saves)\n");
     std::string dir = test_assets_dir();
@@ -2190,7 +2255,9 @@ void test_month_state_from_saves() {
     const Case cases[] = {{"CAESARXX.SAV", 9, -11}, {"CAESARWX.SAV", 1, -7}, {"CAESARVX.SAV", 4, -2}, {"CAESARUX.SAV", 6, -1},
                           {"CAESARXW.SAV", 4, -8},  {"CAESARXV.SAV", 1, -1}, {"CAESARXU.SAV", 9, 0},
                           {"CAESARXT.SAV", 7, 4},   {"CAESARXS.SAV", 7, 7},  {"CAESARXR.SAV", 10, 8},
-                          {"CAESARXQ.SAV", 6, 14}};
+                          {"CAESARXQ.SAV", 6, 14},  {"BAESARUX.SAV", 7, -1}, {"AAESARUX.SAV", 8, -1},
+                          {"DAESARUX.SAV", 9, -1},  {"EAESARUX.SAV", 9, -1}, {"FAESARUX.SAV", 10, -1},
+                          {"GAESARUX.SAV", 10, -1}};
     for (const Case& c : cases) {
         fs::path p = fs::path(dir) / "gaius_test_saves" / c.name;
         if (!fs::exists(p)) {
@@ -2203,7 +2270,8 @@ void test_month_state_from_saves() {
         CHECK(sim.month == c.month && sim.year == c.year);
         CHECK(sim.population_units == gaius::systems::housing::population_units(st.city) ||
               std::string(c.name) == "CAESARVX.SAV" || std::string(c.name) == "CAESARXW.SAV" ||
-              std::string(c.name) == "CAESARXQ.SAV");  // houses that changed after the count
+              std::string(c.name) == "CAESARXQ.SAV" || std::string(c.name) == "BAESARUX.SAV" ||
+              std::string(c.name) == "AAESARUX.SAV");  // houses that changed after the count
     }
 }
 
@@ -2932,7 +3000,9 @@ void test_save_corpus_simulation() {
 // match exactly. CAESARVX.SAV is 2 units higher and holds exactly one 0xCF: the
 // +2 of a single 0xCB -> 0xCF upgrade made after that month's count.
 // CAESARXW.SAV is 1 low and CAESARXQ.SAV 32 high, the same way (not pinned to
-// individual houses: one save can't show which houses changed).
+// individual houses: one save can't show which houses changed). BAESARUX.SAV
+// and AAESARUX.SAV are 1 and 2 low: the next saves show the house at row 24,
+// column 74 going 0xD0 -> 0xCF -> 0xCB after each count.
 void test_save_corpus_population() {
     std::printf("test_save_corpus_population (population_units vs saved DS:0x6C10)\n");
     std::string dir = test_assets_dir();
@@ -2968,6 +3038,10 @@ void test_save_corpus_population() {
             CHECK(units - saved == -1);
         } else if (std::string(n) == "CAESARXQ.SAV") {
             CHECK(units - saved == 32);
+        } else if (std::string(n) == "BAESARUX.SAV") {
+            CHECK(units - saved == -1);  // saved at step 76-83, after row 24's 0xD0 -> 0xCF
+        } else if (std::string(n) == "AAESARUX.SAV") {
+            CHECK(units - saved == -2);  // saved at step 57-64, after row 24's 0xCF -> 0xCB
         } else {
             CHECK(units == saved);
         }
@@ -3287,6 +3361,7 @@ int main() {
     test_month_event_roll();
     test_month_yearly_history();
     test_month_state_from_saves();
+    test_month_consecutive_saves();
     test_actors_spawn_and_release();
     test_actors_walk_road();
     test_actors_walk_around_obstacle();

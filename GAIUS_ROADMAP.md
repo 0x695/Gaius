@@ -157,8 +157,8 @@ This phase is explicitly **RE-heavy, not just engineering**. Treat it as a joint
 Every checklist item above is done. What remains is validation, a few untranscribed pieces and polish:
 
 - **Validation that needs new saves.**
-  - Two saves one month apart, or a few steps apart, from the same session: the only way to check `run_month` and walker paths end to end.
-  - Covered by the second save session (2026-09-14, dispatch findings section 23): reservoirs and working fountains (water bits, fountain tiles and levels exact in all seven saves) and housing grades up to `0xD2`. Its saves are a year or more apart, so the month-apart pair above is still missing.
+  - A walker's path, and the random draws' timing. Six consecutive saves (2026-09-14, dispatch findings section 24) validate `run_step` across months -- tiles, record tables, population and every land-value cell, reproduced exactly -- but neither depends on the generator, whose state saves don't carry. Checking those needs either the generator's state or an event (a fire, a collapse) caught between two saves.
+  - Covered by the second save session (2026-09-14, dispatch findings section 23): reservoirs and working fountains (water bits, fountain tiles and levels exact in all seven saves) and housing grades up to `0xD2`.
 - **Simulation.**
   - The random draws of frames between steps at slower game speeds; Gaius draws once per step.
   - The yearly routine's other calls (`0x282A1`, `0x283D3`, `0x284AA` before the history writes, `0x28C43`, `0x29023`, `0x2933B` after), and the step-105, 18-month and province routines. They're ratings, messages and province events, so they belong to Phases 6-7, but the yearly history values Gaius records may differ until the first three are read.
