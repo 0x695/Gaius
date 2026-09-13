@@ -1,35 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — systems/housing.hpp
 //
-// Layer 3, GAIUS_ROADMAP.md Phase 4: the residential development state
-// machine (43A5 tile IDs 0x00-0x15) and population derivation.
+// Layer 3, GAIUS_ROADMAP.md Phase 4: land-value gating and population
+// derivation for housing.
 //
-// Scope discipline, same as systems/service.hpp: only what's actually
-// documented gets implemented.
+// CORRECTED 2026-09-13, against real saves and the disassembly. This file was
+// written on the premise (from CAESAR_CITY_STATE_v5.md) that tile ids
+// 0x00-0x15 are the residential state machine. They are not simulated at all:
+// the engine's only reader of the DS:153A tile-handler table (the scan at
+// routine 0x2BBBB) skips every tile <= 0x35, and in four real saves the
+// 0x00-0x1C cells form bordered terrain blobs that don't change across a whole
+// play session. The housing tiers the engine actually simulates are 0xC8-0xD7
+// -- see systems::service::apply_housing_tier.
 //
-//   - `land_value_allows` is the one mechanism CAESAR_CITY_STATE_v5.md
-//     traces in full (routine 0x2DB49): DEFINITIVE.
-//   - Tile 00's handler (0x297AC) is the only one of the 22 tile IDs
-//     (0x00-0x15) traced in enough detail to implement -- it calls
-//     land_value_allows(threshold=0x28), then (per the RE doc) "checks the
-//     local A2C4 value and may replace the tile with C9, CA, etc." without
-//     giving the actual A2C4 thresholds. That part is NOT implemented --
-//     flagged as open RE work, not guessed. Tiles 0x01-0x15 have known
-//     dispatch-table addresses (v5) but no traced behavior at all.
-//   - Population density-per-grade: the manual (Caesar_1_Manual.pdf)
-//     confirms the SHAPE (monotonic increase across the sixteen grades,
-//     "the fanciest houses actually have a slight drop in density") but no
-//     RE work has traced the actual population-derivation routine, and
-//     this project's copy of the manual gives no numeric table either --
-//     it's a condensed player's guide, not the full technical manual.
-//     `provisional_density_per_grade` is therefore exactly what its name
-//     says: the simplest function matching the confirmed SHAPE (grade
-//     number as its own density unit), not a real game-balance number.
-//   - Grade-to-tile-ID mapping: explicitly deferred to Phase 5 by
-//     GAIUS_ROADMAP.md itself ("map grade -> tile ID range once the
-//     construction dispatcher work... clarifies IDs") -- not attempted
-//     here. HousingGrade is a standalone Layer 3 concept for now, not
-//     derived from or mapped to any `model::CityMap::tile` value.
+//   - `land_value_allows` (routine 0x2DB49): DEFINITIVE, and still a real
+//     routine -- only its caller in this file was misattributed.
+//   - `tick_tile_00` transcribes DS:153A's entry for tile 0x00 (0x297AC). That
+//     handler is unreachable from the main tick, so this models code the engine
+//     never runs; it is kept because the handler is real and fully decoded.
+//     The full behaviour is documented at its declaration.
+//   - Population density per grade: the manual confirms the SHAPE (monotonic
+//     increase across sixteen grades, "the fanciest houses actually have a
+//     slight drop in density"), and no numeric table exists in this project's
+//     sources, so `provisional_density_per_grade` uses grade number as its own
+//     density -- the shape, not a real game-balance number.
+//   - HousingGrade is still not mapped to tile ids. The strongest candidate is
+//     now 0xC8-0xD7 in order, sixteen ids for sixteen grades, but that remains
+//     an inference, not a finding.
 
 #pragma once
 
@@ -47,11 +44,18 @@ namespace gaius::systems::housing {
 // transition happened.
 bool land_value_allows(model::CityMap& city, int x, int y, int threshold);
 
-// The tile-00 handler (0x297AC): calls land_value_allows(x, y, 0x28) (the
-// confirmed threshold, 40). Only meaningful when city.tile[y][x] == 0x00;
-// the caller is responsible for that (this module has no per-tile
-// dispatcher yet -- see the file header for why tiles 0x01-0x15 aren't
-// handled at all).
+// DS:153A's handler for tile 0x00 (0x297AC). UNREACHABLE in the engine: its
+// only dispatch site skips tiles <= 0x35, and nothing else calls it. Its full
+// decoded behaviour, for the record:
+//   1. land_value_allows(x, y, 0x28); if that fired (tile -> 0xA7), stop.
+//   2. Otherwise read A2C4 at the cell (signed). If it is < 2, or the runtime
+//      flag DS:0x6DC7 bit 0 is clear, write tile 0xC9.
+//   3. Otherwise (A2C4 >= 2 and the flag set): if A2C4 == 2 do nothing; if
+//      A2C4 > 2, write tile 0xCB.
+//   4. After writing 0xC9 or 0xCB, clear 7BB4 at the cell.
+// Only step 1 is implemented. Steps 2-4 depend on DS:0x6DC7, a runtime global
+// whose meaning isn't traced, and modeling them would add API for a handler
+// that never runs.
 void tick_tile_00(model::CityMap& city, int x, int y);
 
 // Sixteen grades per the manual ("There are sixteen grades of housing

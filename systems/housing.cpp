@@ -17,9 +17,9 @@ bool land_value_allows(model::CityMap& city, int x, int y, int threshold) {
 
 void tick_tile_00(model::CityMap& city, int x, int y) {
     land_value_allows(city, x, y, 0x28);  // 40, per CAESAR_CITY_STATE_v5.md
-    // "then checks the local A2C4 value and may replace the tile with C9,
-    // CA, etc." -- no A2C4 thresholds are documented for this, so the
-    // failure-path replacement isn't implemented (see file header).
+    // Steps 2-4 of the decoded handler (A2C4-driven writes of 0xC9/0xCB) are
+    // deliberately not modeled -- the handler is unreachable in the engine.
+    // See housing.hpp.
 }
 
 int provisional_density_per_grade(HousingGrade grade) {

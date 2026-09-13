@@ -250,3 +250,70 @@ Phase 5's core RE question is **answered** (sections 12-13): the construction di
 5. **`[0x6D0C]`'s toolbar plumbing** — which on-screen button maps to which command id is implied by the ~30 assignment sites in `0x172CD`-`0x17BDA`, but the button *geometry* (hit rectangles) wasn't extracted; Phase 5's toolbar-UI item would want it.
 
 The technique that broke this open, for reuse: **scan the whole image for far-pointer tables generically** (runs of ≥8 consecutive 4-byte entries sharing a segment word), then identify tables by which code region their targets land in. That found all 19 tables in the binary in one pass, including `DS:134C`/`DS:1384` (the actor type/state tables `CAESAR_CITY_STATE_v9.md` wanted) which nobody has decoded yet — a ready-made next target.
+
+## 15. The service layer, read directly -- and checked against the running game (2026-09-12/13)
+
+Everything `systems::service` implements was previously transcribed from the RE corpus's parameter tables (`CAESAR_CONSTRUCTION_RE_v2.md`, `CAESAR_CITY_STATE_v5/v6.md`). Four real saves from one play session made it possible to check that against the game, and the check failed in ways that sent this pass back to the binary. Every routine below was disassembled from the decompressed US-build image; addresses are flat. Where this section contradicts sections 2-3, it wins -- those are kept as the record.
+
+### 15.1 The tick
+
+- **`0x293A2` is a phased tick**, a switch over tick-phase numbers. One phase calls the reset `0x2C8D3` and then `0x2DA0D`; four phases call the scan `0x2BBBB` with start rows **0, 25, 50, 75**; a later phase publishes per-scan counters into saved globals, dividing some by building footprint area (`/4`, `/16`).
+- **`0x2BBBB`** loops 25 rows x 100 columns and does `cmp tile, 0x35; jbe skip; lcall [tile*4 + 0x153A]`. **It is the only instruction in the executable that references `0x153A` in any operand form** (exhaustive search). So DS:153A entries `0x00`-`0x35` never run: tile `0x00`'s handler (`0x297AC`, the one Phase 4 implemented from v5) is referenced only from its own table slot, with no direct callers.
+- **`0x2C8D3`**, the reset, is exactly what Gaius already had: `C9D4 &= 0x12`, `A2C4 = 0`, `2D94 = 0x3F`, every cell. Land value is never reset.
+- **`0x2DA0D`**: for every cell, if `C9D4.10` set `0x02` and clear `0x10`, else clear `0x02`. Skipped while `DS:0x6D9B` is nonzero. The source bit is `C9D4.10`, not `7BB4.10` as previously documented.
+
+### 15.2 The propagators
+
+All three clip a square (Chebyshev) radius to the grid with identical bounds code. Arguments are pushed ceiling, radius, delta, row, col (flags: radius, mask, row, col).
+
+- **`0x2C577` coverage.** Per cell: `2D94 = min(2D94, ceiling)`; `A2C4 += delta` (byte, wraps); if `A2C4 > 2D94` (signed), `A2C4 = 2D94`. No lower clamp. The ceiling is a **per-cell running minimum** over every source in the tick, so a low-ceiling source caps all others in range. v5 described a ratchet that could only be raised; the code only ever lowers it.
+- **`0x2C6AF` land value.** `54A4 += delta` (byte); if `54A4 > ceiling` (signed), `54A4 = ceiling`. **No floor** -- which is why a real save holds -43.
+- **`0x2C7BB` flags.** ORs the mask. If `DS:0x6CFC` is nonzero, the *first* cell is ANDed instead and the global is cleared after that one cell.
+- **`0x2DA7E` is not a propagator.** It is a per-cell step: `+growth` if `C9D4.20`, else -2, then clamp to -8..+50. This is where the corpus's -8..+50 lives. No DS:153A handler calls it; its caller is unidentified.
+
+### 15.3 Every handler that calls them
+
+Coverage is (delta, radius, ceiling); flags (radius, mask); land value (delta, radius, ceiling). **Bold** marks a value that differs from what Gaius previously implemented, or a handler it didn't have.
+
+| tiles | handler | building | effect |
+|---|---|---|---|
+| `36`-`3B` | `2BC26` | road/wall family | if 7BB4.10: cov (+1, 1, 31) |
+| `3C`-`3F` | `2BC6A` | road/wall family | cov (+2 if 7BB4.10 else +1, **1**, 31); **no land value** |
+| `40` | `2BCB9` | road/wall family | cov (+3 if 7BB4.10 else +2, 1, 31) |
+| `94`-`95` | `2BD08` | unidentified | **cov (+1, 2, 8); land (-2, 2, 64)** |
+| `A2`-`A3`, `A7`-`B2` | `2BD3D` | unidentified | **cov (-2, 3, 8); cov (-2, 1, 8)** |
+| `B9`, `BB`, `BC` | `2BD72` | unidentified | **if C9D4.01: cov (+1, 2, 31)** |
+| `C8`-`D7` | `2BDA2`-`2BF06` | housing tiers | **cov (base + -1/0/+1/+1/+2/+2, radius 1/1/1/2/1/2, ceiling 4/8/31/31/31/31)**, base = `DS:0x6BF8` |
+| `D8`-`DB` | `2BF4F` | temple stages | **cov (+1, 2, 31); land (-2, 2, 53)** |
+| `DC`-`DF` | `2BFA8` | temple stages | **cov (+1, 3, 31); land (-2, 3, 37)** |
+| `E0`-`E7` | `2C001` / `2C057` / `2C0AD` / `2C103` | temples v1-v4 | cov (+1, **2/3/4**/5, 31); flags (6/8/10/12, `20`) |
+| `E8`, `EA` | `2C159` | Bath Houses | if 7BB4.10: cov (+1, **2**, 31); flags (**3**, `04`) |
+| `EB` | `2C1B4` | Oracle | cov (+2, 8, 31); land (-2, 5, 32) |
+| `EC`-`ED` | `2C20D` | School / Hospital | cov (+1, 3, 31); flags (4, `40`) |
+| `EE` | `2C267` | Prefecture | cov (+1, 2, **8**); flags (4, `20`); land (-2, 3, 48) |
+| `EF` | `2C2D7` | Barracks | cov (+1, **3**, **5**); land (**-3**, **5**, 32); **no flags** |
+| `F0` | `2C330` | Theater | cov (+1, 3, 31); flags (4, `80`) |
+| `F1` | `2C386` | Coliseum | cov (+1, 4, 31); flags (6, `80`) |
+| `F2` | `2C3DC` | Hippodrome | cov (+1, 5, 31); flags (7, `80`) |
+| `F3` | `2C432` | Heavy Industry | cov (+1, 4, **2**) |
+| `F4` | `2C475` | Market | cov (+1, 1, **16**); flags (6, `08`) |
+| `F5`-`F6` | `2C4AB` | unidentified, 3x3 | cov (+1, 3, **3**) |
+
+A scan of the whole table, bounded at each handler's true end, found no other DS:153A handler that calls any of the three propagators. Building identities come from section 13's construction seeds and real-save footprints, not from v2's labels, which were wrong for `0xEB`-`0xF4`. And `CAESAR_CITY_STATE_v5.md`'s parameters for `0x3C`-`0x3F` (cov +1 r2, land -2 r2 ceiling `0x40`) are really the code at `0x2BD08`, which tiles `0x94`/`0x95` dispatch to.
+
+### 15.4 Housing, located
+
+- The six `0xC8`-`0xD7` handlers share one template and differ only in tier parameters that rise with the tile id and cap at 31. `0xC8` is Housing's construction seed (section 13), the range ends where the temple family begins, and in real saves these tiles line the roads. **STRONG INFERENCE** that they are the manual's sixteen grades. The handlers never change the tile id, so the grade-change routine is still unfound.
+- `0x297AC` (tile `0x00`, unreachable), fully decoded: `land_value_allows(0x28)`; otherwise, if `A2C4 < 2` or `DS:0x6DC7` bit 0 is clear, write `0xC9`; otherwise, if `A2C4 > 2`, write `0xCB`; clear 7BB4 after either write.
+- In the saves, all 146 cells of `0x00`-`0x1C` form bordered blobs far from the city and are byte-identical across all four saves.
+
+### 15.5 The proof
+
+`tools/sim_check` and `test_save_corpus_simulation` run `reset_tick` plus one `dispatch_tile` pass over each save's own tile grid and compare the result against the layers the engine saved. With the five untranscribed handlers still missing, coverage matched 9988, 10000, 9856 and 9856 of 10000 cells, and every mismatch sat on or beside those handlers' tiles (saved bytes of 254/255 from negative coverage). With them added: **10000/10000 coverage, and 10000/10000 on each of C9D4 bits `04`, `08`, `20`, `40` and `80`, in all four saves.** Independently, the two scan counters the tick publishes -- `DS:0x6BF2` (handler tile set `C8`-`E8`, `EA`-`F3`, `F5`-`F6`) and `DS:0x6BF0` (`36`-`40`) -- equal the grids' own counts exactly: 20/191/251/251 and 40/90/141/153.
+
+### 15.6 Still open
+
+- Who calls `0x2DA7E` (the -8..+50 land-value step), and so how land value is actually bounded over time.
+- The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from.
+- The housing grade-change routine; the identities of `0x94`/`95`, `0xA2`-`B2`, `0xB9`/`BB`/`BC` and `0xF5`/`F6`; what sets `C9D4.01` and `DS:0x6BF8`.
+- What reads the C9D4 service bits.

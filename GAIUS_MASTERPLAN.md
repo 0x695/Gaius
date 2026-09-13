@@ -69,7 +69,7 @@ The reverse-engineering corpus is already substantial and has been consolidated 
 ### Explicitly unresolved (tracked as blockers below)
 - The **construction command → object type → city tile ID → footprint** pipeline is not fully decoded (this is the single highest-value remaining RE target).
 - City terrain *generation* (new-game/new-city procedural terrain) source is not yet located — the manual states terrain is randomly generated per province/city, but the generator routine hasn't been pinned down.
-- Heavy Industry / Market / Workshop / Fort are confirmed **not** to live in the same 43A5 tile-dispatch mechanism as civic buildings — they're suspected to run through the object/actor system instead, but this is unproven.
+- Heavy Industry and Market **do** run through the same 43A5 tile-dispatch mechanism as civic buildings (tiles `0xF3` and `0xF4`), confirmed by disassembly and by reproducing real saves' coverage layer exactly — see `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 15. That corrects this document's earlier claim that they don't. Those handlers only do service propagation, though: the *economic* behaviour (goods, labour, sales) isn't in them and is still suspected to run through the object/actor system. Workshop may be the unidentified 3×3 building on tiles `0xF5`/`0xF6`; Fort hasn't been located.
 - `EDATA.CSR`, `CONTFRM.GD8`, `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, and the VAS win/lose animation format are undeciphered.
 - The save **loader** (as opposed to the serializer) hasn't been reverse engineered, so the save layout is currently proven one-directional.
 - Renderer tile-lookup tables (how a tile ID maps to a sprite frame) are not yet recovered.

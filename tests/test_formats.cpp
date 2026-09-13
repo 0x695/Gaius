@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -74,6 +75,14 @@ std::vector<uint8_t> read_whole_file(const std::string& path) {
 // ---------------------------------------------------------------------
 // Pure / synthetic tests — no external assets needed.
 // ---------------------------------------------------------------------
+
+// A fresh city plus its per-tick service state, heap-allocated: a CityMap
+// is 50 KB, and the handler tests below build dozens of independent cases.
+struct SimFixture {
+    CityMap city;
+    ServiceState svc;
+};
+std::unique_ptr<SimFixture> fresh() { return std::make_unique<SimFixture>(); }
 
 void test_save_block_table_contiguous() {
     std::printf("test_save_block_table_contiguous\n");
@@ -215,7 +224,7 @@ void test_model_city_state_round_trip() {
 // COMPLETE.md section 71 -- these tests exist to catch a transcription
 // slip against the RE corpus, not to validate a design choice.
 void test_service_bit_table_fixtures() {
-    std::printf("test_service_bit_table_fixtures (CAESAR_CITY_STATE_v6.md \"Current C9D4 table\")\n");
+    std::printf("test_service_bit_table_fixtures (C9D4 bits, producers confirmed by disassembly)\n");
     auto find = [](uint8_t mask) -> const C9D4BitInfo* {
         for (const auto& b : kC9D4BitTable)
             if (b.mask == mask) return &b;
@@ -224,7 +233,11 @@ void test_service_bit_table_fixtures() {
     const C9D4BitInfo* religious = find(0x20);
     CHECK(religious != nullptr);
     CHECK(religious && std::string(religious->name) == "religious");
-    CHECK(religious && religious->confidence == Confidence::High);
+    // Downgraded from High (2026-09-13): the Prefecture handler (tile 0xEE)
+    // sets 0x20 too, so it isn't exclusively temple-produced and "religious"
+    // is unverified against any consumer. Pinned here so it can't silently
+    // drift back up without new evidence.
+    CHECK(religious && religious->confidence == Confidence::StrongInference);
 
     const C9D4BitInfo* entertainment = find(0x80);
     CHECK(entertainment != nullptr);
@@ -233,17 +246,15 @@ void test_service_bit_table_fixtures() {
 
     const C9D4BitInfo* persistent_conn = find(0x10);
     CHECK(persistent_conn && persistent_conn->confidence == Confidence::High);
+    // 0x02's generator, routine 0x2DA0D, is disassembled: Definitive.
     const C9D4BitInfo* derived_net = find(0x02);
-    CHECK(derived_net && derived_net->confidence == Confidence::High);
+    CHECK(derived_net && derived_net->confidence == Confidence::Definitive);
 
-    // 0x08 had no documented producer/radius anywhere when Phase 3 wrote
-    // this fixture (Unresolved); CAESAR_CONSTRUCTION_RE_v2.md's DS:153A
-    // dispatch-table decode (Phase 5) found one (tile 0xF3, radius 6) --
-    // a real upgrade backed by new evidence, not a silent one. Still only
-    // StrongInference, not High: the *mechanism* is now confirmed but the
-    // *building identity* (barracks) is still inferred, not proven.
-    const C9D4BitInfo* barracks_bit = find(0x08);
-    CHECK(barracks_bit && barracks_bit->confidence == Confidence::StrongInference);
+    // 0x08 is set by tile 0xF4, the Market (its construction seed, 2x2
+    // footprints in real saves, counted /4 by the engine) -- not the barracks
+    // it was attributed to before. Upgraded to High on that evidence.
+    const C9D4BitInfo* market_bit = find(0x08);
+    CHECK(market_bit && market_bit->confidence == Confidence::High);
 
     CHECK(kC9D4BitTable.size() == 8);
 }
@@ -270,41 +281,100 @@ void test_service_reset_tick() {
 }
 
 void test_service_apply_coverage() {
-    std::printf("test_service_apply_coverage (square radius, clamp to [0, ceiling])\n");
-    CityMap city;
-    apply_coverage(city, 50, 50, 10, 2, 15);
+    std::printf("test_service_apply_coverage (routine 0x2C577: square radius, running-minimum ceiling)\n");
+    {
+        auto f = fresh();
+        CityMap& city = f->city;
+        ServiceState& svc = f->svc;
+        apply_coverage(city, svc, 50, 50, 10, 2, 15);
+        CHECK(city.coverage[50][50] == 10);           // origin
+        CHECK(city.coverage[50][52] == 10);           // exactly radius 2 on an axis
+        CHECK(city.coverage[52][52] == 10);           // radius 2 on BOTH axes -- square, not circular
+        CHECK(city.coverage[50][53] == 0);            // just outside
+        CHECK(city.coverage[53][53] == 0);
+        CHECK(svc.coverage_ceiling[50][50] == 15);    // lowered from 0x3F to this call's ceiling
+        CHECK(svc.coverage_ceiling[50][53] == 0x3F);  // untouched outside the radius
 
-    CHECK(city.coverage[50][50] == 10);       // origin
-    CHECK(city.coverage[50][52] == 10);       // exactly radius 2 away on an axis
-    CHECK(city.coverage[52][52] == 10);       // radius 2 away on BOTH axes -- square (Chebyshev), not circular
-    CHECK(city.coverage[50][53] == 0);        // just outside radius -- untouched
-    CHECK(city.coverage[53][53] == 0);        // corner just outside the square -- untouched
+        apply_coverage(city, svc, 50, 50, 10, 0, 15);
+        CHECK(city.coverage[50][50] == 15);  // capped
 
-    // Clamping: a second application should cap at `ceiling`, not overflow.
-    apply_coverage(city, 50, 50, 10, 0, 15);
-    CHECK(city.coverage[50][50] == 15);
+        apply_coverage(city, svc, 0, 0, 5, 1, 20);  // off-grid centre must clip, not crash
+        CHECK(city.coverage[0][0] == 5);
+        CHECK(city.coverage[1][1] == 5);
+    }
 
-    // Off-grid center must not crash and must still touch in-bounds cells.
-    apply_coverage(city, 0, 0, 5, 1, 20);
-    CHECK(city.coverage[0][0] == 5);
-    CHECK(city.coverage[1][1] == 5);
+    // The engine's defining behaviour: the ceiling is a per-cell running
+    // minimum over every source this tick, so a low ceiling caps a high one
+    // in range whichever is applied first.
+    {
+        auto f = fresh();
+        apply_coverage(f->city, f->svc, 10, 10, 10, 0, 31);  // high ceiling first
+        apply_coverage(f->city, f->svc, 10, 10, 1, 0, 4);    // then a low one
+        CHECK(f->city.coverage[10][10] == 4);
+    }
+    {
+        auto f = fresh();
+        apply_coverage(f->city, f->svc, 10, 10, 1, 0, 4);    // low ceiling first
+        apply_coverage(f->city, f->svc, 10, 10, 10, 0, 31);  // a higher one can't lift it back
+        CHECK(f->city.coverage[10][10] == 4);
+        CHECK(f->svc.coverage_ceiling[10][10] == 4);
+        reset_tick(f->city, f->svc);  // the next tick starts over
+        CHECK(f->svc.coverage_ceiling[10][10] == 0x3F);
+    }
 }
 
 void test_service_apply_land_value() {
-    std::printf("test_service_apply_land_value (square radius, hard clamp -8..+50)\n");
-    CityMap city;
-    apply_land_value(city, 30, 30, 20, 1, 50);
+    std::printf("test_service_apply_land_value (routine 0x2C6AF: square radius, ceiling only, no floor)\n");
+    auto f = fresh();
+    CityMap& city = f->city;
+    apply_land_value(city, 30, 30, 20, 1, 32);
     CHECK(city.land_value[30][30] == 20);
-    CHECK(city.land_value[31][31] == 20);  // square radius, same as coverage
-    CHECK(city.land_value[32][32] == 0);   // outside radius
+    CHECK(city.land_value[31][31] == 20);  // square radius
+    CHECK(city.land_value[32][32] == 0);   // outside
 
-    // Ceiling is never allowed above +50 regardless of what's passed in.
-    apply_land_value(city, 30, 30, 1000, 0, 200);
-    CHECK(city.land_value[30][30] == 50);
+    apply_land_value(city, 30, 30, 20, 0, 32);  // 40 -> capped at this call's ceiling
+    CHECK(city.land_value[30][30] == 32);
 
-    // Floor is always -8, not caller-adjustable.
-    apply_land_value(city, 60, 60, -1000, 0, 50);
-    CHECK(city.land_value[60][60] == -8);
+    for (int i = 0; i < 3; ++i) apply_land_value(city, 40, 40, 20, 0, 64);
+    CHECK(city.land_value[40][40] == 60);  // no +50 cap in the propagator
+
+    // No floor: the barracks' -3 accumulates straight past -8. A real save
+    // holds -43 right next to one.
+    for (int i = 0; i < 15; ++i) apply_land_value(city, 60, 60, -3, 0, 32);
+    CHECK(city.land_value[60][60] == -45);
+}
+
+void test_service_evolve_land_value() {
+    std::printf("test_service_evolve_land_value (routine 0x2DA7E: per-cell step, clamp -8..+50)\n");
+    auto f = fresh();
+    CityMap& city = f->city;
+    city.service_flags[5][5] = 0x20;  // bit 0x20 set: grows by the argument
+    city.land_value[5][5] = 45;
+    evolve_land_value(city, 5, 5, 3);
+    CHECK(city.land_value[5][5] == 48);
+    evolve_land_value(city, 5, 5, 3);
+    CHECK(city.land_value[5][5] == 50);  // capped at +50
+
+    city.land_value[6][6] = -7;  // no 0x20: decays by 2, floored at -8
+    evolve_land_value(city, 6, 6, 3);
+    CHECK(city.land_value[6][6] == -8);
+
+    city.land_value[7][7] = -43;  // propagated below the floor: pulled back up
+    evolve_land_value(city, 7, 7, 3);
+    CHECK(city.land_value[7][7] == -8);
+}
+
+void test_service_derive_network_flags() {
+    std::printf("test_service_derive_network_flags (routine 0x2DA0D: C9D4.10 -> C9D4.02)\n");
+    auto f = fresh();
+    CityMap& city = f->city;
+    city.service_flags[1][1] = 0x10;         // pending: becomes 0x02, 0x10 cleared
+    city.service_flags[2][2] = 0x02;         // stale 0x02 with no 0x10: cleared
+    city.service_flags[3][3] = 0x10 | 0x80;  // unrelated bits survive
+    derive_network_flags(city);
+    CHECK(city.service_flags[1][1] == 0x02);
+    CHECK(city.service_flags[2][2] == 0x00);
+    CHECK(city.service_flags[3][3] == (0x02 | 0x80));
 }
 
 void test_service_apply_flags() {
@@ -318,131 +388,286 @@ void test_service_apply_flags() {
 }
 
 void test_service_building_handlers() {
-    std::printf(
-        "test_service_building_handlers (temple/bath houses/hospital/theater/coliseum/hippodrome/"
-        "plaza/barracks/prefecture/school/oracle -- CAESAR_CONSTRUCTION_RE_v2.md corrected parameters)\n");
-    CityMap city;
-    apply_temple(city, 50, 50, TempleVariant::Variant1);  // radius 6, no coverage (unconfirmed for this variant)
-    CHECK((city.service_flags[50][56] & 0x20) != 0);      // exactly radius 6
-    CHECK((city.service_flags[50][57] & 0x20) == 0);      // just outside
-    CHECK(city.coverage[50][50] == 0);                    // variant 1's coverage isn't confirmed -- must NOT apply one
+    std::printf("test_service_building_handlers (every handler parameter, transcribed from disassembly)\n");
+    auto cov = [](const CityMap& c, int x, int y) { return static_cast<int>(c.coverage[y][x]); };
 
-    CityMap city2;
-    apply_temple(city2, 20, 20, TempleVariant::Variant4);  // radius 12 flags + radius 5 coverage (confirmed)
-    CHECK((city2.service_flags[20][32] & 0x20) != 0);
-    CHECK((city2.service_flags[20][33] & 0x20) == 0);
-    CHECK(city2.coverage[20][25] == 1);  // exactly radius 5
-    CHECK(city2.coverage[20][26] == 0);
+    // Temples: coverage radius 2/3/4/5 (variants 1-3 were previously
+    // missing), flags radius 6/8/10/12.
+    for (int v = 1; v <= 4; ++v) {
+        auto f = fresh();
+        apply_temple(f->city, f->svc, 50, 50, static_cast<TempleVariant>(v));
+        int cr = v + 1, fr = 4 + 2 * v;
+        CHECK(cov(f->city, 50 + cr, 50) == 1);
+        CHECK(cov(f->city, 51 + cr, 50) == 0);
+        CHECK((f->city.service_flags[50][50 + fr] & 0x20) != 0);
+        CHECK((f->city.service_flags[50][51 + fr] & 0x20) == 0);
+    }
 
-    // Bath houses now require the 7BB4.10 "connected" gate -- CORRECTED
-    // from Phase 3, which had no gate at all.
-    CityMap city3;
-    apply_bath_houses(city3, 50, 50);  // not connected -- must do nothing
-    CHECK(city3.service_flags[50][50] == 0);
-    CHECK(city3.coverage[50][50] == 0);
-
-    CityMap city4;
-    city4.operational_state[50][50] = 0x10;
-    apply_bath_houses(city4, 50, 50);
-    CHECK((city4.service_flags[50][54] & 0x04) != 0);  // radius 4 (was 3 in Phase 3 -- corrected)
-    CHECK((city4.service_flags[50][55] & 0x04) == 0);
-    CHECK(city4.coverage[50][53] == 1);  // radius 3 (was 2 in Phase 3 -- corrected)
-    CHECK(city4.coverage[50][54] == 0);
-
-    CityMap city5;
-    apply_theater(city5, 50, 50);
-    CHECK((city5.service_flags[50][54] & 0x80) != 0);  // radius 4
-    CHECK((city5.service_flags[50][55] & 0x80) == 0);
-    CHECK(city5.coverage[50][53] == 1);  // coverage now implemented (was missing in Phase 3)
-    CHECK(city5.coverage[50][54] == 0);
-
-    CityMap city6;
-    apply_coliseum(city6, 50, 50);
-    CHECK((city6.service_flags[50][56] & 0x80) != 0);  // radius 6
-    CHECK(city6.coverage[50][54] == 1);                 // radius 4
-
-    CityMap city7;
-    apply_hippodrome(city7, 50, 50);
-    CHECK((city7.service_flags[50][57] & 0x80) != 0);  // radius 7
-    CHECK(city7.coverage[50][55] == 1);                 // radius 5
-
-    CityMap city8;
-    apply_hospital(city8, 50, 50);
-    CHECK((city8.service_flags[50][54] & 0x40) != 0);  // radius 4
-    CHECK(city8.coverage[50][53] == 1);                 // radius 3, now implemented
-
-    // New in Phase 5 -- Plaza/Barracks/Prefecture/School/Oracle had zero
-    // documented parameters in Phase 3 and were skipped entirely.
-    CityMap city9;
-    apply_plaza(city9, 50, 50);
-    CHECK(city9.coverage[50][54] == 1);  // radius 4, no flag documented
-    CHECK(city9.service_flags[50][50] == 0);
-
-    CityMap city10;
-    apply_barracks(city10, 50, 50);
-    CHECK((city10.service_flags[50][56] & 0x08) != 0);  // radius 6
-    CHECK(city10.coverage[50][51] == 1);                 // radius 1
-
-    CityMap city11;
-    apply_prefecture(city11, 50, 50);
-    CHECK(city11.coverage[50][53] == 1);  // radius 3, no flag documented
-    CHECK(city11.service_flags[50][50] == 0);
-
-    CityMap city12;
-    apply_school(city12, 50, 50);
-    CHECK((city12.service_flags[50][54] & 0x20) != 0);  // radius 4 -- same mask as religious (0x20)
-    CHECK(city12.coverage[50][52] == 1);                 // radius 2
-    CHECK(city12.land_value[50][53] == -2);              // radius 3, negative -- an undesirable-neighbor effect
-
-    CityMap city13;
-    apply_oracle(city13, 50, 50);  // mechanically identical to apply_school -- see header comment
-    CHECK((city13.service_flags[50][54] & 0x20) != 0);
-    CHECK(city13.coverage[50][52] == 1);
-    CHECK(city13.land_value[50][53] == -2);
+    {  // Bath houses: nothing unless connected
+        auto f = fresh();
+        apply_bath_houses(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 0);
+        CHECK(f->city.service_flags[50][50] == 0);
+    }
+    {  // ...then coverage r2 and flags 0x04 r3
+        auto f = fresh();
+        f->city.operational_state[50][50] = 0x10;
+        apply_bath_houses(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 52, 50) == 1);
+        CHECK(cov(f->city, 53, 50) == 0);
+        CHECK((f->city.service_flags[50][53] & 0x04) != 0);
+        CHECK((f->city.service_flags[50][54] & 0x04) == 0);
+    }
+    {  // Oracle: coverage +2 r8, land value -2 r5, no flags
+        auto f = fresh();
+        apply_oracle(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 58, 50) == 2);
+        CHECK(cov(f->city, 59, 50) == 0);
+        CHECK(f->city.land_value[50][55] == -2);
+        CHECK(f->city.land_value[50][56] == 0);
+        CHECK(f->city.service_flags[50][50] == 0);
+    }
+    {  // School/Hospital: coverage r3, flags 0x40 r4
+        auto f = fresh();
+        apply_school_or_hospital(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 53, 50) == 1);
+        CHECK(cov(f->city, 54, 50) == 0);
+        CHECK((f->city.service_flags[50][54] & 0x40) != 0);
+        CHECK((f->city.service_flags[50][55] & 0x40) == 0);
+    }
+    {  // Prefecture: coverage r2 at ceiling 8, flags 0x20 r4, land value -2 r3
+        auto f = fresh();
+        apply_prefecture(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 52, 50) == 1);
+        CHECK(cov(f->city, 53, 50) == 0);
+        CHECK(f->svc.coverage_ceiling[50][52] == 8);
+        CHECK((f->city.service_flags[50][54] & 0x20) != 0);
+        CHECK((f->city.service_flags[50][55] & 0x20) == 0);
+        CHECK(f->city.land_value[50][53] == -2);
+        CHECK(f->city.land_value[50][54] == 0);
+    }
+    {  // Barracks: coverage r3 at ceiling 5, land value -3 r5, no flags at all
+        auto f = fresh();
+        apply_barracks(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 53, 50) == 1);
+        CHECK(cov(f->city, 54, 50) == 0);
+        CHECK(f->svc.coverage_ceiling[50][53] == 5);
+        CHECK(f->city.land_value[50][55] == -3);
+        CHECK(f->city.land_value[50][56] == 0);
+        CHECK(f->city.service_flags[50][50] == 0);
+    }
+    {  // Theater: coverage r3, flags 0x80 r4
+        auto f = fresh();
+        apply_theater(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 53, 50) == 1);
+        CHECK(cov(f->city, 54, 50) == 0);
+        CHECK((f->city.service_flags[50][54] & 0x80) != 0);
+        CHECK((f->city.service_flags[50][55] & 0x80) == 0);
+    }
+    {  // Coliseum: coverage r4, flags 0x80 r6
+        auto f = fresh();
+        apply_coliseum(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 54, 50) == 1);
+        CHECK(cov(f->city, 55, 50) == 0);
+        CHECK((f->city.service_flags[50][56] & 0x80) != 0);
+        CHECK((f->city.service_flags[50][57] & 0x80) == 0);
+    }
+    {  // Hippodrome: coverage r5, flags 0x80 r7
+        auto f = fresh();
+        apply_hippodrome(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 55, 50) == 1);
+        CHECK(cov(f->city, 56, 50) == 0);
+        CHECK((f->city.service_flags[50][57] & 0x80) != 0);
+        CHECK((f->city.service_flags[50][58] & 0x80) == 0);
+    }
+    {  // Heavy industry: coverage r4 at ceiling 2, no flags
+        auto f = fresh();
+        apply_heavy_industry(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 54, 50) == 1);
+        CHECK(cov(f->city, 55, 50) == 0);
+        CHECK(f->svc.coverage_ceiling[50][54] == 2);
+        CHECK(f->city.service_flags[50][50] == 0);
+    }
+    {  // Market: coverage r1 at ceiling 16, flags 0x08 r6
+        auto f = fresh();
+        apply_market(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 51, 50) == 1);
+        CHECK(cov(f->city, 52, 50) == 0);
+        CHECK(f->svc.coverage_ceiling[50][51] == 16);
+        CHECK((f->city.service_flags[50][56] & 0x08) != 0);
+        CHECK((f->city.service_flags[50][57] & 0x08) == 0);
+    }
+    {  // 0xF5/F6: coverage r3 at ceiling 3
+        auto f = fresh();
+        apply_tile_f5_f6(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 53, 50) == 1);
+        CHECK(cov(f->city, 54, 50) == 0);
+        CHECK(f->svc.coverage_ceiling[50][53] == 3);
+    }
+    {  // 0x36-0x3B: nothing unless connected, then +1 r1
+        auto f = fresh();
+        apply_tile_36_3b(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 0);
+        f->city.operational_state[50][50] = 0x10;
+        apply_tile_36_3b(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 51, 50) == 1);
+        CHECK(cov(f->city, 52, 50) == 0);
+    }
+    {  // 0x3C-0x3F: +1 r1 unconnected, +2 connected, and no land-value effect
+        auto f = fresh();
+        apply_tile_3c_3f(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 51, 50) == 1);
+        CHECK(cov(f->city, 52, 50) == 0);
+        CHECK(f->city.land_value[50][50] == 0);
+        f->city.operational_state[50][50] = 0x10;
+        apply_tile_3c_3f(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 3);
+    }
+    {  // 0x40: +2 unconnected, +3 connected
+        auto f = fresh();
+        apply_tile_40(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 2);
+        f->city.operational_state[50][50] = 0x10;
+        apply_tile_40(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 5);
+    }
+    {  // What the low ceilings are for: a heavy industry beside a temple caps
+       // the temple's coverage in their overlap at 2.
+        auto f = fresh();
+        for (int i = 0; i < 5; ++i) apply_temple(f->city, f->svc, 50, 50, TempleVariant::Variant4);
+        CHECK(f->city.coverage[50][50] == 5);  // alone, it accumulates
+        apply_heavy_industry(f->city, f->svc, 52, 50);
+        CHECK(f->city.coverage[50][50] == 2);  // capped inside industry's radius
+        CHECK(f->city.coverage[50][45] == 5);  // untouched outside it
+    }
+    {  // 0x94/95: coverage +1 r2 at ceiling 8, land value -2 r2
+        auto f = fresh();
+        apply_tile_94_95(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 52, 50) == 1);
+        CHECK(cov(f->city, 53, 50) == 0);
+        CHECK(f->svc.coverage_ceiling[50][52] == 8);
+        CHECK(f->city.land_value[50][52] == -2);
+        CHECK(f->city.land_value[50][53] == 0);
+    }
+    {  // 0xA2/A3, 0xA7-B2: NEGATIVE coverage, -2 r3 then -2 r1, ceiling 8. No
+       // lower clamp, so the byte wraps -- real saves hold 254/255 near these.
+        auto f = fresh();
+        apply_tile_a2_b2(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 252);  // -4 within radius 1
+        CHECK(f->city.coverage[50][52] == 254);  // -2 out to radius 3
+        CHECK(f->city.coverage[50][53] == 254);
+        CHECK(f->city.coverage[50][54] == 0);
+        CHECK(f->svc.coverage_ceiling[50][53] == 8);
+    }
+    {  // 0xB9/BB/BC: coverage +1 r2, only when C9D4.01 is set
+        auto f = fresh();
+        apply_tile_b9_bb_bc(f->city, f->svc, 50, 50);
+        CHECK(f->city.coverage[50][50] == 0);
+        f->city.service_flags[50][50] = 0x01;
+        apply_tile_b9_bb_bc(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 52, 50) == 1);
+        CHECK(cov(f->city, 53, 50) == 0);
+    }
+    {  // Temple stages 0xD8-DB: coverage +1 r2, land value -2 r2
+        auto f = fresh();
+        f->city.tile[50][50] = 0xD9;
+        apply_temple_stage(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 52, 50) == 1);
+        CHECK(cov(f->city, 53, 50) == 0);
+        CHECK(f->city.land_value[50][52] == -2);
+        CHECK(f->city.land_value[50][53] == 0);
+    }
+    {  // Temple stages 0xDC-DF: coverage +1 r3, land value -2 r3
+        auto f = fresh();
+        f->city.tile[50][50] = 0xDE;
+        apply_temple_stage(f->city, f->svc, 50, 50);
+        CHECK(cov(f->city, 53, 50) == 1);
+        CHECK(cov(f->city, 54, 50) == 0);
+        CHECK(f->city.land_value[50][53] == -2);
+        CHECK(f->city.land_value[50][54] == 0);
+    }
 }
 
 // dispatch_tile (Phase 5): the actual DS:153A tile-ID dispatcher, routing
 // city.tile[y][x] to the handler above matching that exact ID.
 void test_service_dispatch_tile() {
-    std::printf("test_service_dispatch_tile (DS:153A far-pointer dispatch, CAESAR_CONSTRUCTION_RE_v2.md)\n");
-
-    // A temple-4 tile should produce exactly apply_temple's variant-4 effect.
-    CityMap city;
-    city.tile[50][50] = 0xE6;
-    dispatch_tile(city, 50, 50);
-    CHECK((city.service_flags[50][62] & 0x20) != 0);  // radius 12
-    CHECK(city.coverage[50][55] == 1);                 // radius 5
-
-    // 0x36-0x3B requires the connectivity gate, same as apply_tile_36_3b directly.
-    CityMap city2;
-    city2.tile[10][10] = 0x38;
-    dispatch_tile(city2, 10, 10);
-    CHECK(city2.coverage[10][10] == 0);  // not connected
-    city2.operational_state[10][10] = 0x10;
-    dispatch_tile(city2, 10, 10);
-    CHECK(city2.coverage[10][10] == 1);
-
-    // Housing tiles (0x00-0x15) are explicitly NOT this dispatcher's
-    // concern -- systems::housing owns them. Must be a true no-op here.
-    CityMap city3;
-    city3.tile[5][5] = 0x00;
-    city3.land_value[5][5] = 41;  // would trigger land_value_allows if this dispatcher touched it
-    dispatch_tile(city3, 5, 5);
-    CHECK(city3.tile[5][5] == 0x00);  // untouched
-
-    // 0xE9 (documented default handler, no specifics) and a genuinely
-    // unused ID must both be no-ops.
-    CityMap city4;
-    city4.tile[7][7] = 0xE9;
-    dispatch_tile(city4, 7, 7);
-    CHECK(city4.service_flags[7][7] == 0);
-    CHECK(city4.coverage[7][7] == 0);
-
-    CityMap city5;
-    city5.tile[8][8] = 0x99;  // arbitrary ID with no documented handler
-    dispatch_tile(city5, 8, 8);
-    CHECK(city5.service_flags[8][8] == 0);
-    CHECK(city5.coverage[8][8] == 0);
+    std::printf("test_service_dispatch_tile (DS:153A dispatch, incl. the <=0x35 gate and housing tiers)\n");
+    {  // A temple-4 tile produces exactly apply_temple's variant-4 effect
+        auto f = fresh();
+        f->city.tile[50][50] = 0xE6;
+        dispatch_tile(f->city, f->svc, 50, 50);
+        CHECK((f->city.service_flags[50][62] & 0x20) != 0);  // radius 12
+        CHECK(f->city.coverage[50][55] == 1);                // radius 5
+    }
+    {  // 0x36-0x3B keeps its connectivity gate through dispatch
+        auto f = fresh();
+        f->city.tile[10][10] = 0x38;
+        dispatch_tile(f->city, f->svc, 10, 10);
+        CHECK(f->city.coverage[10][10] == 0);
+        f->city.operational_state[10][10] = 0x10;
+        dispatch_tile(f->city, f->svc, 10, 10);
+        CHECK(f->city.coverage[10][10] == 1);
+    }
+    {  // The engine's scan (0x2BBBB) never dispatches tiles <= 0x35, and it is
+       // the only reader of DS:153A. So tile 0x00 -- whose table entry would
+       // turn it into housing -- is inert, which is why 0x00 terrain sits
+       // unchanged through a whole play session in real saves.
+        auto f = fresh();
+        f->city.tile[5][5] = 0x00;
+        f->city.land_value[5][5] = 41;
+        dispatch_tile(f->city, f->svc, 5, 5);
+        CHECK(f->city.tile[5][5] == 0x00);
+        f->city.tile[6][6] = 0x35;  // the boundary is skipped too
+        f->city.operational_state[6][6] = 0x10;
+        dispatch_tile(f->city, f->svc, 6, 6);
+        CHECK(f->city.coverage[6][6] == 0);
+    }
+    {  // Housing tier 0xC8: base-1, radius 1, ceiling 4
+        auto f = fresh();
+        f->city.tile[20][20] = 0xC8;
+        dispatch_tile(f->city, f->svc, 20, 20);
+        CHECK(f->city.coverage[20][21] == 1);
+        CHECK(f->city.coverage[20][22] == 0);
+        CHECK(f->svc.coverage_ceiling[20][20] == 4);
+    }
+    {  // Housing tier 0xD7: base+2, radius 2, ceiling 31
+        auto f = fresh();
+        f->city.tile[20][20] = 0xD7;
+        dispatch_tile(f->city, f->svc, 20, 20);
+        CHECK(f->city.coverage[20][22] == 4);
+        CHECK(f->city.coverage[20][23] == 0);
+    }
+    {  // The base really is a parameter (DS:0x6BF8)
+        auto f = fresh();
+        f->svc.housing_coverage_base = 5;
+        f->city.tile[20][20] = 0xCA;  // base, radius 1, ceiling 8
+        dispatch_tile(f->city, f->svc, 20, 20);
+        CHECK(f->city.coverage[20][20] == 5);
+    }
+    {  // 0xF4 routes to the Market (flags 0x08)
+        auto f = fresh();
+        f->city.tile[30][30] = 0xF4;
+        dispatch_tile(f->city, f->svc, 30, 30);
+        CHECK((f->city.service_flags[30][36] & 0x08) != 0);
+    }
+    {  // 0xEF routes to the Barracks (no flags, land value -3)
+        auto f = fresh();
+        f->city.tile[30][30] = 0xEF;
+        dispatch_tile(f->city, f->svc, 30, 30);
+        CHECK(f->city.service_flags[30][30] == 0);
+        CHECK(f->city.land_value[30][35] == -3);
+    }
+    {  // 0xE9 and an id with no transcribed handler are no-ops
+        auto f = fresh();
+        f->city.tile[7][7] = 0xE9;
+        dispatch_tile(f->city, f->svc, 7, 7);
+        CHECK(f->city.service_flags[7][7] == 0);
+        CHECK(f->city.coverage[7][7] == 0);
+        f->city.tile[8][8] = 0x99;
+        dispatch_tile(f->city, f->svc, 8, 8);
+        CHECK(f->city.service_flags[8][8] == 0);
+        CHECK(f->city.coverage[8][8] == 0);
+    }
 }
 
 // systems::housing (Phase 4, Layer 3). land_value_allows and tick_tile_00
@@ -665,7 +890,8 @@ void test_construction_place() {
 // the simulation dispatcher then recognises that tile's grown form.
 void test_construction_to_simulation_pipeline() {
     std::printf("test_construction_to_simulation_pipeline (place -> seed tile -> dispatch_tile)\n");
-    CityMap city;
+    auto f = fresh();
+    CityMap& city = f->city;
     for (int y = 40; y < 60; ++y)
         for (int x = 40; x < 60; ++x) city.tile[y][x] = 0x20;
 
@@ -674,7 +900,7 @@ void test_construction_to_simulation_pipeline() {
     // theater work at that cell with no further wiring.
     CHECK(place(city, CommandId::Theater, 50, 50));
     CHECK(city.tile[50][50] == 0xF0);
-    dispatch_tile(city, 50, 50);
+    dispatch_tile(city, f->svc, 50, 50);
     CHECK((city.service_flags[50][54] & 0x80) != 0);  // entertainment flag, radius 4
     CHECK(city.coverage[50][53] == 1);                 // coverage radius 3
 }
@@ -874,14 +1100,214 @@ void test_pl8_corpus_sanity() {
     }
 }
 
-void test_save_corpus_size_only() {
-    std::printf("test_save_corpus_size_only\n");
+// Real save files -- the first this project has ever had (2026-09-12): four
+// saves of one city from a single play session in the US build. They live in
+// GAIUS_TEST_ASSETS/gaius_test_saves/ rather than the game's own directory, so
+// playing the original again can't silently overwrite a fixture.
+//
+// Two things are checked here that no synthetic buffer could ever prove:
+//
+//  1. model::load -> model::serialize is byte-identical against saves the
+//     ORIGINAL ENGINE wrote. Phase 2's round trip was previously proven only
+//     against bytes this project made up.
+//
+//  2. systems::construction's footprints -- transcribed from the executable's
+//     placement handlers in Phase 5 -- match what the real game actually wrote
+//     into the tile grid. In CAESARUX.SAV, every connected component of each
+//     building's seed tile must be a full rectangle of exactly its spec's
+//     width x height, read row-major. That also confirms the row-major grid
+//     layout the model and viewer have assumed since Phase 1: the Hippodrome
+//     (4x2) and Coliseum (3x2) are non-square, so a column-major reading
+//     would show them transposed.
+//
+// Golden against these specific fixtures, the same way test_exepack_golden_
+// decode is golden against the analyzed US-build CSR.EXE.
+void test_save_corpus_real() {
+    std::printf("test_save_corpus_real (four saves from a real play session)\n");
     std::string dir = test_assets_dir();
-    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set (also: no real .SAV file has been supplied yet)"); return; }
-    fs::path p = fs::path(dir) / "CAESARXX.SAV";
-    if (!fs::exists(p)) { skip("no .SAV file found under " + dir + " — expected, none has been captured yet"); return; }
-    save::SaveFile sf = save::load(p.string());
-    CHECK(sf.raw.size() == save::kSaveSize);
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    fs::path saves = fs::path(dir) / "gaius_test_saves";
+    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    for (const char* n : names) {
+        if (!fs::exists(saves / n)) {
+            skip("real save fixture missing: " + (saves / n).string());
+            return;
+        }
+    }
+
+    for (const char* n : names) {
+        save::SaveFile sf = save::load((saves / n).string());
+        CHECK(sf.raw.size() == save::kSaveSize);
+        CityState st = gaius::model::load(sf);
+        save::SaveFile out = gaius::model::serialize(st);
+        CHECK(out.raw == sf.raw);
+    }
+
+    save::SaveFile ux = save::load((saves / "CAESARUX.SAV").string());
+    CityState st = gaius::model::load(ux);
+
+    struct Component { int cells, w, h; };
+    auto components = [&](uint8_t tid) {
+        std::vector<Component> out;
+        std::vector<uint8_t> seen(10000, 0);
+        for (int r = 0; r < 100; ++r) {
+            for (int c = 0; c < 100; ++c) {
+                if (seen[r * 100 + c] || st.city.tile[r][c] != tid) continue;
+                std::vector<std::pair<int, int>> stack{{r, c}};
+                seen[r * 100 + c] = 1;
+                int n = 0, r0 = r, r1 = r, c0 = c, c1 = c;
+                while (!stack.empty()) {
+                    auto [y, x] = stack.back();
+                    stack.pop_back();
+                    ++n;
+                    r0 = y < r0 ? y : r0;
+                    r1 = y > r1 ? y : r1;
+                    c0 = x < c0 ? x : c0;
+                    c1 = x > c1 ? x : c1;
+                    const int dy[] = {1, -1, 0, 0};
+                    const int dx[] = {0, 0, 1, -1};
+                    for (int k = 0; k < 4; ++k) {
+                        int ny = y + dy[k], nx = x + dx[k];
+                        if (ny < 0 || ny >= 100 || nx < 0 || nx >= 100) continue;
+                        if (seen[ny * 100 + nx] || st.city.tile[ny][nx] != tid) continue;
+                        seen[ny * 100 + nx] = 1;
+                        stack.push_back({ny, nx});
+                    }
+                }
+                out.push_back({n, c1 - c0 + 1, r1 - r0 + 1});
+            }
+        }
+        return out;
+    };
+
+    // Every placing command whose seed tile the player actually built in this
+    // session. (Temple is absent on purpose: its 0xD8 seed had already grown
+    // into its 0xE0 stage by this save.)
+    const CommandId built[] = {CommandId::BathHouses, CommandId::Oracle,   CommandId::School,
+                               CommandId::Hospital,   CommandId::Prefecture, CommandId::Barracks,
+                               CommandId::Theater,    CommandId::Coliseum, CommandId::Hippodrome,
+                               CommandId::HeavyIndustry, CommandId::Market};
+    for (CommandId id : built) {
+        PlacementSpec spec = placement_spec(id);
+        int w = spec.kind == PlacementKind::SingleCell ? 1 : spec.width;
+        int h = spec.kind == PlacementKind::SingleCell ? 1 : spec.height;
+        auto comps = components(spec.seed_tile);
+        CHECK(!comps.empty());
+        for (const auto& cp : comps) {
+            CHECK(cp.w == w);
+            CHECK(cp.h == h);
+            CHECK(cp.cells == w * h);
+        }
+    }
+}
+
+// formats/save's kGlobalWordDsAddress (the save writer's address order),
+// checked against real saves three ways that don't depend on each other.
+void test_save_corpus_globals() {
+    std::printf("test_save_corpus_globals (writer-order DS table vs real saves)\n");
+    using save::kGlobalWordDsAddress;
+    CHECK(kGlobalWordDsAddress[0] == 0x6CE2);
+    CHECK(kGlobalWordDsAddress[0x3E / 2] == 0x6CA2);  // the treasury
+    CHECK(kGlobalWordDsAddress[0xC2 / 2] == 0x6C0E);  // one variable written twice...
+    CHECK(kGlobalWordDsAddress[0xDC / 2] == 0x6C0E);  // ...here too
+    bool has_6cb8 = false;
+    for (uint16_t a : kGlobalWordDsAddress) has_6cb8 = has_6cb8 || a == 0x6CB8;
+    CHECK(!has_6cb8);  // never saved
+
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    fs::path saves = fs::path(dir) / "gaius_test_saves";
+    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    for (const char* n : names) {
+        if (!fs::exists(saves / n)) {
+            skip("real save fixture missing: " + (saves / n).string());
+            return;
+        }
+    }
+
+    auto word_at_ds = [](const save::SaveFile& sf, uint16_t ds, int copy) -> int {
+        const uint8_t* blk = sf.block("global_words_128").first;
+        int seen = 0;
+        for (size_t i = 0; i < 128; ++i) {
+            if (kGlobalWordDsAddress[i] != ds) continue;
+            if (seen++ != copy) continue;
+            return blk[2 * i] | (blk[2 * i + 1] << 8);
+        }
+        return -1;
+    };
+
+    const int funds[] = {7182, 4692, 3210, 3144};
+    for (int k = 0; k < 4; ++k) {
+        save::SaveFile sf = save::load((saves / names[k]).string());
+        const uint8_t* tiles = sf.block("city_tiles_100x100").first;
+
+        // 1. The treasury, falling as the player built.
+        CHECK(word_at_ds(sf, 0x6CA2, 0) == funds[k]);
+        // 2. The variable saved twice holds one value in both copies.
+        CHECK(word_at_ds(sf, 0x6C0E, 0) == word_at_ds(sf, 0x6C0E, 1));
+        // 3. Two statistics the tick publishes equal the grid's own counts, using
+        //    the tile sets read off the handlers that feed each counter.
+        int buildings = 0, roads = 0;
+        for (int i = 0; i < 10000; ++i) {
+            const uint8_t t = tiles[i];
+            if ((t >= 0xC8 && t <= 0xE8) || (t >= 0xEA && t <= 0xF3) || t == 0xF5 || t == 0xF6) ++buildings;
+            if (t >= 0x36 && t <= 0x40) ++roads;
+        }
+        CHECK(word_at_ds(sf, 0x6BF2, 0) == buildings);
+        CHECK(word_at_ds(sf, 0x6BF0, 0) == roads);
+    }
+}
+
+// The strongest check in this suite. The engine rebuilds A2C4 coverage and
+// C9D4's service bits from scratch every tick (routine 0x2C8D3 resets them,
+// then every dispatched tile adds to them), so one reset_tick plus one full
+// dispatch pass over a real save's own tile grid must reproduce the layers the
+// ORIGINAL ENGINE saved -- every cell, every service bit. It does, in all four
+// saves: systems::service checked against the game itself, not against
+// transcribed parameters. tools/sim_check prints the same comparison with
+// per-quarter and per-tile breakdowns when something doesn't match.
+void test_save_corpus_simulation() {
+    std::printf("test_save_corpus_simulation (reset_tick + dispatch reproduces saved A2C4 and C9D4 service bits)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    fs::path saves = fs::path(dir) / "gaius_test_saves";
+    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    for (const char* n : names) {
+        if (!fs::exists(saves / n)) {
+            skip("real save fixture missing: " + (saves / n).string());
+            return;
+        }
+    }
+
+    const uint8_t bits[5] = {0x04, 0x08, 0x20, 0x40, 0x80};
+    for (const char* n : names) {
+        save::SaveFile sf = save::load((saves / n).string());
+        auto saved = std::make_unique<CityState>(gaius::model::load(sf));
+        auto f = fresh();
+        f->city = saved->city;
+        const uint8_t* globals = sf.block("global_words_128").first;
+        for (int i = 0; i < 128; ++i)
+            if (save::kGlobalWordDsAddress[i] == 0x6BF8)
+                f->svc.housing_coverage_base = globals[2 * i] | (globals[2 * i + 1] << 8);
+
+        reset_tick(f->city, f->svc);
+        for (int y = 0; y < gaius::model::kCityH; ++y)
+            for (int x = 0; x < gaius::model::kCityW; ++x) dispatch_tile(f->city, f->svc, x, y);
+
+        int coverage_match = 0;
+        int bit_match[5] = {0, 0, 0, 0, 0};
+        for (int y = 0; y < gaius::model::kCityH; ++y) {
+            for (int x = 0; x < gaius::model::kCityW; ++x) {
+                if (f->city.coverage[y][x] == saved->city.coverage[y][x]) ++coverage_match;
+                for (int b = 0; b < 5; ++b) {
+                    if ((f->city.service_flags[y][x] & bits[b]) == (saved->city.service_flags[y][x] & bits[b]))
+                        ++bit_match[b];
+                }
+            }
+        }
+        CHECK(coverage_match == 10000);
+        for (int b = 0; b < 5; ++b) CHECK(bit_match[b] == 10000);
+    }
 }
 
 void test_exepack_golden_decode() {
@@ -1137,6 +1563,8 @@ int main() {
     test_service_apply_coverage();
     test_service_apply_land_value();
     test_service_apply_flags();
+    test_service_evolve_land_value();
+    test_service_derive_network_flags();
     test_service_building_handlers();
     test_service_dispatch_tile();
     test_housing_land_value_allows();
@@ -1159,7 +1587,9 @@ int main() {
     test_empire2_corpus_roundtrip();
     test_vpx_golden_image();
     test_pl8_corpus_sanity();
-    test_save_corpus_size_only();
+    test_save_corpus_real();
+    test_save_corpus_globals();
+    test_save_corpus_simulation();
     test_exepack_golden_decode();
 
     std::printf("\n=== %d checks run, %d failed, %d test(s) skipped ===\n", g_ran, g_failures, g_skipped);

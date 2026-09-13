@@ -4,7 +4,8 @@
 // Slice a CAESARxx.SAV file into its confirmed blocks (see
 // formats/save/save.hpp) and print offset/size/name for each, plus the
 // leading global-words section decoded per CAESAR_SAVE_FORMAT.md
-// (128 x 16-bit words, descending DS address from DS:0x6CE2), matching
+// (128 x 16-bit words, the save writer's own DS-address order, which is NOT a simple descending
+// range -- see formats/save/save.hpp kGlobalWordDsAddress), matching
 // caesar_save_layout.py's output for direct cross-checking. Also loads the
 // save through model::CityState (Phase 2) and prints the 70-record actor
 // table -- see model/city_state.hpp for which fields are confirmed vs.
@@ -38,10 +39,10 @@ int main(int argc, char** argv) {
             std::printf("  0x%04zX-0x%04zX  %5zu  %s\n", b.offset, b.offset + b.size - 1, b.size, b.name.c_str());
         }
 
-        std::printf("\nFirst global words (save+0xNNNN -> DS:0xNNNN, per the recovered descending-address mapping):\n");
+        std::printf("\nFirst global words (save+0xNNNN -> DS:0xNNNN, per the save writer's address order):\n");
         auto [block_ptr, block_size] = sf.block("global_words_128");
         for (size_t i = 0; i + 1 < block_size; i += 2) {
-            uint16_t ds_addr = static_cast<uint16_t>(0x6CE2 - i);
+            uint16_t ds_addr = gaius::formats::save::kGlobalWordDsAddress[i / 2];
             uint16_t value = static_cast<uint16_t>(block_ptr[i]) | (static_cast<uint16_t>(block_ptr[i + 1]) << 8);
             std::printf("  save+0x%04zX -> DS:0x%04X = 0x%04X (%u)\n", i, ds_addr, value, value);
         }

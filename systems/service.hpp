@@ -1,43 +1,47 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — systems/service.hpp
 //
-// Layer 3 (per GAIUS_MASTERPLAN.md section 5's engine module breakdown):
-// the A2C4/C9D4/54A4 service-propagation primitives, the per-tick reset,
-// building handlers, and (new in Phase 5) the city-tile simulation
-// dispatcher itself.
+// Layer 3 (GAIUS_MASTERPLAN.md section 5): the A2C4/C9D4/54A4 propagation
+// primitives, the per-tick reset, and the city-tile simulation dispatcher
+// with every handler it routes to.
 //
-// Sources, in order of authority for anything they overlap on:
-//   - This project's own direct extraction of the full 256-entry DS:153A
-//     table (docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 11,
-//     flat file offset 0x75D8A in the decompressed US-build image,
-//     verified byte-exact against 22 independently-published tile
-//     addresses from CAESAR_CITY_STATE_v5.md) -- authoritative for tile
-//     IDs specifically. It CORRECTS CAESAR_CONSTRUCTION_RE_v2.md section
-//     5's own table: v2's handler addresses are all exactly right, but
-//     every tile ID it attaches them to is off by one (v2 says temple
-//     variant 1 is tiles 0xDF/E0; it's actually 0xE0/E1, and so on down
-//     the whole list). v2 in turn already corrected an earlier assumption
-//     (still present, uncorrected, in CAESAR_REVERSE_ENGINEERING_COMPLETE.md
-//     section 72 / CAESAR_CITY_STATE_v6.md) that these handlers lived at
-//     0x43-0x50 -- they don't, they're in the 0xE0-0xF6 range. Phase 3 was
-//     built against that oldest, wrong assumption; this file was corrected
-//     once already for the v2 tile IDs, and now again for the off-by-one.
-//   - CAESAR_CITY_STATE_v5.md -- the 0x36-0x40 construction/placement-state
-//     family (distinct from the civic buildings) and the
-//     apply_coverage/apply_land_value/apply_flags call-order/mechanism.
-//   - CAESAR_CITY_STATE_v6.md -- the C9D4 bit table and per-tick reset;
-//     still authoritative for what v2 doesn't touch.
+// SOURCE OF AUTHORITY: direct disassembly of the decompressed US-build
+// CSR.EXE (2026-09-13). Every routine and every handler parameter below is
+// transcribed from the machine code -- see
+// docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 15. That supersedes
+// the parameter tables in CAESAR_CONSTRUCTION_RE_v2.md and
+// CAESAR_CITY_STATE_v5/v6.md, which this file used to follow and which were
+// wrong in ways only reading the code could reveal:
 //
-// Scope discipline unchanged from Phase 3: only handlers with an actual
-// documented radius/mask/delta get implemented. v2 newly documents Plaza,
-// Barracks, Prefecture, School, Oracle (all skipped in Phase 3 for lack of
-// data) and adds a previously-undocumented coverage component to
-// Hospital/Theater/Coliseum/Hippodrome. One tile (0xEA, "Career /
-// specialized service") has a concrete mechanism but no confident building
-// identity even in v2's own text -- implemented under its tile ID, not a
-// building name, for exactly that reason. 0xE8 ("generic/default handler
-// -- generic object processing") has no specifics beyond that description
-// and is left as the dispatcher's default case.
+//   - Five handlers had wrong parameters as well as wrong building names.
+//     v2 called tile 0xEE "School" and 0xEF "Oracle" and gave them one shared
+//     mechanism; they are Prefecture and Barracks (Phase 5's construction
+//     seeds, confirmed by nine 1x1 and one 3x3 footprint in a real save) and
+//     share nothing.
+//   - Coverage ceilings are NOT a universal 31: heavy industry 2, the
+//     0xF5/F6 building 3, barracks 5, prefecture 8, market 16. Because the
+//     ceiling is a per-cell running minimum (see apply_coverage), those low
+//     values cap coverage from every other source in range -- which is how
+//     industry and the military suppress their surroundings.
+//   - Tiles 0x3C-0x3F use radius 1 and have no land-value effect.
+//   - Temple variants 1-3 do apply coverage (radius 2/3/4).
+//   - Bath houses use flags radius 3 and coverage radius 2 -- what Phase 3
+//     originally had, before a "correction" from v2 swapped them.
+//   - The per-tick land-value propagator has no -8 floor. The -8..+50 range
+//     is real but belongs to a separate per-cell routine (evolve_land_value).
+//
+// Engine behaviour to know before calling anything here:
+//
+//   - The main tick scans the 100x100 grid a quarter at a time (25 rows per
+//     tick phase, routine 0x2BBBB) and dispatches a cell ONLY if its tile id
+//     is greater than 0x35. Tiles 0x00-0x35 are never simulated. That scan is
+//     the only code in the executable that reads DS:153A.
+//   - Most handlers first bump a per-scan counter (which the tick later
+//     publishes as a city statistic) and, when it equals one of two runtime
+//     thresholds, call an event routine INSTEAD of their normal effect for
+//     that one cell. The thresholds are runtime-only globals and the event
+//     routines aren't decoded, so that branch is not modeled: every handler
+//     here always performs its normal effect.
 
 #pragma once
 
@@ -49,7 +53,7 @@
 namespace gaius::systems::service {
 
 // CAESAR_REVERSE_ENGINEERING_COMPLETE.md's own confidence scale (section
-// ~79), reused here rather than inventing a parallel one.
+// ~79), reused rather than inventing a parallel one.
 enum class Confidence { Definitive, High, StrongInference, Unresolved };
 
 struct C9D4BitInfo {
@@ -59,200 +63,208 @@ struct C9D4BitInfo {
     const char* evidence;
 };
 
-// CAESAR_CITY_STATE_v6.md's "Current C9D4 table", updated with
-// CAESAR_CONSTRUCTION_RE_v2.md's newer findings where v2 adds a radius/
-// building attribution v6 didn't have (0x08 in particular: v6 found no
-// producer at all; v2's dispatch-table decode found one).
+// The C9D4 bitfield. Names are the RE corpus's; producers and radii are from
+// the disassembly. A name is only as strong as its confidence -- several are
+// about who SETS a bit, not what reads it.
 inline const std::array<C9D4BitInfo, 8> kC9D4BitTable = {{
     {0x01, "service_prerequisite", Confidence::StrongInference,
      "CAESAR_CITY_STATE_v6.md: consumed by housing transitions; exact semantic name still open"},
-    {0x02, "derived_network_availability", Confidence::High,
-     "CAESAR_CITY_STATE_v6.md: generated directly from 7BB4.10 by routine 0x2DA0D"},
-    {0x04, "localized_service_coverage", Confidence::StrongInference,
-     "CAESAR_CONSTRUCTION_RE_v2.md: tile 0xE8/EA handler (2C159), requires 7BB4.10, "
-     "apply_flags(radius=4, mask=0x04) + coverage+1@radius3; building identity (bath houses) still inferred, not proven. "
-     "Tile IDs corrected from v2's own (off by one) -- see docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 11."},
-    {0x08, "localized_service_coverage_c", Confidence::StrongInference,
-     "CAESAR_CONSTRUCTION_RE_v2.md: tile 0xF4 handler (2C475), apply_flags(radius=6, mask=0x08) + "
-     "coverage+1@radius1; building identity (barracks) inferred from section-72-style provisional table, not proven. "
-     "CAESAR_CITY_STATE_v6.md had found no producer for this bit at all -- v2 supersedes that."},
+    {0x02, "derived_network_availability", Confidence::Definitive,
+     "Routine 0x2DA0D (disassembled), run at tick start: for every cell, if C9D4.10 is set it sets 0x02 and "
+     "clears 0x10, otherwise it clears 0x02. The source is C9D4.10 -- an earlier evidence line said 7BB4.10, "
+     "which is wrong. See derive_network_flags."},
+    {0x04, "localized_service_coverage", Confidence::High,
+     "Set only by the Bath Houses handler (tiles 0xE8/EA, 0x2C159) at radius 3, and only when 7BB4.10 is set. "
+     "0xE8 is Bath Houses' construction seed and real saves show it as 1x1 buildings. What reads the bit is not traced."},
+    {0x08, "localized_service_coverage_c", Confidence::High,
+     "Set by the Market handler (tile 0xF4, 0x2C475) at radius 6. 0xF4 is Market's construction seed, real saves "
+     "show 2x2 buildings, and the engine counts 0xF4 cells /4. Previously attributed to barracks, which was wrong."},
     {0x10, "persistent_connection_state", Confidence::High,
-     "CAESAR_CITY_STATE_v6.md: survives the &=0x12 per-tick reset, drives 0x02 generation"},
-    {0x20, "religious", Confidence::High,
-     "CAESAR_REVERSE_ENGINEERING_COMPLETE.md HIGH CONFIDENCE example; CAESAR_CONSTRUCTION_RE_v2.md: "
-     "four temple variants (tiles 0xE0-0xE7) confirmed via DS:153A dispatch decode, radii 6/8/10/12"},
-    {0x40, "localized_service_coverage_b", Confidence::StrongInference,
-     "CAESAR_CONSTRUCTION_RE_v2.md: tile 0xEC/ED handler (2C20D), apply_flags(radius=4, mask=0x40) + "
-     "coverage+1@radius3; building identity (hospital) inferred, not proven (v6 called it \"anonymous\")"},
+     "Survives the &=0x12 reset (0x2C8D3), but routine 0x2DA0D then converts it into 0x02 and clears it -- so it "
+     "only persists from when it is set until the next tick start."},
+    {0x20, "religious", Confidence::StrongInference,
+     "Temples (tiles 0xE0-0xE7) set it at radius 6/8/10/12, but the Prefecture handler (tile 0xEE, 0x2C267) also "
+     "sets it at radius 4. So it is not exclusively temple-produced, and the corpus's 'religious' label is "
+     "unverified against any consumer. Downgraded from High on that evidence."},
+    {0x40, "localized_service_coverage_b", Confidence::High,
+     "Set at radius 4 by the handler shared by tiles 0xEC (School) and 0xED (Hospital), 0x2C20D. Both are "
+     "construction seeds, and the engine also counts 0xEC-0xED cells together (/4)."},
     {0x80, "entertainment", Confidence::High,
-     "CAESAR_REVERSE_ENGINEERING_COMPLETE.md HIGH CONFIDENCE example; CAESAR_CONSTRUCTION_RE_v2.md: "
-     "theater/coliseum/hippodrome (tiles 0xF0/F1/F2) confirmed via DS:153A dispatch decode, radii 4/6/7"},
+     "Theater/Coliseum/Hippodrome (tiles 0xF0/F1/F2) set it at radius 4/6/7, confirmed by disassembly."},
 }};
 
-// Runtime-only per-tick scratch state -- NOT part of model::CityState / the
-// save format. "2D94" resets to 0x3F (63) every tick (CAESAR_CITY_STATE_v6.md
-// routine 0x2C8D3). CAESAR_CITY_STATE_v5.md additionally describes a
-// ratchet-style interaction between this array and apply_coverage's
-// `ceiling` argument (the limit can only be *raised*, never lowered, when
-// A2C4 already exceeds it) -- but every worked disassembly example found
-// so far (CAESAR_CONSTRUCTION_RE_v2.md's temple-variant-4 decode, and
-// v5/v6's 0x36-0x40 family) passes a literal constant (31, or 0x40 for
-// land value) as the ceiling and clamps directly against it, with no
-// observed behavior that depends on the ratchet. So: this array's
-// reset-to-63 behavior is still modeled (it's confirmed), but no handler
-// below reads from it -- none has been found to. The ratchet mechanic
-// itself is not implemented; flagged as an open question rather than
-// guessed at.
+// Runtime-only per-tick state -- not part of model::CityState or the save.
 struct ServiceState {
+    ServiceState();
+
+    // "2D94": the per-cell coverage ceiling. reset_tick sets every cell to
+    // 0x3F; apply_coverage lowers a cell to the smallest ceiling applied to it
+    // this tick and clamps A2C4 against it. Constructed at 0x3F, i.e. the
+    // state immediately after a reset.
     model::CityGrid<uint8_t> coverage_ceiling{};
+
+    // DS:0x6BF8 -- the base delta the housing tiers add to coverage (see
+    // apply_housing_tier). It is a saved global (global_words_128 index 105,
+    // save+0xD2) and holds 2 in all four real saves captured so far; what sets
+    // it is not traced. The default is that observed value, not a derived one.
+    int housing_coverage_base = 2;
 };
 
-// Per-tick reset, exactly matching routine 0x2C8D3
-// (CAESAR_CITY_STATE_v6.md): C9D4 &= 0x12 (only bits 0x02/0x10 survive;
-// see kC9D4BitTable), A2C4 = 0, coverage_ceiling = 0x3F (63) everywhere.
+// Routine 0x2C8D3 (disassembled). For every cell: C9D4 &= 0x12, A2C4 = 0,
+// coverage_ceiling = 0x3F. Land value (54A4) is NOT touched -- it is never
+// reset per tick.
 void reset_tick(model::CityMap& city, ServiceState& service);
 
-// apply_coverage(x, y, delta, radius, ceiling) -- adds `delta` to A2C4 for
-// every cell within a SQUARE radius of (x,y) -- Chebyshev distance <=
-// radius, per CAESAR_REVERSE_ENGINEERING_COMPLETE.md section 73's "service
-// propagation uses square-radius routines" (not a circle) -- clamped to
-// [0, ceiling]. `ceiling` is used as a direct clamp bound here, matching
-// every worked disassembly example (see ServiceState's comment on why the
-// alternative "read from 2D94" interpretation was dropped). Out-of-bounds
-// cells are silently skipped (city edges are a normal case, not an error).
-void apply_coverage(model::CityMap& city, int x, int y, int delta, int radius, int ceiling);
+// Routine 0x2DA0D (disassembled), called straight after reset_tick. For every
+// cell: if C9D4.10 is set, set C9D4.02 and clear C9D4.10; otherwise clear
+// C9D4.02. The engine skips the whole pass while the runtime global DS:0x6D9B
+// is nonzero; that global's meaning isn't traced, so the caller decides.
+void derive_network_flags(model::CityMap& city);
 
-// apply_land_value(x, y, delta, radius, ceiling) -- same square radius.
-// The absolute range -8..+50 is DEFINITIVE (CAESAR_CITY_STATE_v6.md
-// routine 0x2DA7E) and is always enforced regardless of `ceiling`;
-// `ceiling` additionally caps the result below +50 if the caller supplies
-// something lower (CAESAR_CITY_STATE_v5.md's 0x3C-0x3F family does exactly
-// this, with ceiling=0x40=64 -- above +50, so it has no additional effect
-// there; no call site with a ceiling *below* 50 has turned up yet). The
-// floor is always -8, not caller-adjustable.
-void apply_land_value(model::CityMap& city, int x, int y, int delta, int radius, int ceiling = 50);
+// Routine 0x2C577 (disassembled). For every cell within a square (Chebyshev)
+// radius of (x,y), clipped to the grid:
+//   1. coverage_ceiling = min(coverage_ceiling, ceiling)   (signed 8-bit)
+//   2. A2C4 += delta                                        (8-bit, wraps)
+//   3. if A2C4 > coverage_ceiling, A2C4 = coverage_ceiling  (signed 8-bit)
+// No lower clamp. Step 1 is the point: the ceiling is a running minimum over
+// every source that touched the cell this tick, so a low-ceiling source caps
+// coverage for all others in range, whichever is applied first.
+void apply_coverage(model::CityMap& city, ServiceState& service, int x, int y, int delta, int radius, int ceiling);
 
-// apply_flags(x, y, radius, mask) -- same square radius. ORs `mask` into
-// C9D4. Pure set, no clamping.
+// Routine 0x2C6AF (disassembled) -- the square-radius land-value propagator
+// the handlers call. For each cell in range: 54A4 += delta (8-bit, wraps);
+// if 54A4 > ceiling (signed), 54A4 = ceiling. NO floor: repeated negative
+// deltas accumulate without limit (a real save holds -43). The -8..+50 range
+// belongs to evolve_land_value, not here.
+void apply_land_value(model::CityMap& city, int x, int y, int delta, int radius, int ceiling);
+
+// Routine 0x2DA7E (disassembled) -- a per-cell land-value step, distinct from
+// the propagator. If the cell has C9D4.20 set, 54A4 += growth; otherwise
+// 54A4 -= 2. Then clamp to -8..+50. This is where the documented -8..+50 range
+// actually lives. Its caller is not yet identified -- no DS:153A handler calls
+// it -- so nothing in this file invokes it.
+void evolve_land_value(model::CityMap& city, int x, int y, int growth);
+
+// Routine 0x2C7BB (disassembled). ORs `mask` into C9D4 over a square radius.
+// The engine also has a one-shot mode: if the runtime global DS:0x6CFC is
+// nonzero, the FIRST cell visited is ANDed with the mask instead and the global
+// is cleared -- after one cell, not after the call. Nothing in the dispatcher
+// sets it, so that mode isn't modeled.
 void apply_flags(model::CityMap& city, int x, int y, int radius, uint8_t mask);
 
-// The only concrete ceiling value ever observed across every traced
-// coverage-applying handler so far (temple variant 4, all of 0x36-0x40,
-// and every civic-building tile below) -- used here as a shared constant
-// rather than re-deriving "31" at each call site. This is a pattern
-// (every +1/+2/+3-delta handler found uses it), not something independently
-// confirmed per building -- if a future trace finds a handler using a
-// different ceiling, that handler's number wins, not this one.
-constexpr int kObservedCoverageCeiling = 31;
+// The ceiling most civic handlers pass. Not universal -- see the handlers.
+constexpr int kCommonCoverageCeiling = 31;
 
-// --- Construction/placement-state tile family 0x36-0x40 ---
-// (CAESAR_CITY_STATE_v5.md; distinct from the civic buildings below --
-// these are written directly by construction/placement code, per v5's
-// trace of the placement routine at 0x17F00-0x1834C.)
+// ---- Tile handlers. Coverage is (delta, radius, ceiling); flags (radius,
+// mask); land value (delta, radius, ceiling). All from the disassembly. ----
 
-// Tiles 0x36-0x3B (6 IDs, all dispatch to the same handler): if
-// 7BB4[cell] & 0x10, apply_coverage(+1, radius=1, ceiling=31); otherwise
-// no effect.
-void apply_tile_36_3b(model::CityMap& city, int x, int y);
-// Tiles 0x3C-0x3F (4 IDs): apply_coverage(+1, radius=2, ceiling=31) +
-// apply_land_value(-2, radius=2, ceiling=0x40) -- service-positive,
-// land-value-limiting.
-void apply_tile_3c_3f(model::CityMap& city, int x, int y);
-// Tile 0x40: apply_coverage(+2 normally, or +3 if 7BB4[cell] & 0x10 is
-// set, radius=1, ceiling=31) -- a stronger variant of 0x36-0x3B.
-void apply_tile_40(model::CityMap& city, int x, int y);
+// Tiles 0x36-0x3B, handler 0x2BC26 (road/wall family): if 7BB4.10
+// ("connected") is set, coverage (+1, r1, c31). Otherwise nothing.
+void apply_tile_36_3b(model::CityMap& city, ServiceState& service, int x, int y);
 
-// --- Confirmed civic-building handlers, tiles 0xE0-0xF6 ---
-// (CAESAR_CONSTRUCTION_RE_v2.md section 5's dispatch-table decode, itself
-// corrected by this project: v2's own published tile IDs for this range
-// are each off by exactly one, discovered by directly locating and
-// extracting the full 256-entry DS:153A table from the real executable
-// (flat file offset 0x75D8A, confirmed byte-exact against 22 independently
-// -published tile-0x00-0x21 addresses from CAESAR_CITY_STATE_v5.md -- see
-// docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 11). The HANDLER
-// ADDRESSES below match v2's exactly; only the TILE IDs they're attached
-// to are corrected. SUPERSEDES Phase 3's original tile-ID assumption of
-// 0x43-0x50 too, same as v2 already did.)
+// Tiles 0x3C-0x3F, handler 0x2BC6A: coverage (+2 if 7BB4.10 is set, else +1,
+// r1, c31). No land-value effect -- v5's -2 land value and radius 2 are not in
+// the code.
+void apply_tile_3c_3f(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Which deity a temple honors isn't identified anywhere in the corpus --
-// only that there are four variants with these radii (tiles
-// 0xE0/E1=1, 0xE2/E3=2, 0xE4/E5=3, 0xE6/E7=4).
+// Tile 0x40, handler 0x2BCB9: coverage (+3 if 7BB4.10 is set, else +2, r1, c31).
+void apply_tile_40(model::CityMap& city, ServiceState& service, int x, int y);
+
+// Which deity each variant honours isn't identified. Two tile ids per
+// variant: 0xE0/E1, 0xE2/E3, 0xE4/E5, 0xE6/E7.
 enum class TempleVariant { Variant1 = 1, Variant2, Variant3, Variant4 };
 
-// apply_flags(x, y, radius, 0x20), radius per variant (6/8/10/12).
-// CORRECTED from Phase 3: only variant 4's coverage component is actually
-// confirmed (v2 section 7's worked decode of handler 0x2C103: coverage+1
-// @ radius=5, ceiling=31). Variant 1's table entry marks its coverage
-// radius with a "?" (uncertain); variants 2-3 have none documented at all.
-// Rather than assume they share variant 4's numbers, only variant 4 gets a
-// coverage call here -- an inconsistency in the *code*, honestly, but not
-// in the *evidence*.
-void apply_temple(model::CityMap& city, int x, int y, TempleVariant variant);
+// Temples, handlers 0x2C001 / 0x2C057 / 0x2C0AD / 0x2C103: coverage (+1,
+// radius 2/3/4/5, c31), then flags (radius 6/8/10/12, 0x20).
+void apply_temple(model::CityMap& city, ServiceState& service, int x, int y, TempleVariant variant);
 
-// Tiles 0xE8/EA. CORRECTED from Phase 3 (was radius=3/mask=0x04 +
-// coverage radius=2, no gate -- all three numbers were wrong, sourced from
-// v6's less precise pass). Now: requires 7BB4[cell] & 0x10 (same gating
-// pattern as apply_tile_36_3b) to do anything at all; when set,
-// apply_flags(radius=4, mask=0x04) + apply_coverage(+1, radius=3,
-// ceiling=31).
-void apply_bath_houses(model::CityMap& city, int x, int y);
+// Bath Houses, tiles 0xE8/EA, handler 0x2C159. Only if 7BB4.10 is set:
+// coverage (+1, r2, c31), then flags (r3, 0x04).
+void apply_bath_houses(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0xEC/ED. CORRECTED: added a coverage component v6 didn't document
-// (+1, radius=3, ceiling=31); flags unchanged (radius=4, mask=0x40).
-void apply_hospital(model::CityMap& city, int x, int y);
+// Oracle, tile 0xEB, handler 0x2C1B4: coverage (+2, r8, c31), then land value
+// (-2, r5, c32). Identity from Phase 5's construction seed and a 2x1 footprint
+// in a real save. (Was apply_tile_ea, named before the off-by-one fix.)
+void apply_oracle(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0xF0. CORRECTED: added coverage (+1, radius=3, ceiling=31); flags
-// unchanged (radius=4, mask=0x80).
-void apply_theater(model::CityMap& city, int x, int y);
-// Tile 0xF1. CORRECTED: added coverage (+1, radius=4, ceiling=31); flags
-// unchanged (radius=6, mask=0x80).
-void apply_coliseum(model::CityMap& city, int x, int y);
-// Tile 0xF2. CORRECTED: added coverage (+1, radius=5, ceiling=31); flags
-// unchanged (radius=7, mask=0x80).
-void apply_hippodrome(model::CityMap& city, int x, int y);
+// School (0xEC) and Hospital (0xED) share handler 0x2C20D: coverage (+1, r3,
+// c31), then flags (r4, 0x40). The engine counts the two together as well.
+void apply_school_or_hospital(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0xF3. NEW in Phase 5 (no data existed for this in Phase 3):
-// apply_coverage(+1, radius=4, ceiling=31). No C9D4 flag documented.
-void apply_plaza(model::CityMap& city, int x, int y);
+// Prefecture, tile 0xEE, handler 0x2C267: coverage (+1, r2, c8), flags
+// (r4, 0x20), land value (-2, r3, c48).
+void apply_prefecture(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0xF4. NEW: apply_flags(radius=6, mask=0x08) +
-// apply_coverage(+1, radius=1, ceiling=31).
-void apply_barracks(model::CityMap& city, int x, int y);
+// Barracks, tile 0xEF, handler 0x2C2D7: coverage (+1, r3, c5), then land value
+// (-3, r5, c32). No flags.
+void apply_barracks(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tiles 0xF5/F6. NEW: apply_coverage(+1, radius=3, ceiling=31). No C9D4
-// flag documented.
-void apply_prefecture(model::CityMap& city, int x, int y);
+// Theater 0xF0 (0x2C330): coverage (+1, r3, c31), flags (r4, 0x80).
+void apply_theater(model::CityMap& city, ServiceState& service, int x, int y);
+// Coliseum 0xF1 (0x2C386): coverage (+1, r4, c31), flags (r6, 0x80).
+void apply_coliseum(model::CityMap& city, ServiceState& service, int x, int y);
+// Hippodrome 0xF2 (0x2C3DC): coverage (+1, r5, c31), flags (r7, 0x80).
+void apply_hippodrome(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0xEE (School) and 0xEF (Oracle). NEW. Both dispatch to
-// mechanically-IDENTICAL parameters per v2's table (apply_coverage(+1,
-// radius=2, ceiling=31) + apply_flags(radius=4, mask=0x20) +
-// apply_land_value(-2, radius=3)) -- v1 itself says distinguishing them
-// "requires caller/placement correlation" that hasn't been done. Exposed
-// as two identically-implemented functions (not one shared name) so a
-// future correction to just one of them doesn't require restructuring
-// callers -- but don't read the duplication as two independently-confirmed
-// mechanisms; it's one mechanism attributed to two possible buildings.
-void apply_school(model::CityMap& city, int x, int y);
-void apply_oracle(model::CityMap& city, int x, int y);
+// Heavy Industry, tile 0xF3, handler 0x2C432: coverage (+1, r4, c2).
+void apply_heavy_industry(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0xEB. v2 itself hedges the identity ("Career / specialized
-// service") -- named after its tile ID, not a building, for exactly that
-// reason. Mechanism: apply_coverage(+2, radius=8, ceiling=31) +
-// apply_land_value(-2, radius=5).
-void apply_tile_ea(model::CityMap& city, int x, int y);
+// Market, tile 0xF4, handler 0x2C475: coverage (+1, r1, c16), then flags
+// (r6, 0x08).
+void apply_market(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Dispatches city.tile[y][x] to the handler above matching that exact
-// tile ID, per the definitive DS:153A far-pointer table structure
-// (CAESAR_CONSTRUCTION_RE_v2.md section 3: "handler = table[city_tile];
-// call_far(handler)"; this project's own full 256-entry extraction is the
-// authority for which tile ID maps to which handler -- see this file's
-// top comment). Deliberately does NOT handle tiles 0x00-0x15 (that's
-// systems::housing's concern, kept separate rather than duplicating
-// dispatch logic across two systems) or tile 0xE9 (documented only as
-// "generic/default handler -- generic object processing", with no
-// specifics to implement). Any tile ID not listed above (including 0xE9)
-// is a no-op here, matching CAESAR_CITY_STATE_v5.md's own dispatch table
-// listing most IDs outside the known families as no-ops/returns.
-void dispatch_tile(model::CityMap& city, int x, int y);
+// Tiles 0xF5/F6, handler 0x2C4AB: coverage (+1, r3, c3). Named by tile id
+// because the building is unidentified: no construction seed maps to it, and
+// in a real save it appears as 3x3 blocks. Workshop (3x3) is a candidate only.
+void apply_tile_f5_f6(model::CityMap& city, ServiceState& service, int x, int y);
+
+// Tiles 0xC8-0xD7, six handlers (0x2BDA2..0x2BF06) sharing one template:
+// coverage (base + adj, radius, ceiling), base = service.housing_coverage_base.
+//   0xC8-C9: base-1, r1, c4     0xCA-CC: base, r1, c8     0xCD-D0: base+1, r1, c31
+//   0xD1-D4: base+1, r2, c31    0xD5-D6: base+2, r1, c31  0xD7:    base+2, r2, c31
+// DEFINITIVE as code. That these sixteen ids are the manual's sixteen housing
+// grades is STRONG INFERENCE: 0xC8 is Housing's construction seed, the
+// parameters rise in tiers with the id, the range ends where the temple family
+// begins (0xD8), and in real saves these tiles line the roads. Reads the tile
+// id itself; a no-op for any other tile.
+void apply_housing_tier(model::CityMap& city, ServiceState& service, int x, int y);
+
+// ---- Handlers for tiles no construction command seeds directly. Identities
+// go only as far as the evidence does. ----
+
+// Tiles 0x94/95, handler 0x2BD08: coverage (+1, r2, c8), then land value
+// (-2, r2, c64). Unidentified. (CAESAR_CITY_STATE_v5.md attributed exactly these
+// parameters to tiles 0x3C-0x3F, which run different code.)
+void apply_tile_94_95(model::CityMap& city, ServiceState& service, int x, int y);
+
+// Tiles 0xA2/A3 and 0xA7-0xB2, handler 0x2BD3D: coverage (-2, r3, c8), then
+// coverage (-2, r1, c8) -- NEGATIVE coverage. With no lower clamp the byte
+// wraps, which is why real saves hold A2C4 values of 254/255 near these tiles.
+// Unidentified. 0xA7 is also the tile land_value_allows writes when land value
+// exceeds its threshold (systems::housing).
+void apply_tile_a2_b2(model::CityMap& city, ServiceState& service, int x, int y);
+
+// Tiles 0xB9/BB/BC, handler 0x2BD72: coverage (+1, r2, c31), only if C9D4.01 is
+// set. reset_tick clears that bit and no handler in this file sets it, so within
+// one tick this fires only if some untraced producer set 0x01 first.
+// Unidentified; the ids sit between the Well (0xB8) and Fountain (0xBA) seeds.
+void apply_tile_b9_bb_bc(model::CityMap& city, ServiceState& service, int x, int y);
+
+// Tiles 0xD8-0xDF, two handlers: 0xD8-DB (0x2BF4F) coverage (+1, r2, c31) and
+// land value (-2, r2, c53); 0xDC-DF (0x2BFA8) coverage (+1, r3, c31) and land
+// value (-2, r3, c37). 0xD8 is Temple's construction seed, the range sits
+// directly below the finished temples (0xE0+), and Phase 5 traced growth stages
+// through 0xDD-0xDF -- so "temple under construction" is STRONG INFERENCE.
+// Reads the tile id itself; a no-op for any other tile.
+void apply_temple_stage(model::CityMap& city, ServiceState& service, int x, int y);
+
+// One cell of the DS:153A dispatch. Tiles <= 0x35 are a no-op, exactly as at
+// the engine's only dispatch site (routine 0x2BBBB). Every DS:153A handler that
+// calls one of the three propagation routines (0x2C577 / 0x2C6AF / 0x2C7BB) is
+// dispatched here; the remaining ids' handlers call none of them, so they are
+// no-ops for A2C4, C9D4 and 54A4. (They may still do other work -- tile or
+// actor changes, say -- that isn't modeled.) Verified against real saves by
+// tools/sim_check.
+void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y);
 
 }  // namespace gaius::systems::service

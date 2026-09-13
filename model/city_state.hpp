@@ -78,6 +78,14 @@ struct Actor {
     uint16_t screen_y() const { return static_cast<uint16_t>(raw[0x04] | (raw[0x05] << 8)); }  // +0x04
     uint8_t active() const { return raw[0x06]; }                                                // +0x06 -- exact bit packing unconfirmed
     uint8_t type() const { return raw[0x07]; }                                                  // +0x07 -- actor class, NOT a building tile id
+    // raw_x/raw_y (+0x12/+0x13) are the current cell for PROVINCE actors, but
+    // NOT for city actors. In four real saves the province actor's raw (21,23)
+    // agrees with both packed_xy (941 = 23*40+21) and screen/16 (336,368). City
+    // actors instead hold values like (99,99) and (50,0) here, while packed_xy
+    // and screen_x/16 agree with each other (col 81 <-> screen_x 1296). So for
+    // a city actor's position use packed_xy (or screen_x/y / 16); what
+    // raw_x/raw_y mean for city actors -- an origin or destination? -- is
+    // unresolved.
     uint8_t raw_x() const { return raw[0x12]; }                                                 // +0x12
     uint8_t raw_y() const { return raw[0x13]; }                                                 // +0x13
     uint16_t packed_xy() const { return static_cast<uint16_t>(raw[0x18] | (raw[0x19] << 8)); }  // +0x18
