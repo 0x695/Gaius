@@ -92,8 +92,8 @@ constexpr int kCityCellPx = 6;
 // Build-mode tool ring: the placeable construction commands, in toolbar
 // order. The drag-built ones (Road/Wall/Plaza/Clear Area) place one cell per
 // click, which is what the engine's handler does for each cell of a drag.
-// Forum and Workshop place their lowest grade / first goods type (choosing
-// either isn't in the toolbar yet).
+// Forum and Workshop place the grade / goods chosen with CycleVariant (V,
+// gamepad right shoulder, or tapping the selected button again).
 constexpr systems::construction::CommandId kBuildTools[] = {
     systems::construction::CommandId::Road,      systems::construction::CommandId::Wall,
     systems::construction::CommandId::Plaza,     systems::construction::CommandId::ClearArea,

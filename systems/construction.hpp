@@ -106,10 +106,9 @@ enum class PlacementKind {
     // place() refuses these; use place_road / place_wall / place_plaza /
     // clear_area below (transcribed 2026-09-13).
     DragAutoTiled,
-    // Footprint is known but the seed tile is selected per-variant at
-    // runtime (Forum has 8 grades, Workshop 8 goods types), from a table
-    // this pass didn't decode. Placement is therefore not implementable
-    // without inventing a tile id.
+    // The seed tile depends on a player choice (Forum: 8 grades, Workshop:
+    // 8 goods types), which place() doesn't take. place() refuses these; use
+    // place_forum / place_workshop below (transcribed 2026-09-13).
     VariantSelected,
 };
 
