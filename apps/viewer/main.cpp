@@ -91,11 +91,12 @@ constexpr int kCityCellPx = 6;
 // Build-mode tool ring: the placeable construction commands, in toolbar
 // order. The drag-built ones (Road/Wall/Plaza/Clear Area) place one cell per
 // click, which is what the engine's handler does for each cell of a drag.
-// Excludes the variant-selected ones (Forum/Workshop) -- see
-// systems/construction.hpp for why those can't be placed yet.
+// Forum and Workshop place their lowest grade / first goods type (choosing
+// either isn't in the toolbar yet).
 constexpr systems::construction::CommandId kBuildTools[] = {
     systems::construction::CommandId::Road,      systems::construction::CommandId::Wall,
     systems::construction::CommandId::Plaza,     systems::construction::CommandId::ClearArea,
+    systems::construction::CommandId::Forum,     systems::construction::CommandId::Workshop,
     systems::construction::CommandId::Housing,   systems::construction::CommandId::Well,
     systems::construction::CommandId::Fountain,  systems::construction::CommandId::ReservoirPipe,
     systems::construction::CommandId::Temple,    systems::construction::CommandId::BathHouses,
@@ -330,7 +331,7 @@ int main(int argc, char** argv) {
     bool time_running = save_mode && !start_paused;
     constexpr Uint32 kMonthMs = 2000;
     auto advance_month = [&]() {
-        systems::month::run_month(state.city, sim);
+        systems::month::run_month(state, sim);
         city_image_dirty = true;
         std::printf("month %d, year %d: population %d\n", sim.month + 1, sim.year,
                     4 * sim.population_units);
@@ -346,7 +347,9 @@ int main(int argc, char** argv) {
             case construction::CommandId::Road: return construction::place_road(state.city, drag, x, y);
             case construction::CommandId::Wall: return construction::place_wall(state.city, drag, x, y);
             case construction::CommandId::Plaza: return construction::place_plaza(state.city, x, y);
-            case construction::CommandId::ClearArea: return construction::clear_area(state.city, sim.random, x, y);
+            case construction::CommandId::ClearArea: return construction::clear_area(state, sim.random, x, y);
+            case construction::CommandId::Forum: return construction::place_forum(state, 0, x, y);
+            case construction::CommandId::Workshop: return construction::place_workshop(state, 0, x, y);
             default: return construction::place(state.city, tool, x, y);
         }
     };

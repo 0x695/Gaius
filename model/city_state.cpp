@@ -134,3 +134,51 @@ formats::save::SaveFile serialize(const CityState& state) {
 }
 
 }  // namespace gaius::model
+
+namespace gaius::model {
+
+namespace {
+
+// final_state's layout, from the save writer (flat 0x042EC-0x04516): six
+// words, 12 bytes at DS:0x6B9E, then 22 words.
+struct FinalStateWord {
+    uint16_t ds;
+    size_t offset;
+};
+constexpr FinalStateWord kFinalStateWords[] = {
+    {0x6BB4, 0},  {0x6BB2, 2},  {0x6BB0, 4},  {0x6BAE, 6},  {0x6BAC, 8},  {0x6BAA, 10}, {0x6CB8, 24}, {0x6C02, 26},
+    {0x6BFC, 28}, {0x6C98, 30}, {0x6C96, 32}, {0x6C94, 34}, {0x6C90, 36}, {0x6C8E, 38}, {0x6C8C, 40}, {0x6C8A, 42},
+    {0x6C88, 44}, {0x6C86, 46}, {0x6C84, 48}, {0x6C82, 50}, {0x6C80, 52}, {0x6C7E, 54}, {0x6C5C, 56}, {0x6BEE, 58},
+    {0x6BEC, 60}, {0x6BEA, 62}, {0x6BE8, 64}, {0x6BE6, 66},
+};
+
+uint8_t* word_slot(std::vector<uint8_t>& bytes, size_t offset) {
+    return offset + 1 < bytes.size() ? &bytes[offset] : nullptr;
+}
+
+uint8_t* find_word(CityState& state, uint16_t ds) {
+    for (int i = 0; i < 128; ++i) {
+        if (formats::save::kGlobalWordDsAddress[i] == ds) return word_slot(state.global_words_128, static_cast<size_t>(i) * 2);
+    }
+    for (const FinalStateWord& w : kFinalStateWords) {
+        if (w.ds == ds) return word_slot(state.final_state, w.offset);
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+int global_word(const CityState& state, uint16_t ds, int fallback) {
+    const uint8_t* p = find_word(const_cast<CityState&>(state), ds);
+    return p ? static_cast<int16_t>(p[0] | (p[1] << 8)) : fallback;
+}
+
+bool set_global_word(CityState& state, uint16_t ds, int value) {
+    uint8_t* p = find_word(state, ds);
+    if (!p) return false;
+    p[0] = static_cast<uint8_t>(value & 0xFF);
+    p[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+    return true;
+}
+
+}  // namespace gaius::model

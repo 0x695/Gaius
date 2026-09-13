@@ -118,9 +118,9 @@ struct CityState {
     // formats::save::block_table()) are carried through byte-for-byte,
     // unmodeled, so the round trip stays exact without guessing at their
     // content. Their runtime addresses are known from the save writer
-    // (docs/FORMATS.md): table_480 = DS:0x5BA4 temple records (30x16),
-    // table_120 = DS:0x5B2C tile-0xEF records (10x12), table_720 =
-    // DS:0x585C tile-0xF5/0xF6 records (30x24), table_50/8/10 =
+    // (docs/FORMATS.md): table_480 = DS:0x5BA4 forum records (30x16),
+    // table_120 = DS:0x5B2C barracks records (10x12), table_720 =
+    // DS:0x585C workshop records (30x24), table_8 = workshops per goods, table_50/8/10 =
     // DS:0x581E/5816/580C, table_60_a-d = 3496:01F0/022C/0268/02A4,
     // table_72 = 3496:02E0, final_state = 34 globals.
     std::vector<uint8_t> global_words_128;
@@ -140,6 +140,16 @@ struct CityState {
 
 // Reshapes an already-loaded save file into a CityState.
 CityState load(const formats::save::SaveFile& sf);
+
+// A global word by its DS address: the 128 words of global_words_128 (see
+// formats::save::kGlobalWordDsAddress) and the 34 words of final_state (see
+// docs/FORMATS.md). Signed, as the engine uses them. Returns `fallback` for an
+// address the save doesn't store.
+int global_word(const CityState& state, uint16_t ds, int fallback = 0);
+
+// Sets a stored global word; returns false (and changes nothing) if the save
+// doesn't store `ds`.
+bool set_global_word(CityState& state, uint16_t ds, int value);
 
 // Inverse of load(): reproduces a formats::save::SaveFile's raw bytes
 // exactly, per the block table, from a CityState. NOTE this trusts the

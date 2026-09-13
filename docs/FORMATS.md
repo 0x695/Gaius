@@ -60,14 +60,14 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
   | Block | Runtime address | Size | What it is |
   |---|---|---|---|
   | `objects_70x50` | `DS:0x5D84` | 70×50 | the actor table: word +0 sprite frame, +2/+4 world x/y, byte +6 active, +7 type, word +8 own index (see `model::Actor`; the renderer at flat `0x6946` reads these) |
-  | `table_480` | `DS:0x5BA4` | 30×16 | temples: demolishing one clears its record (`0x1287C`) |
-  | `table_120` | `DS:0x5B2C` | 10×12 | the tile-`0xEF` buildings' records (`0x12A94`) |
-  | `table_720` | `DS:0x585C` | 30×24 | the tile-`0xF5`/`0xF6` buildings' records, which also drive their bottom-row sprites (`0x12963`, renderer `0x20613`) |
+  | `table_480` | `DS:0x5BA4` | 30×16 | forum records (tiles `0xE0`-`0xE7`, which the corpus called temples): +0 column, +2 row, +4 grade, +6 timer, +8 active — `construction::place_forum` |
+  | `table_120` | `DS:0x5B2C` | 10×12 | barracks records (tile `0xEF`): +0 column, +2 row, +6 active (`0x12A94`) |
+  | `table_720` | `DS:0x585C` | 30×24 | workshop records (tiles `0xF5`/`0xF6`): +0 column, +2 row, +4 goods, +6 timer, +8 active, +0x10 production level; they also drive the bottom-row sprites (renderer `0x20613`) — `construction::place_workshop` |
   | `city_tiles_100x100` | `43A5:0000` | 10000 | |
   | `cell_flags_c9d4`, `cell_value_a2c4`, `cell_flags_7bb4`, `cell_value_54a4` | `3496:C9D4`, `A2C4`, `7BB4`, `54A4` | 10000 each | |
   | `empire2_1602` | `3496:2752` | 1602 | |
   | `table_50` | `DS:0x581E` | 50 | |
-  | `table_8` | `DS:0x5816` | 8 | per-kind counters: demolishing a `0xF5`/`0xF6` decrements the one its record names |
+  | `table_8` | `DS:0x5816` | 8 | workshops per goods type (bytes) |
   | `table_10` | `DS:0x580C` | 10 | |
   | `table_60_a`-`d` | `3496:01F0`, `022C`, `0268`, `02A4` | 60 each | |
   | `table_72` | `3496:02E0` | 72 | |

@@ -396,11 +396,11 @@ void test_service_building_handlers() {
     std::printf("test_service_building_handlers (every handler parameter, transcribed from disassembly)\n");
     auto cov = [](const CityMap& c, int x, int y) { return static_cast<int>(c.coverage[y][x]); };
 
-    // Temples: coverage radius 2/3/4/5 (variants 1-3 were previously
-    // missing), flags radius 6/8/10/12.
+    // Forums (tiles 0xE0-0xE7): coverage radius 2/3/4/5, flags radius
+    // 6/8/10/12.
     for (int v = 1; v <= 4; ++v) {
         auto f = fresh();
-        apply_temple(f->city, f->svc, 50, 50, static_cast<TempleVariant>(v));
+        apply_forum(f->city, f->svc, 50, 50, static_cast<ForumTier>(v));
         int cr = v + 1, fr = 4 + 2 * v;
         CHECK(cov(f->city, 50 + cr, 50) == 1);
         CHECK(cov(f->city, 51 + cr, 50) == 0);
@@ -539,7 +539,7 @@ void test_service_building_handlers() {
     {  // What the low ceilings are for: a heavy industry beside a temple caps
        // the temple's coverage in their overlap at 2.
         auto f = fresh();
-        for (int i = 0; i < 5; ++i) apply_temple(f->city, f->svc, 50, 50, TempleVariant::Variant4);
+        for (int i = 0; i < 5; ++i) apply_forum(f->city, f->svc, 50, 50, ForumTier::Tier4);
         CHECK(f->city.coverage[50][50] == 5);  // alone, it accumulates
         apply_heavy_industry(f->city, f->svc, 52, 50);
         CHECK(f->city.coverage[50][50] == 2);  // capped inside industry's radius
@@ -597,7 +597,7 @@ void test_service_building_handlers() {
 // city.tile[y][x] to the handler above matching that exact ID.
 void test_service_dispatch_tile() {
     std::printf("test_service_dispatch_tile (DS:153A dispatch, incl. the <=0x35 gate and housing tiers)\n");
-    {  // A temple-4 tile produces exactly apply_temple's variant-4 effect
+    {  // A tile-0xE6 forum produces exactly apply_forum's tier-4 effect
         auto f = fresh();
         f->city.tile[50][50] = 0xE6;
         dispatch_tile(f->city, f->svc, 50, 50);
@@ -1652,6 +1652,95 @@ void test_construction_road_rebuild_real_saves() {
     }
 }
 
+// Forum (0x14D2F) and Workshop (0x15377), and removing their records on
+// demolition (0x1287C / 0x12963), on a synthetic save.
+void test_construction_forum_and_workshop() {
+    std::printf("test_construction_forum_and_workshop (records, counts, sizes, demolition)\n");
+    using namespace gaius::systems::construction;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->table_480.assign(480, 0);
+    st->table_720.assign(720, 0);
+    st->table_120.assign(120, 0);
+    st->table_8.assign(8, 0);
+    for (auto& row : st->city.tile) row.fill(0x1D);
+    auto word = [](const std::vector<uint8_t>& t, size_t o) { return static_cast<int16_t>(t[o] | (t[o + 1] << 8)); };
+
+    // Grades 0 / 3 / 7: tile 0xE0 + grade, sizes 2 / 3 / 4.
+    CHECK(place_forum(*st, 0, 10, 10));
+    CHECK(place_forum(*st, 3, 20, 10));
+    CHECK(place_forum(*st, 7, 30, 10));
+    CHECK(st->city.tile[11][11] == 0xE0 && st->city.tile[10][12] == 0x1D);
+    CHECK(st->city.tile[12][22] == 0xE3 && st->city.tile[10][23] == 0x1D);
+    CHECK(st->city.tile[13][33] == 0xE7 && st->city.operational_state[13][33] == 15);
+    CHECK(global_word(*st, 0x6CA0) == 3);
+    CHECK(word(st->table_480, 16 + 0) == 20 && word(st->table_480, 16 + 2) == 10);
+    CHECK(word(st->table_480, 16 + 4) == 3 && word(st->table_480, 16 + 8) == 1);
+    CHECK(!place_forum(*st, 0, 10, 10));  // occupied
+    set_global_word(*st, 0x6CA0, 30);
+    CHECK(!place_forum(*st, 0, 50, 50));  // 30 forums already
+    set_global_word(*st, 0x6CA0, 3);
+
+    // A workshop for goods 5: tile 0xF6, 3x3, per-goods count.
+    CHECK(place_workshop(*st, 5, 40, 40));
+    CHECK(st->city.tile[42][42] == 0xF6 && st->city.tile[40][40] == 0xF6);
+    CHECK(global_word(*st, 0x6C9E) == 1 && st->table_8[5] == 1);
+    CHECK(word(st->table_720, 4) == 5 && word(st->table_720, 8) == 1);
+    CHECK(place_workshop(*st, 2, 60, 40));
+    CHECK(st->city.tile[40][60] == 0xF5);
+
+    gaius::systems::month::Random random;
+    // Demolish the goods-5 workshop from a non-anchor cell.
+    CHECK(clear_area(*st, random, 42, 41));
+    CHECK(st->city.tile[40][40] >= 0xA7 && st->city.tile[40][40] <= 0xAA);
+    CHECK(global_word(*st, 0x6C9E) == 1 && st->table_8[5] == 0);
+    CHECK(word(st->table_720, 8) == 0 && word(st->table_720, 0) == 0);
+
+    // Demolish the grade-3 forum: record gone, count down, and the flag
+    // routine's clear mode -- the square's first cell keeps only the mask,
+    // every other cell gains it.
+    for (int y = 0; y < kCityH; ++y) st->city.service_flags[y].fill(0x81);
+    CHECK(clear_area(*st, random, 21, 11));
+    CHECK(global_word(*st, 0x6CA0) == 2);
+    CHECK(word(st->table_480, 16 + 8) == 0);
+    CHECK(st->city.service_flags[0][10] == 0x00);  // first cell of the radius-10 square around (20,10): &= 0x02, then &= 0x10
+    CHECK(st->city.service_flags[0][11] == (0x81 | 0x02 | 0x10));
+    CHECK(st->city.service_flags[20][30] == (0x81 | 0x02 | 0x10));
+    CHECK(st->city.service_flags[21][30] == 0x81);  // outside the square
+}
+
+// The fountain supply check (0x2CAE6) and pipe trace (0x2CBF1) inside the
+// water pass (0x2C93F).
+void test_service_fountain_supply() {
+    std::printf("test_service_fountain_supply (0x2C93F / 0x2CAE6 / 0x2CBF1)\n");
+    auto f = fresh();
+    for (auto& row : f->city.tile) row.fill(0x1D);
+    // Dry fountain at (10,10), a vertical pipe piece above it, a reservoir above that.
+    f->city.tile[10][10] = 0xBA;
+    f->city.tile[9][10] = 0x44;
+    f->city.tile[8][10] = 0xA4;
+    // A working fountain on its own, far away.
+    f->city.tile[50][50] = 0xB9;
+
+    apply_water(f->city);
+    CHECK(f->city.tile[10][10] == 0xB9);  // supplied: now working
+    CHECK(f->city.operational_state[10][10] == 1);
+    CHECK((f->city.service_flags[16][10] & 0x01) != 0);  // radius 6
+    CHECK((f->city.service_flags[17][10] & 0x01) == 0);
+    CHECK(f->city.tile[50][50] == 0xBA);  // no supply: dry
+    CHECK((f->city.service_flags[50][50] & 0x01) == 0);
+
+    // Next month: the level drops to 0, and the trace sets it back to 1.
+    apply_water(f->city);
+    CHECK(f->city.tile[10][10] == 0xB9 && f->city.operational_state[10][10] == 1);
+
+    // Cut the pipe: the fountain runs dry once its level is spent.
+    f->city.tile[9][10] = 0x1D;
+    apply_water(f->city);
+    CHECK(f->city.tile[10][10] == 0xBA);
+}
+
 // 2EF9:1425 from the image's initial state, computed independently.
 void test_month_random_sequence() {
     std::printf("test_month_random_sequence (2EF9:1425 from the image's initial state)\n");
@@ -1720,6 +1809,29 @@ void test_month_growth_changes_after_step_80() {
     CHECK(f->city.land_value[80][5] == growth_80);
     CHECK(f->city.land_value[81][5] == growth_81);
     CHECK(sim.random.walk == after.walk);
+}
+
+// 0x28215's four routines, recomputed from each real save's own inputs.
+void test_month_economy_matches_saves() {
+    std::printf("test_month_economy_matches_saves (0x28621/0x28694/0x28800/0x28826 vs four real saves)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    for (const char* name : {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"}) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        const uint16_t outputs[] = {0x6BF4, 0x6BCC, 0x6BFA, 0x6BF8, 0x6BF6};
+        int saved[5];
+        for (int i = 0; i < 5; ++i) saved[i] = global_word(*st, outputs[i], -9999);
+        gaius::systems::month::run_economy(*st);
+        int same = 0;
+        for (int i = 0; i < 5; ++i) same += global_word(*st, outputs[i]) == saved[i];
+        std::printf("  %s: %d/5 outputs reproduced (coverage base %d, growth base %d)\n", name, same, saved[3], saved[4]);
+        CHECK(same == 5);
+    }
 }
 
 void test_month_state_from_saves() {
@@ -2501,11 +2613,14 @@ int main() {
     test_pl8_corpus_sanity();
     test_pl8_matches_real_screenshots();
     test_construction_drag_rules();
+    test_construction_forum_and_workshop();
+    test_service_fountain_supply();
     test_construction_road_rebuild_real_saves();
     test_month_random_sequence();
     test_month_calendar_and_draws();
     test_month_growth_changes_after_step_80();
     test_month_state_from_saves();
+    test_month_economy_matches_saves();
     test_render_building_metrics();
     test_render_walkers();
     test_render_city_matches_screenshots();

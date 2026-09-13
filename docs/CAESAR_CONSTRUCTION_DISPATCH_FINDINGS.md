@@ -476,3 +476,93 @@ The exact sets are data in `systems/construction.cpp` (`kRoadRules`, `kWallRules
 Roads can be checked against the four real saves directly. Every road piece (`0x36`-`0x40`) is reset to `0x1D`, and `place_road` is called on those cells in row order (`test_construction_road_rebuild_real_saves`). That rebuilds 40/40, 90/90, 137/141 and 149/153 road tiles, with nothing refused and no other cell touched.
 
 The four misses are the same cells in `CAESARVX` and `CAESARUX`, and `CAESARWX` rebuilds that area exactly. In between, road cells next to those junctions were built over (cell (21,80) went from a road corner to a well), and Clear Area doesn't re-tile a cleared road's neighbours. The junction shapes are history that a rebuild from the final grid can't reproduce. Walls, plazas and clearing have no equivalent evidence in these saves (they contain no walls), so they're pinned by `test_construction_drag_rules` against the lifted code.
+
+## 19. Forum, Workshop, water and the month's economy (2026-09-13)
+
+### 19.1 Tiles `0xE0`-`0xE7` are the Forum, not temples
+
+**Forum (command 12, `0x14D2F`):**
+- It refuses once `DS:0x6CA0` reaches 30.
+- It sizes the building from the chosen grade `DS:0x6D89`: 2×2 for grades 0-2, 3×3 for 3-6, 4×4 for 7.
+- It places tile `0xE0` + grade through the shared footprint writer (`0x1232E`).
+- It then fills the first free 16-byte record in `DS:0x5BA4`: +0 column, +2 row, +4 grade, +6 timer = 0, +8 active = 1, +A a 0-7 frame counter. It also increments the count.
+
+Those sizes are exactly what the building table gives tiles `0xE0`-`0xE7`. So the "temple variants" of the inherited corpus, and of sections 11-15 here, are the eight Forum grades:
+- `service::apply_temple` is now `apply_forum`;
+- the save's `table_480` is the forum records;
+- the walker spawner `0x2D2F5` (rows 0 and 50) spawns from forums.
+
+Tiles `0xD8`-`0xDF` are still Temple's growth stages: Temple's seed is `0xD8`.
+
+**Workshop (command 28, `0x15377`):**
+- It refuses at `DS:0x6C9E` = 30.
+- It's 3×3, with tile `0xF5` + (goods type `DS:0x6D87` ÷ 4): goods 0-3 give `0xF5`, 4-7 give `0xF6`.
+- Its 24-byte record in `DS:0x585C` holds +0 column, +2 row, +4 goods, +6 timer, +8 active, +0x10 production level.
+- It increments the byte counter `DS:0x5816`[goods].
+
+So `0xF5`/`0xF6` are workshops (section 15's unidentified 3×3 building), `table_720` is their records and `table_8` the per-goods counts. By the same pattern, `0xEF` and `table_120` (10 × 12 bytes at `DS:0x5B2C`, active at +6) are barracks.
+
+**Demolition** removes the record of what it demolishes:
+- forums (`0x1287C`);
+- workshops (`0x12963`), which also decrement their goods counter;
+- barracks (`0x12A94`).
+
+Each routine decrements its count before searching.
+
+**The forum flag quirk.** Removing a forum's record calls the flag routine `0x2C7BB` with its clear-mode flag `DS:0x6CFC` set, for mask `0x02` and then `0x10`, radius 10. But the routine resets `DS:0x6CFC` after the first cell it visits. So the square's first cell gets `C9D4 &= mask`, and every other cell gets `|= mask`. Implemented as the engine behaves (`service::apply_flags_clear_mode`).
+
+### 19.2 The water pass, exactly (`0x2C93F`, `0x2CAE6`, `0x2CBF1`)
+
+**Every cell, in row order:**
+- **Reservoir `0xA4`:** water at radius 3.
+- **Well `0xB8`:** radius 1.
+- **Fountain (`0xB9`-`0xBD`):** asks the supply check, with *working* = (`0xB9` or `0xBB`).
+  - **Supplied:** water at radius 6; `0xBA` becomes `0xB9`, `0xBD` becomes `0xBB`.
+  - **Not supplied:** `0xB9` becomes `0xBA`, `0xBB`/`0xBC` become `0xBD`, and a sound plays.
+- **Houses `0xC8`-`0xD7`:** add to the population count in the same pass.
+
+**The supply check (`0x2CAE6`).** A fountain's `7BB4` byte is its water level.
+- The level drops by one.
+- Pipes are traced north, east, south and west by `0x2CBF1`:
+  - a reservoir (class `0xFF`) gives 1;
+  - a fountain (class `0x0B`) with a higher level than this one gives its level − 1, and counts as reached if it has water;
+  - anything else follows the turn table or stops.
+- The best non-zero result becomes the new level.
+- The check returns the level. If the level is 0, it returns 1 anyway when more than one watered fountain was reached, or exactly one and the fountain isn't working.
+
+**The two tables:**
+- **Pipe classes (`3496:1BE0`):**
+  - class 1: `0x43`, `0x44`, `0x72`-`0x75`, `0x8E`-`0x91`, `0xA0`;
+  - class 2: `0x42`, `0x45`, `0x8A`-`0x8D`, `0xA1`;
+  - classes 3-6: `0x46`-`0x49`;
+  - `0xFF`: `0xA4`-`0xA6`; `0x0B`: `0xB9`-`0xBD`.
+- **Turns (`3496:1BA0`):** for each class, the direction leaving for each direction entering, or 8 to stop. Classes 1 and 2 are straight vertical and horizontal pieces; 3-6 are the four corners.
+
+With this, the four real saves' coverage and service bits (including water) still match cell for cell (`tools/sim_check`). They hold only wells and dry fountains, so the tracer itself is pinned by `test_service_fountain_supply`.
+
+### 19.3 The economy at step 101 (`0x28215`)
+
+After population and water, four routines turn the month's state into the next month's housing inputs. They're given as formulas in `systems/month.hpp`, with their five tables in segment `3496` (`006E`, `0136`, `014B`, `017E`, `01B1`) embedded.
+- **`0x28621`** gives `DS:0x6BF4`, from population, the workshop count and `DS:0x6C36`.
+- **`0x28694`** gives a 0-100 share `DS:0x6BCC`, and `DS:0x6BFA` = share ÷ 5. The share is what's left of the population after `DS:0x6C06` percent, workshops × 20, forums × 30 and the month's scan counts (`DS:0x6BEA` × 30 + `DS:0x6BEE` × 12, times `DS:0x6BE8` / 4 + 1). It uses the C runtime's 32-bit multiply and divide.
+- **`0x28800`** gives `DS:0x6BF8`, the housing coverage base, from `DS:0x6C04` and `DS:0x6BFA`.
+- **`0x28826`** gives `DS:0x6BF6`, the land-value growth base, from `DS:0x6C04` and `DS:0x6C06` / 10.
+- Then `DS:0x6C00` += `DS:0x6C04`.
+
+Recomputed from each real save's own inputs, all five outputs match in all four saves (`test_month_economy_matches_saves`). `systems::month::run_month` on a whole save now runs this, so the month no longer relies on the bases read from the save. What `DS:0x6C04` and `DS:0x6C06` are to the player isn't established.
+
+### 19.4 The rest of the month, classified
+
+- **The other per-row routines spawn walkers:**
+  - `0x2D2F5` from forums;
+  - `0x2CE7C` from workshops: one record per row, rows 25-54, computing a 0-7 production level from several city globals and spawning actor kind 8;
+  - `0x2CD1C` from barracks: rows 75-84, kind 4.
+
+  All go through the actor allocator `0334:28F9`.
+- **Actor movement** is a two-level dispatch in `0x23C52`: actor type through `DS:0x134C` (30 handlers), then state (+0x31) through `DS:0x1384` (16 handlers). It isn't transcribed yet.
+- **Province-level events:** `0x2E249`/`0x2E220` (step 80) cycle province-map tiles `0x4C`/`0x79`/`0x7A`/`0x61`.
+- **Ratings and messages:**
+  - the step-105 routines `0x2E0BE`, `0x2DC72`, `0x2DEC8`, `0x2DD21` and `0x2DE0F` work on province, ratings and message globals;
+  - so do the 18-month `0x2D6F4` and `0x27BA1` (population milestones, with flags in `table_10`).
+
+  None touches the city grid layers; they belong to Phases 6-7.

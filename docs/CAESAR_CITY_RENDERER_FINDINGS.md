@@ -56,7 +56,7 @@ Special cases that switch to `HOUSES2.PL8`:
 | `0xEA` bath house 2×2 | 2 if watered, else 3 |
 | `0xF3` | 4 |
 | `0xF4` market | 5; `0x18`-`0x1A` while trading (`DS:0x6D3C & 0x30`, `DS:0x6BF8` > 0, population ≥ 30) |
-| `0xF5` / `0xF6` | top two rows: 6 / 7 (48×34, height forced to 32, 2 extra rows) |
+| `0xF5` / `0xF6` (workshops) | top two rows: 6 / 7 (48×34, height forced to 32, 2 extra rows) |
 | `0xF5` / `0xF6` bottom row (`7BB4` bit `0x08`) | no extra rows. The cell looks for an actor in the 30-entry, 24-byte table at `DS:0x585C` standing two rows up and up to two columns left. Left two cells draw 32×16 frame 8 + (actor byte `+0x10` & 7); right cell (`7BB4` bit `0x02`) draws 16×16 frame 16 + actor word `+0x04`. With no actor both read 0: frames 8 and 16. |
 | `0xF1` | `HOUSES2` `0x29`-`0x2B` while `DS:0x6D3A` ≥ 70 and population ≥ 200; otherwise the default |
 | `0xEC`, `0xEE` | animated variants gated on `DS:0x6D3E & 6`; otherwise the default |
@@ -81,7 +81,7 @@ A search of the captures with the decoded sheets finds 13 `HOUSES`, 13 `HOUSES2`
 ## 6. Open
 
 - Animation timing: which frame counters advance when (`DS:0x57EA`, `0x6D3A`, `0x6D3C`, `0x6D3E`).
-- The table at `DS:0x585C` (the save's `table_720`), which drives the `0xF5`/`0xF6` bottom row. Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
+- The workshop records at `DS:0x585C` (the save's `table_720`), which drive the `0xF5`/`0xF6` bottom row. Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
 - The overlay map modes (`0x1FB94`, `SHADE.PL8`).
 - What moves the actors (their types' behaviour), `SPRITE2.PL8`, `FIXT3.PL8` and the province view.
 - `HOUSES.PL8` frame 43 (8×16) and `HOUSES2.PL8` frames not listed above.

@@ -79,4 +79,30 @@ void run_step(model::CityMap& city, SimState& sim);
 // Runs steps until the calendar next advances.
 void run_month(model::CityMap& city, SimState& sim);
 
+// Routine 0x28215, run at step 101 after population and water: four routines
+// that turn the city's state into the inputs the next month's housing uses.
+// Reads and writes the save's global words (model::global_word). Checked by
+// recomputing each of four real saves' outputs from its own inputs.
+//   0x28621  DS:0x6BF4 = population units <= 100 ? table 3496:006E[units / 8]
+//            : clamp(units / 20 / (2 * workshops, if any) + DS:0x6C36 / 20 - 2, 0, 6)
+//   0x28694  DS:0x6BCC (a 0-100 percentage) = the population share left over
+//            once DS:0x6C06 percent, workshops x 20, forums x 30 and the monthly
+//            scan counts (DS:0x6BEA x 30 + DS:0x6BEE x 12, times DS:0x6BE8 / 4 + 1)
+//            are taken out; DS:0x6BFA = DS:0x6BCC / 5
+//   0x28800  DS:0x6BF8 (the housing coverage base) = 3496:014B[DS:0x6C04]
+//            + 3496:0136[DS:0x6BFA]
+//   0x28826  DS:0x6BF6 (the land-value growth base) = 3496:017E[DS:0x6C04]
+//            + 3496:01B1[DS:0x6C06 / 10]
+// then DS:0x6C00 += DS:0x6C04 (and DS:0x6BFE += DS:0x6C02, which the save
+// doesn't keep). What DS:0x6C04 and DS:0x6C06 mean to the player -- tax rate,
+// wages? -- isn't established; the arithmetic is.
+void run_economy(model::CityState& state);
+
+// A month on a whole save: as above, plus at step 101 the save's population
+// words (DS:0x6C10, DS:0x6C0E) are stored and run_economy() runs, and its
+// growth and coverage bases feed the months after; month and year are written
+// back to DS:0x6C1C / DS:0x6C32.
+void run_step(model::CityState& state, SimState& sim);
+void run_month(model::CityState& state, SimState& sim);
+
 }  // namespace gaius::systems::month

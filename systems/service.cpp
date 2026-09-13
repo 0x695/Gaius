@@ -106,8 +106,8 @@ void apply_tile_40(model::CityMap& city, ServiceState& service, int x, int y) {
     apply_coverage(city, service, x, y, connected(city, x, y) ? 3 : 2, 1, kCommonCoverageCeiling);
 }
 
-void apply_temple(model::CityMap& city, ServiceState& service, int x, int y, TempleVariant variant) {
-    const int n = static_cast<int>(variant);                                // 1..4
+void apply_forum(model::CityMap& city, ServiceState& service, int x, int y, ForumTier tier) {
+    const int n = static_cast<int>(tier);                                   // 1..4
     apply_coverage(city, service, x, y, 1, n + 1, kCommonCoverageCeiling);  // radius 2/3/4/5
     apply_flags(city, x, y, 4 + 2 * n, 0x20);                               // radius 6/8/10/12
 }
@@ -251,16 +251,16 @@ void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y) {
             apply_housing_tier(city, service, x, y);
             break;
         case 0xE0: case 0xE1:
-            apply_temple(city, service, x, y, TempleVariant::Variant1);
+            apply_forum(city, service, x, y, ForumTier::Tier1);
             break;
         case 0xE2: case 0xE3:
-            apply_temple(city, service, x, y, TempleVariant::Variant2);
+            apply_forum(city, service, x, y, ForumTier::Tier2);
             break;
         case 0xE4: case 0xE5:
-            apply_temple(city, service, x, y, TempleVariant::Variant3);
+            apply_forum(city, service, x, y, ForumTier::Tier3);
             break;
         case 0xE6: case 0xE7:
-            apply_temple(city, service, x, y, TempleVariant::Variant4);
+            apply_forum(city, service, x, y, ForumTier::Tier4);
             break;
         case 0xE8: case 0xEA:
             apply_bath_houses(city, service, x, y);
@@ -300,16 +300,105 @@ void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y) {
     }
 }
 
+namespace {
+
+// 3496:1BE0, the pipe class of every tile: 1-6 pipe pieces, 0xFF a water
+// source (reservoir), 0x0B a fountain, 0 anything else.
+uint8_t pipe_class(uint8_t t) {
+    switch (t) {
+        case 0x43: case 0x44: case 0x72: case 0x73: case 0x74: case 0x75:
+        case 0x8E: case 0x8F: case 0x90: case 0x91: case 0xA0:
+            return 1;
+        case 0x42: case 0x45: case 0x8A: case 0x8B: case 0x8C: case 0x8D: case 0xA1:
+            return 2;
+        case 0x46: return 3;
+        case 0x47: return 4;
+        case 0x48: return 5;
+        case 0x49: return 6;
+        case 0xA4: case 0xA5: case 0xA6: return 0xFF;
+        case 0xB9: case 0xBA: case 0xBB: case 0xBC: case 0xBD: return 0x0B;
+        default: return 0;
+    }
+}
+
+// 3496:1BA0: for pipe class c entering a cell heading north/east/south/west,
+// the direction it leaves in (0, 2, 4, 6), or 8 for a dead end.
+constexpr std::array<std::array<int, 4>, 7> kPipeTurn = {{
+    {8, 8, 8, 8}, {0, 8, 4, 8}, {8, 2, 8, 6}, {2, 8, 8, 4}, {6, 4, 8, 8}, {8, 0, 6, 8}, {8, 8, 2, 0},
+}};
+
+// 0x2CBF1: follows the pipe leaving (x, y) in `dir`. 1 on reaching a water
+// source; a fountain with a higher level than the start passes on that level
+// minus one; anything else ends the trace with 0.
+int trace_pipe(const model::CityMap& city, int x, int y, int dir, int& fountains_reached) {
+    const int start_level = city.operational_state[y][x];
+    for (;;) {
+        if ((dir == 0 && y <= 0) || (dir == 4 && y >= 99) || (dir == 2 && x >= 99) || (dir == 6 && x <= 0)) return 0;
+        if (dir == 0) --y;
+        else if (dir == 4) ++y;
+        else if (dir == 6) --x;
+        else if (dir == 2) ++x;
+        const uint8_t c = pipe_class(city.tile[y][x]);
+        if (c == 0xFF) return 1;
+        if (c == 0x0B) {
+            const int level = city.operational_state[y][x];
+            if (level == 0) return 0;
+            ++fountains_reached;
+            return level > start_level ? level - 1 : 0;
+        }
+        dir = c < kPipeTurn.size() ? kPipeTurn[c][static_cast<size_t>(dir / 2)] : 8;
+        if (dir == 8) return 0;
+    }
+}
+
+}  // namespace
+
+int fountain_supply(model::CityMap& city, int x, int y, bool working) {
+    uint8_t& level = city.operational_state[y][x];
+    if (level != 0) --level;
+    int reached = 0, best = 0;
+    for (int dir : {0, 2, 4, 6}) best = std::max(best, trace_pipe(city, x, y, dir, reached));
+    if (best != 0) level = static_cast<uint8_t>(best);
+    if (level != 0) return level;
+    return (reached > 1 || (!working && reached == 1)) ? 1 : 0;
+}
+
+void apply_flags_clear_mode(model::CityMap& city, int x, int y, int radius, uint8_t mask) {
+    const int y0 = std::max(0, y - radius), y1 = std::min(model::kCityH - 1, y + radius);
+    const int x0 = std::max(0, x - radius), x1 = std::min(model::kCityW - 1, x + radius);
+    bool first = true;
+    for (int cy = y0; cy <= y1; ++cy) {
+        for (int cx = x0; cx <= x1; ++cx) {
+            if (first) {
+                city.service_flags[cy][cx] &= mask;
+                first = false;
+            } else {
+                city.service_flags[cy][cx] |= mask;
+            }
+        }
+    }
+}
+
 void apply_water(model::CityMap& city) {
+    // 0x2C93F, water half.
     for (int y = 0; y < model::kCityH; ++y) {
         for (int x = 0; x < model::kCityW; ++x) {
-            const uint8_t t = city.tile[y][x];
-            if (t == 0xB8) {
-                apply_flags(city, x, y, 1, 0x01);
-            } else if (t == 0xA4) {
+            uint8_t& t = city.tile[y][x];
+            if (t == 0xA4) {
                 apply_flags(city, x, y, 3, 0x01);
-            } else if (t == 0xB9 || t == 0xBB || t == 0xBC) {
-                apply_flags(city, x, y, 6, 0x01);
+            } else if (t == 0xB8) {
+                apply_flags(city, x, y, 1, 0x01);
+            } else if (t >= 0xB9 && t <= 0xBD) {
+                const bool working = t == 0xB9 || t == 0xBB;
+                if (fountain_supply(city, x, y, working) != 0) {
+                    apply_flags(city, x, y, 6, 0x01);
+                    if (t == 0xBA) t = 0xB9;
+                    else if (t == 0xBD) t = 0xBB;
+                } else if (t == 0xB9) {
+                    t = 0xBA;
+                } else if (t == 0xBB || t == 0xBC) {
+                    t = 0xBD;
+                }
             }
         }
     }

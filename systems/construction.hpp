@@ -250,8 +250,40 @@ bool place_plaza(model::CityMap& city, int x, int y);
 // ground 0x1D; a reservoir 0xA4 restores the tile it stored in 7BB4; and a
 // building (>= 0xCA) is demolished whole (0x124F8): from its anchor, every
 // footprint cell becomes rubble 0xA7 + (random & 3), one generator draw per
-// cell. Demolishing a temple, 0xEF or 0xF5/0xF6 also removes it from a
-// runtime object table (DS:5BA4, DS:5B2C, DS:585C) that isn't modeled.
+// cell. This grid-only version leaves the building record tables alone; the
+// model::CityState overload below also removes the record.
 bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
+
+// ---------------------------------------------------------------------------
+// Buildings with a record: Forum (command 12, 0x14D2F) and Workshop (command
+// 28, 0x15377), transcribed 2026-09-13. Each takes its tile from a player
+// choice and is tracked in a record table the save keeps (docs/FORMATS.md).
+//
+// Forum: grade 0-7 (DS:0x6D89) -> tile 0xE0 + grade, 2x2 for grades 0-2, 3x3
+// for 3-6, 4x4 for 7 -- the sizes kBuildingMetrics gives tiles 0xE0-0xE7.
+// Refused once DS:0x6CA0 counts 30. Record in table_480 (DS:0x5BA4, 30 x 16
+// bytes): +0 column, +2 row, +4 grade, +6 timer, +8 active, +A frame counter.
+// (Tiles 0xE0-0xE7 were called temples in the inherited corpus; the command
+// that places them is the Forum.)
+//
+// Workshop: goods type 0-7 (DS:0x6D87) -> tile 0xF5 for goods 0-3, 0xF6 for
+// 4-7, 3x3. Refused once DS:0x6C9E counts 30. Record in table_720 (DS:0x585C,
+// 30 x 24 bytes): +0 column, +2 row, +4 goods, +6 timer, +8 active, +0x10
+// production level; table_8 (DS:0x5816) counts workshops per goods type.
+//
+// Both place through the shared footprint writer (0x1232E) -- the same
+// terrain rule and part indices as place() -- and return false where it
+// refuses. The record goes into the first free slot; with none free, the
+// building is placed without one, as in the engine.
+bool place_forum(model::CityState& state, int grade, int x, int y);
+bool place_workshop(model::CityState& state, int goods, int x, int y);
+
+// Clear Area on a whole save. As the grid version, and demolishing a forum
+// (0xE0-0xE7), workshop (0xF5/0xF6) or barracks (0xEF) first removes its
+// record and decrements its count (0x1287C / 0x12963 / 0x12A94). Removing a
+// forum's record also calls the flag routine in clear mode for C9D4 bits
+// 0x02 and 0x10 over radius 10 -- see service::apply_flags_clear_mode for
+// what that actually does.
+bool clear_area(model::CityState& state, month::Random& random, int x, int y);
 
 }  // namespace gaius::systems::construction

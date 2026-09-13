@@ -83,9 +83,9 @@ inline const std::array<C9D4BitInfo, 8> kC9D4BitTable = {{
      "Survives the &=0x12 reset (0x2C8D3), but routine 0x2DA0D then converts it into 0x02 and clears it -- so it "
      "only persists from when it is set until the next tick start."},
     {0x20, "religious", Confidence::StrongInference,
-     "Temples (tiles 0xE0-0xE7) set it at radius 6/8/10/12, but the Prefecture handler (tile 0xEE, 0x2C267) also "
-     "sets it at radius 4. So it is not exclusively temple-produced, and the corpus's 'religious' label is "
-     "unverified against any consumer. Downgraded from High on that evidence."},
+     "Forums (tiles 0xE0-0xE7, which the corpus called temples) set it at radius 6/8/10/12, and the Prefecture "
+     "handler (tile 0xEE, 0x2C267) at radius 4. The corpus's 'religious' label rests on the temple misreading and "
+     "is unverified against any consumer; kept as the name only for continuity."},
     {0x40, "localized_service_coverage_b", Confidence::High,
      "Set at radius 4 by the handler shared by tiles 0xEC (School) and 0xED (Hospital), 0x2C20D. Both are "
      "construction seeds, and the engine also counts 0xEC-0xED cells together (/4)."},
@@ -170,13 +170,15 @@ void apply_tile_3c_3f(model::CityMap& city, ServiceState& service, int x, int y)
 // Tile 0x40, handler 0x2BCB9: coverage (+3 if 7BB4.10 is set, else +2, r1, c31).
 void apply_tile_40(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Which deity each variant honours isn't identified. Two tile ids per
-// variant: 0xE0/E1, 0xE2/E3, 0xE4/E5, 0xE6/E7.
-enum class TempleVariant { Variant1 = 1, Variant2, Variant3, Variant4 };
+// Tiles 0xE0-0xE7 are the Forum's eight grades (the Forum command places
+// 0xE0 + grade -- construction::place_forum), which the inherited corpus
+// called temples. The simulation table handles them in pairs: 0xE0/E1,
+// 0xE2/E3, 0xE4/E5, 0xE6/E7.
+enum class ForumTier { Tier1 = 1, Tier2, Tier3, Tier4 };
 
-// Temples, handlers 0x2C001 / 0x2C057 / 0x2C0AD / 0x2C103: coverage (+1,
+// Forums, handlers 0x2C001 / 0x2C057 / 0x2C0AD / 0x2C103: coverage (+1,
 // radius 2/3/4/5, c31), then flags (radius 6/8/10/12, 0x20).
-void apply_temple(model::CityMap& city, ServiceState& service, int x, int y, TempleVariant variant);
+void apply_forum(model::CityMap& city, ServiceState& service, int x, int y, ForumTier tier);
 
 // Bath Houses, tiles 0xE8/EA, handler 0x2C159. Only if 7BB4.10 is set:
 // coverage (+1, r2, c31), then flags (r3, 0x04).
@@ -267,16 +269,32 @@ void apply_temple_stage(model::CityMap& city, ServiceState& service, int x, int 
 // tools/sim_check.
 void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Routine 0x2C93F, water half. Wells (tile 0xB8) set C9D4.01 within radius 1,
-// reservoirs (0xA4) within radius 3, and supplied fountains within radius 6.
-// The engine decides "supplied" with a pipe-network trace (0x2CAE6 -> 0x2CBF1)
-// that isn't transcribed, and flips fountains between working (0xB9/0xBB) and
-// dry (0xBA/0xBD) tiles to match. Here a fountain counts as supplied exactly
-// when its tile is a working one (0xB9, 0xBB, or 0xBC, which the engine only
-// leaves in place when supplied), and no tile is flipped. Reproduces the saved
-// C9D4.01 of four real saves cell for cell -- but those saves exercise wells and
-// dry fountains only, no reservoir or working fountain.
+// Routine 0x2C93F, water half, transcribed exactly (2026-09-13). Reservoirs
+// (tile 0xA4) set C9D4.01 within radius 3 and wells (0xB8) within radius 1.
+// Each fountain (0xB9-0xBD) asks fountain_supply(); if supplied it sets
+// C9D4.01 within radius 6 and a dry 0xBA becomes 0xB9, 0xBD becomes 0xBB; if
+// not, 0xB9 becomes 0xBA and 0xBB/0xBC become 0xBD (the engine also plays a
+// sound). Cells are visited in row order, so a fountain sees the levels its
+// earlier neighbours were just given. Reproduces the saved C9D4.01 of four real
+// saves cell for cell -- which contain wells and dry fountains, no reservoir.
 void apply_water(model::CityMap& city);
+
+// Routine 0x2CAE6. A fountain's 7BB4 byte is its water level. The level drops
+// by one, then the pipes leaving the fountain north, east, south and west are
+// traced (0x2CBF1) through the pipe classes of 3496:1BE0 and the turn table at
+// 3496:1BA0: a reservoir (0xA4-0xA6) gives 1, a fountain whose level is higher
+// than this one's gives its level minus one, and a dead end gives 0. The best
+// result, if nonzero, becomes the new level. Returns the level; with level 0,
+// returns 1 anyway if the traces reached more than one fountain with water, or
+// exactly one and `working` is false (the engine passes true for 0xB9/0xBB).
+int fountain_supply(model::CityMap& city, int x, int y, bool working);
+
+// Routine 0x2C7BB called with DS:0x6CFC set, as demolishing a forum does
+// (0x1287C). The flag is meant to switch the routine from OR to AND, but the
+// routine clears it after the first cell it visits: so the square's first cell
+// (top-left, clipped to the grid) keeps only `mask`, and every other cell in the
+// square gains `mask`. Transcribed as the engine behaves.
+void apply_flags_clear_mode(model::CityMap& city, int x, int y, int radius, uint8_t mask);
 
 // The service half of the engine's month-end, steps 100-105 of its 106-step
 // month: reset_tick, apply_water, then dispatch_tile over every cell (the four

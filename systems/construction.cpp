@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "systems/construction.hpp"
 
+#include <algorithm>
 #include <initializer_list>
 
 #include "systems/month.hpp"
+#include "systems/service.hpp"
 
 namespace gaius::systems::construction {
 
@@ -517,6 +519,140 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y) {
         return false;
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Forum, Workshop, and record removal -- see the header.
+
+namespace {
+
+constexpr uint16_t kForumCount = 0x6CA0;
+constexpr uint16_t kWorkshopCount = 0x6C9E;
+constexpr uint16_t kBarracksCount = 0x6C9C;
+
+std::vector<uint8_t>& sized(std::vector<uint8_t>& table, size_t size) {
+    if (table.size() < size) table.resize(size, 0);
+    return table;
+}
+
+int word_at(const std::vector<uint8_t>& t, size_t o) { return static_cast<int16_t>(t[o] | (t[o + 1] << 8)); }
+
+void set_word_at(std::vector<uint8_t>& t, size_t o, int v) {
+    t[o] = static_cast<uint8_t>(v & 0xFF);
+    t[o + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+}
+
+// 0x1232E for a square footprint with a given seed.
+bool write_square(model::CityMap& city, uint8_t seed, int size, int x, int y) {
+    if (!footprint_ok(city, x, y, size, size)) return false;
+    for (int dy = 0; dy < size; ++dy) {
+        for (int dx = 0; dx < size; ++dx) {
+            city.tile[y + dy][x + dx] = seed;
+            city.operational_state[y + dy][x + dx] = static_cast<uint8_t>(4 * dy + dx);
+        }
+    }
+    return true;
+}
+
+// 0x1287C
+void remove_forum(model::CityState& state, int x, int y) {
+    model::set_global_word(state, kForumCount, model::global_word(state, kForumCount) - 1);
+    auto& t = sized(state.table_480, 480);
+    for (size_t r = 0; r < 480; r += 16) {
+        if (word_at(t, r + 8) == 0 || word_at(t, r) != x || word_at(t, r + 2) != y) continue;
+        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 16), 0);
+        service::apply_flags_clear_mode(state.city, x, y, 10, 0x02);
+        service::apply_flags_clear_mode(state.city, x, y, 10, 0x10);
+        return;
+    }
+}
+
+// 0x12963
+void remove_workshop(model::CityState& state, int x, int y) {
+    model::set_global_word(state, kWorkshopCount, model::global_word(state, kWorkshopCount) - 1);
+    auto& t = sized(state.table_720, 720);
+    for (size_t r = 0; r < 720; r += 24) {
+        if (word_at(t, r + 8) == 0 || word_at(t, r) != x || word_at(t, r + 2) != y) continue;
+        const int goods = word_at(t, r + 4);
+        auto& per_goods = sized(state.table_8, 8);
+        if (goods >= 0 && goods < 8) --per_goods[static_cast<size_t>(goods)];
+        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 24), 0);
+        return;
+    }
+}
+
+// 0x12A94
+void remove_barracks(model::CityState& state, int x, int y) {
+    model::set_global_word(state, kBarracksCount, model::global_word(state, kBarracksCount) - 1);
+    auto& t = sized(state.table_120, 120);
+    for (size_t r = 0; r < 120; r += 12) {
+        if (word_at(t, r + 6) == 0 || word_at(t, r) != x || word_at(t, r + 2) != y) continue;
+        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 12), 0);
+        return;
+    }
+}
+
+}  // namespace
+
+bool place_forum(model::CityState& state, int grade, int x, int y) {
+    if (grade < 0 || grade > 7) return false;
+    const int count = model::global_word(state, kForumCount);
+    if (count >= 30) return false;
+    const int size = grade <= 2 ? 2 : grade <= 6 ? 3 : 4;
+    if (!write_square(state.city, static_cast<uint8_t>(0xE0 + grade), size, x, y)) return false;
+    auto& t = sized(state.table_480, 480);
+    for (size_t r = 0; r < 480; r += 16) {
+        if (word_at(t, r + 8) != 0) continue;
+        model::set_global_word(state, kForumCount, count + 1);
+        set_word_at(t, r + 8, 1);
+        set_word_at(t, r + 6, 0);
+        set_word_at(t, r, x);
+        set_word_at(t, r + 2, y);
+        set_word_at(t, r + 4, grade);
+        break;
+    }
+    return true;
+}
+
+bool place_workshop(model::CityState& state, int goods, int x, int y) {
+    if (goods < 0 || goods > 7) return false;
+    const int count = model::global_word(state, kWorkshopCount);
+    if (count >= 30) return false;
+    if (!write_square(state.city, static_cast<uint8_t>(0xF5 + (goods >> 2)), 3, x, y)) return false;
+    auto& t = sized(state.table_720, 720);
+    for (size_t r = 0; r < 720; r += 24) {
+        if (word_at(t, r + 8) != 0) continue;
+        model::set_global_word(state, kWorkshopCount, count + 1);
+        set_word_at(t, r + 8, 1);
+        set_word_at(t, r + 6, 0);
+        set_word_at(t, r + 0x10, 0);
+        set_word_at(t, r, x);
+        set_word_at(t, r + 2, y);
+        set_word_at(t, r + 4, goods);
+        ++sized(state.table_8, 8)[static_cast<size_t>(goods)];
+        break;
+    }
+    return true;
+}
+
+bool clear_area(model::CityState& state, month::Random& random, int x, int y) {
+    if (!in_grid(x, y)) return false;
+    model::CityMap& city = state.city;
+    if (city.tile[y][x] >= 0xCA) {
+        // 0x124F8: find the anchor, then the per-kind cleanup, then rubble.
+        int ax = x, ay = y;
+        while (ax > 0 && (city.operational_state[ay][ax] & 0x03)) --ax;
+        while (ay > 0 && (city.operational_state[ay][ax] & 0x0C)) --ay;
+        const uint8_t t = city.tile[ay][ax];
+        if (t >= 0xE0 && t <= 0xE7) {
+            remove_forum(state, ax, ay);
+        } else if (t == 0xF5 || t == 0xF6) {
+            remove_workshop(state, ax, ay);
+        } else if (t == 0xEF) {
+            remove_barracks(state, ax, ay);
+        }
+    }
+    return clear_area(city, random, x, y);
 }
 
 }  // namespace gaius::systems::construction
