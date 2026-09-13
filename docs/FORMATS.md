@@ -83,6 +83,6 @@ All in `tools/`, all built and smoke-tested against real files:
 ## What's next (see `GAIUS_ROADMAP.md`)
 
 - Map font frames to characters (`FONT1`/`FONT2`/`ROMFONT`, now decodable) and swap them in for `ui/font.hpp`'s placeholder; decode `MINIFONT.PL1`, a separate format.
-- Tile → sprite mapping: the screenshots now show which `FIXTS`/`HOUSES` frames sit on which map cells, a direct handle on the renderer lookup tables.
+- Tile → sprite mapping: **done** for the city view — `render::render_city`, traced in `docs/CAESAR_CITY_RENDERER_FINDINGS.md` and pixel-exact against the captures. Still open there: animation timing, walkers, the overlay map modes and the province view.
 - Match the palette for `PANEL1A`-`PANEL1D.VPX` (the panel variants), which `PANEL1.256` does not cover.
 - Phase 1: SDL2 viewer built on top of these decoders, plus the platform/input skeleton per `GAIUS_MASTERPLAN.md` section 5a.

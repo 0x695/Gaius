@@ -20,9 +20,11 @@
 // DOSBox screenshots of the city view, rendered with SHADE.256: with this
 // layout 13 HOUSES.PL8, 13 HOUSES2.PL8 and 72 FIXTS.PL8 frames appear in them
 // verbatim on the 16-pixel tile grid; read row-major, or column-major, none do.
-// It is also why the font sheets used to decode to noise. Every frame in every
-// shipped .PL8 has a pixel count divisible by 4; the decoder rejects one that
-// isn't rather than guess how its streams split.
+// It is also why the font sheets used to decode to noise. The streams are the
+// four planes of unchained VGA, each holding every 4th column: the engine's
+// blitter (303E:0BF0) copies a frame plane by plane through the sequencer's
+// map mask. So a frame's width must divide by 4 -- every non-empty frame in
+// every shipped .PL8 does, and the decoder rejects one that doesn't.
 //
 // Container header (NEW — resolved here, not fully documented upstream;
 // the existing RE corpus flagged "the first/header word preceding the

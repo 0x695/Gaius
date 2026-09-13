@@ -85,10 +85,13 @@ PL8Sheet load(const std::string& path) {
             }
         } else {
             // Stored as four streams, one after another; pixel i (row-major)
-            // is entry i/4 of stream i%4 -- the same interleave as .VPX.
-            if (pixel_count % 4 != 0) {
-                throw FormatError("pl8: frame " + std::to_string(i) + " has " + std::to_string(pixel_count) +
-                                   " pixels, not a multiple of 4, so its four streams can't be split (" + path + ")");
+            // is entry i/4 of stream i%4 -- the same interleave as .VPX. Each
+            // stream is one plane of unchained VGA (every 4th column), so
+            // the width must divide by 4.
+            if (frame.width % 4 != 0) {
+                throw FormatError("pl8: frame " + std::to_string(i) + " is " + std::to_string(frame.width) +
+                                   " pixels wide, not a multiple of 4, so its four streams can't be split (" + path +
+                                   ")");
             }
             const uint8_t* stored = &data[pixel_offset];
             const size_t stream_len = pixel_count / 4;

@@ -36,7 +36,9 @@
 // Usage:
 //   gaius_viewer <EMPIRE2.0xx | CAESARxx.SAV>
 //   gaius_viewer <path> --screenshot out.png --frames N   (headless smoke test)
-//   gaius_viewer <CAESARxx.SAV> --test-layer 0..4         (headless: pick a layer directly)
+//   gaius_viewer <CAESARxx.SAV> --assets <game dir>       (draw the city with the game's sprites; by default
+//                                                          they're looked for beside the save and one folder up)
+//   gaius_viewer <CAESARxx.SAV> --test-layer 0..4         (headless: pick a data layer directly)
 //   gaius_viewer <CAESARxx.SAV> --test-build T X Y        (headless: place tool T at cell X,Y)
 
 #include <SDL.h>
@@ -50,6 +52,7 @@
 #include <vector>
 
 #include "apps/viewer/save_view.hpp"
+#include "render/city_render.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
@@ -75,9 +78,10 @@ constexpr int kCellPx = 16;  // world pixels per EMPIRE2 map cell at zoom == 1
 constexpr int kWorldW = kMapW * kCellPx;
 constexpr int kWorldH = kMapH * kCellPx;
 
-constexpr int kCityCellPx = 6;  // world pixels per city-grid cell at zoom == 1
-constexpr int kCityWorldW = viewer::kCityW * kCityCellPx;
-constexpr int kCityWorldH = viewer::kCityH * kCityCellPx;
+// World pixels per city-grid cell at zoom == 1 for the data-layer heatmaps.
+// With the game's sprites available the city uses its real 16 px cells
+// (render::kCellPx) for every layer, so camera and clicks share one scale.
+constexpr int kCityCellPx = 6;
 
 // Build-mode tool ring: the placeable construction commands, in toolbar
 // order. Deliberately excludes the drag-auto-tiled ones (Road/Wall/Plaza/
@@ -160,6 +164,27 @@ void render_empire_frame(const EmpireMap& map, const Camera& cam, std::vector<ui
     }
 }
 
+// Samples a rendered city image (render::render_city, 16 px per cell)
+// through the camera and converts it with the city palette.
+void render_sprite_view(const formats::IndexedImage& img, const formats::Palette& pal, const Camera& cam,
+                        std::vector<uint8_t>& rgb_out) {
+    rgb_out.resize(static_cast<size_t>(kLogicalW) * kLogicalH * 3);
+    for (int vy = 0; vy < kLogicalH; ++vy) {
+        for (int vx = 0; vx < kLogicalW; ++vx) {
+            const int ix = static_cast<int>(cam.x + vx / cam.zoom);
+            const int iy = static_cast<int>(cam.y + vy / cam.zoom);
+            formats::RGB c{0, 0, 0};
+            if (ix >= 0 && ix < img.width && iy >= 0 && iy < img.height) {
+                c = pal.colors[img.pixels[static_cast<size_t>(iy) * img.width + ix]];
+            }
+            size_t idx = (static_cast<size_t>(vy) * kLogicalW + vx) * 3;
+            rgb_out[idx + 0] = c.r;
+            rgb_out[idx + 1] = c.g;
+            rgb_out[idx + 2] = c.b;
+        }
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -177,7 +202,9 @@ int main(int argc, char** argv) {
     struct TestClick { int x, y; };
     std::vector<TestClick> test_clicks;  // logical-space clicks, for headless UI tests
     int ui_scale_override = -1;          // -1 = use the size heuristic
+    std::string assets_dir;
     for (int i = 2; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -251,6 +278,33 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // The game's own city sprites, for save mode: from --assets, else the
+    // save's folder (a game install keeps its saves beside the sheets) or the
+    // folder above it. Without them the viewer shows the data layers only.
+    render::CitySprites sprites;
+    bool have_sprites = false;
+    if (save_mode) {
+        std::vector<std::string> candidates;
+        if (!assets_dir.empty()) candidates.push_back(assets_dir);
+        const fs::path save_dir = fs::absolute(in_path).parent_path();
+        candidates.push_back(save_dir.string());
+        candidates.push_back(save_dir.parent_path().string());
+        for (const std::string& dir : candidates) {
+            try {
+                sprites = render::load_city_sprites(dir);
+                have_sprites = true;
+                std::printf("city sprites: %s\n", dir.c_str());
+                break;
+            } catch (const formats::FormatError&) {
+            }
+        }
+        if (!have_sprites) std::printf("city sprites not found (pass --assets <game dir>); showing data layers only\n");
+    }
+    const int city_cell_px = have_sprites ? render::kCellPx : kCityCellPx;
+    bool show_sprites = have_sprites && test_layer < 0;
+    formats::IndexedImage city_image;
+    bool city_image_dirty = true;  // re-rendered whenever build mode changes the grid
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 3;
@@ -268,7 +322,7 @@ int main(int argc, char** argv) {
 
     if (save_mode) {
         std::printf("save mode -- layer: %s (right-click / two-finger-tap / gamepad B to cycle)\n",
-                    viewer::layer_label(layer));
+                    show_sprites ? "city view (the game's sprites)" : viewer::layer_label(layer));
         std::printf("build mode -- tool: %s (Tab / gamepad X to cycle, left-click / tap / gamepad A to place)\n",
                     systems::construction::command_name(kBuildTools[tool_index]));
         for (const auto& b : test_builds) {
@@ -307,7 +361,8 @@ int main(int argc, char** argv) {
                         metrics.button_px(), toolbar.rows(), toolbar.panel().h);
         }
 
-        Camera cam = save_mode ? Camera(kCityWorldW, kCityWorldH) : Camera(kWorldW, kWorldH);
+        Camera cam = save_mode ? Camera(viewer::kCityW * city_cell_px, viewer::kCityH * city_cell_px)
+                               : Camera(kWorldW, kWorldH);
         if (save_mode) cam.visible_h = kLogicalH - toolbar.panel().h;
         cam.x += test_pan_x;
         cam.y += test_pan_y;
@@ -331,10 +386,11 @@ int main(int argc, char** argv) {
             }
             if (toolbar.contains(lx, ly)) return;  // panel background, not a button
 
-            int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / kCityCellPx;
-            int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / kCityCellPx;
+            int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / city_cell_px;
+            int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / city_cell_px;
             auto tool = kBuildTools[tool_index];
             bool ok = systems::construction::place(state.city, tool, cell_x, cell_y);
+            if (ok) city_image_dirty = true;
             std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x, cell_y,
                         ok ? "OK" : "rejected (terrain not buildable / off grid)");
         };
@@ -366,8 +422,17 @@ int main(int argc, char** argv) {
                     }
                     case platform::CommandType::Secondary:
                         if (save_mode) {
-                            layer = viewer::next_layer(layer);
-                            std::printf("layer: %s\n", viewer::layer_label(layer));
+                            // With sprites: city view, then each data layer, then back.
+                            if (show_sprites) {
+                                show_sprites = false;
+                                layer = viewer::kSaveLayerOrder[0];
+                            } else if (have_sprites && viewer::next_layer(layer) == viewer::kSaveLayerOrder[0]) {
+                                show_sprites = true;
+                            } else {
+                                layer = viewer::next_layer(layer);
+                            }
+                            std::printf("layer: %s\n",
+                                        show_sprites ? "city view (the game's sprites)" : viewer::layer_label(layer));
                         }
                         break;
                     case platform::CommandType::CycleTool:
@@ -412,8 +477,15 @@ int main(int argc, char** argv) {
                 }
             }
 
-            if (save_mode) {
-                viewer::render_city_map_layer(state.city, layer, kCityCellPx, cam.x, cam.y, cam.zoom, kLogicalW,
+            if (save_mode && show_sprites) {
+                if (city_image_dirty) {
+                    render::render_city(state.city, sprites, 0, 0, viewer::kCityW, viewer::kCityH, city_image);
+                    city_image_dirty = false;
+                }
+                render_sprite_view(city_image, sprites.palette, cam, frame);
+                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH);
+            } else if (save_mode) {
+                viewer::render_city_map_layer(state.city, layer, city_cell_px, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
                 // Toolbar draws over the map, as the original's panel does.
                 // The map is still rendered full-frame so the click ->

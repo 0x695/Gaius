@@ -67,7 +67,7 @@ inline const char* layer_block_name(SaveLayer l) {
 
 inline const char* layer_label(SaveLayer l) {
     switch (l) {
-        case SaveLayer::Tiles: return "city tiles (43A5, raw ID -- tile->sprite table not yet recovered)";
+        case SaveLayer::Tiles: return "city tiles (43A5, raw tile ID as a heat colour)";
         case SaveLayer::A2C4: return "A2C4 coverage (raw byte)";
         case SaveLayer::C9D4: return "C9D4 flags (raw byte)";
         case SaveLayer::Flags7BB4: return "7BB4 operational/connection state (raw byte)";

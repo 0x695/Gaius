@@ -28,6 +28,7 @@
 #include "formats/save/save.hpp"
 #include "formats/vpx/vpx.hpp"
 #include "model/city_state.hpp"
+#include "render/city_render.hpp"
 #include "stb_image.h"
 #include "systems/construction.hpp"
 #include "systems/housing.hpp"
@@ -1186,7 +1187,7 @@ void test_pl8_synthetic() {
     std::printf("test_pl8_synthetic\n");
     // header: unknown_a=0, frame_count=2
     // frame0: pixel_offset=20 (BE), w=4, h=2, x=0, y=0 -> 8 pixel bytes at offset 20
-    // frame1: pixel_offset=28 (BE), w=2, h=2, x=5, y=7 -> 4 pixel bytes at offset 28
+    // frame1: pixel_offset=28 (BE), w=4, h=1, x=5, y=7 -> 4 pixel bytes at offset 28
     // Pixels are stored as four streams (see formats/pl8/pl8.hpp): row-major
     // pixel i is entry i/4 of stream i%4.
     std::vector<uint8_t> buf;
@@ -1201,12 +1202,12 @@ void test_pl8_synthetic() {
     push_u16le(2);   // frame_count
 
     push_u16be(20); buf.push_back(4); buf.push_back(2); push_u16le(0); push_u16le(0);   // frame0 descriptor
-    push_u16be(28); buf.push_back(2); buf.push_back(2); push_u16le(5); push_u16le(7);   // frame1 descriptor
+    push_u16be(28); buf.push_back(4); buf.push_back(1); push_u16le(5); push_u16le(7);   // frame1 descriptor
 
     while (buf.size() < 20) buf.push_back(0xAA);  // padding up to pixel_offset 20
     // frame0, image rows {1,2,3,4} / {5,6,7,8}: streams {1,5} {2,6} {3,7} {4,8}
     buf.insert(buf.end(), {1, 5, 2, 6, 3, 7, 4, 8});
-    // frame1, 2x2: one entry per stream, so stored order equals image order
+    // frame1, 4x1: one entry per stream, so stored order equals image order
     buf.insert(buf.end(), {55, 66, 77, 88});
 
     std::string tmp = (fs::temp_directory_path() / "gaius_test.pl8").string();
@@ -1219,15 +1220,15 @@ void test_pl8_synthetic() {
         CHECK(sheet.frames[0].x == 0 && sheet.frames[0].y == 0);
         CHECK((sheet.frames[0].pixels == std::vector<uint8_t>{1, 2, 3, 4, 5, 6, 7, 8}));
 
-        CHECK(sheet.frames[1].width == 2 && sheet.frames[1].height == 2);
+        CHECK(sheet.frames[1].width == 4 && sheet.frames[1].height == 1);
         CHECK(sheet.frames[1].x == 5 && sheet.frames[1].y == 7);
         CHECK((sheet.frames[1].pixels == std::vector<uint8_t>{55, 66, 77, 88}));
     }
 
-    // A frame whose pixel count isn't a multiple of 4 can't be split into
-    // streams: rejected, not guessed (no shipped file has one).
-    buf[15] = 3;  // frame1's height byte: now 2x3 = 6 pixels
-    buf.insert(buf.end(), {99, 99});
+    // A frame whose width isn't a multiple of 4 can't be split into planes:
+    // rejected, not guessed (no shipped frame has one).
+    buf[14] = 2;  // frame1's width byte
+    buf[15] = 2;  // and height: now 2x2, still 4 pixels but only 2 wide
     write(tmp);
     bool threw = false;
     try {
@@ -1535,6 +1536,105 @@ void test_pl8_matches_real_screenshots() {
 //
 // Golden against these specific fixtures, the same way test_exepack_golden_
 // decode is golden against the analyzed US-build CSR.EXE.
+// The building metrics table (3496:14B2) against HOUSES.PL8: frame i is
+// width x (height + extra) of tile 0xC8 + i, for tiles 0xC8-0xF2. (Frame 43,
+// an 8x16 sprite, isn't one: tile 0xF3 draws from HOUSES2.PL8.)
+void test_render_building_metrics() {
+    std::printf("test_render_building_metrics (3496:14B2 table vs HOUSES.PL8 frame sizes)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    fs::path p = fs::path(dir) / "HOUSES.PL8";
+    if (!fs::exists(p)) { skip("HOUSES.PL8 not found under " + dir); return; }
+    const PL8Sheet sheet = pl8::load(p.string());
+    int checked = 0, matched = 0;
+    for (size_t i = 0; i < 43 && i < sheet.frames.size(); ++i) {
+        if (sheet.frames[i].pixels.empty()) continue;
+        const auto& m = gaius::render::kBuildingMetrics[i];
+        ++checked;
+        matched += sheet.frames[i].width == m.width && sheet.frames[i].height == m.height + m.extra;
+    }
+    std::printf("  %d/%d frames match\n", matched, checked);
+    CHECK(checked == 43);
+    CHECK(matched == checked);
+}
+
+// render_city against DOSBox captures of the running game. The screenshots'
+// own cities aren't available as saves, so each case rebuilds just one
+// building at the cell where the capture shows it, renders the view, and
+// compares that building's pixels at 6-bit DAC level. Footprints are copied
+// opaque and must match exactly; the rows a sprite rises above its footprint
+// are transparent, so only the pixels the render actually draws there are
+// compared.
+void test_render_city_matches_screenshots() {
+    std::printf("test_render_city_matches_screenshots (render_city vs DOSBox captures)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    const fs::path screens = fs::path(dir) / "gaius_test_screens";
+    if (!fs::exists(screens)) { skip("gaius_test_screens/ not found under " + dir); return; }
+    gaius::render::CitySprites sprites;
+    try {
+        sprites = gaius::render::load_city_sprites(dir);
+    } catch (const FormatError& e) {
+        skip(std::string("city sprites not loadable: ") + e.what());
+        return;
+    }
+
+    struct Case {
+        const char* screenshot;
+        int tile;
+        int col, row, w_cells, h_cells;
+        int extra;  // rows above the footprint to compare
+    };
+    const Case cases[] = {
+        {"2049596-caesar-dos-main-game-screen.png", 0xF5, 14, 6, 3, 3, 2},  // top rows + actor-less bottom row
+        {"2049596-caesar-dos-main-game-screen.png", 0xED, 15, 3, 2, 2, 0},
+        {"2049596-caesar-dos-main-game-screen.png", 0xC9, 9, 3, 1, 1, 0},
+        {"2049596-caesar-dos-main-game-screen.png", 0xF4, 10, 3, 2, 2, 0},  // market, HOUSES2 frame 5
+        {"7910232-caesar-dos-forum-romanum.png", 0xCD, 7, 3, 2, 1, 8},      // house pair rising 8 rows
+    };
+    for (const Case& c : cases) {
+        const fs::path shot_path = screens / c.screenshot;
+        if (!fs::exists(shot_path)) {
+            skip(std::string(c.screenshot) + " not found");
+            continue;
+        }
+        auto f = fresh();
+        // Everything else is tile 0xFF, which draws nothing, so the rows a
+        // sprite rises into stay index 0 wherever it's transparent.
+        for (auto& row : f->city.tile) row.fill(0xFF);
+        for (int dy = 0; dy < c.h_cells; ++dy) {
+            for (int dx = 0; dx < c.w_cells; ++dx) {
+                f->city.tile[c.row + dy][c.col + dx] = static_cast<uint8_t>(c.tile);
+                f->city.operational_state[c.row + dy][c.col + dx] = static_cast<uint8_t>(4 * dy + dx);
+            }
+        }
+        IndexedImage view;
+        gaius::render::render_city(f->city, sprites, 0, 0, 20, 11, view);
+
+        int w, h, channels;
+        unsigned char* shot = stbi_load(shot_path.string().c_str(), &w, &h, &channels, 3);
+        CHECK(shot != nullptr && w == 320 && h == 200);
+        if (!shot) continue;
+        int compared = 0, mismatches = 0;
+        const int x0 = c.col * 16, y_foot = c.row * 16;
+        for (int y = y_foot - c.extra; y < y_foot + c.h_cells * 16; ++y) {
+            for (int x = x0; x < x0 + c.w_cells * 16; ++x) {
+                const uint8_t idx = view.pixels[static_cast<size_t>(y) * view.width + x];
+                if (y < y_foot && idx == 0) continue;  // transparent above the footprint
+                const RGB col = sprites.palette.colors[idx];
+                const unsigned char* s = shot + (y * w + x) * 3;
+                ++compared;
+                if ((col.r >> 2) != (s[0] >> 2) || (col.g >> 2) != (s[1] >> 2) || (col.b >> 2) != (s[2] >> 2)) ++mismatches;
+            }
+        }
+        stbi_image_free(shot);
+        std::printf("  tile 0x%02X at cell (%d,%d): %d/%d pixels match\n", c.tile, c.col, c.row, compared - mismatches,
+                    compared);
+        CHECK(compared > 0);
+        CHECK(mismatches == 0);
+    }
+}
+
 void test_save_corpus_real() {
     std::printf("test_save_corpus_real (four saves from a real play session)\n");
     std::string dir = test_assets_dir();
@@ -2047,6 +2147,8 @@ int main() {
     test_pal256_corpus();
     test_pl8_corpus_sanity();
     test_pl8_matches_real_screenshots();
+    test_render_building_metrics();
+    test_render_city_matches_screenshots();
     test_save_corpus_real();
     test_save_corpus_globals();
     test_save_corpus_simulation();

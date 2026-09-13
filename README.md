@@ -32,6 +32,7 @@ Built alongside the library in `build/`:
 ```sh
 ./build/dump_vpx   <in.vpx>  <out.png> [palette.p32|palette.256]
 ./build/dump_pl8   <in.pl8>  <out.png> [palette.p32|palette.256]
+./build/render_city <CAESARxx.SAV> <game dir> <out.png> [col row cols rows]
 ./build/empire_view <EMPIRE2.0xx> --ascii | --summary | --png <out.png>
 ./build/save_inspect <CAESARxx.SAV>
 ./build/bindiff_exe <a.exe> <b.exe> [--strings]

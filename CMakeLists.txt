@@ -91,6 +91,16 @@ add_library(gaius_ui STATIC
 )
 target_link_libraries(gaius_ui PUBLIC gaius_systems)
 
+# --- render library: the city view drawn from the game's own sprites -------
+# Pure, like gaius_ui: renders into an indexed image, no SDL.
+add_library(gaius_render STATIC
+  render/city_render.cpp
+)
+target_link_libraries(gaius_render PUBLIC gaius_model)
+
+add_executable(render_city tools/render_city.cpp)
+target_link_libraries(render_city PRIVATE gaius_render stb_image_write)
+
 # --- platform layer (Phase 1: window/input/paths) --------------------------
 add_library(gaius_platform STATIC
   platform/window.cpp
@@ -103,10 +113,10 @@ target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
-target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_platform stb_image_write)
+target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_platform stb_image_write)
 
 # --- tests -----------------------------------------------------------------
 enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
-target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui stb_image)
+target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)
