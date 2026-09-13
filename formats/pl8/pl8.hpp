@@ -10,8 +10,19 @@
 //   uint8  height
 //   uint16 x              little-endian
 //   uint16 y              little-endian
-//   -> width*height raw indexed pixel bytes live at absolute file offset
+//   -> width*height indexed pixel bytes live at absolute file offset
 //      `pixel_offset`, not inline in the descriptor.
+//
+// Pixel layout (DEFINITIVE, found 2026-09-13 -- corrects this decoder's
+// original row-major reading): the width*height bytes are FOUR STREAMS stored
+// one after another, interleaved one pixel at a time exactly like .VPX. Row-
+// major pixel i is entry i/4 of stream i%4. Proven pixel-exact against real
+// DOSBox screenshots of the city view, rendered with SHADE.256: with this
+// layout 13 HOUSES.PL8, 13 HOUSES2.PL8 and 72 FIXTS.PL8 frames appear in them
+// verbatim on the 16-pixel tile grid; read row-major, or column-major, none do.
+// It is also why the font sheets used to decode to noise. Every frame in every
+// shipped .PL8 has a pixel count divisible by 4; the decoder rejects one that
+// isn't rather than guess how its streams split.
 //
 // Container header (NEW — resolved here, not fully documented upstream;
 // the existing RE corpus flagged "the first/header word preceding the

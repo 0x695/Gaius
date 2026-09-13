@@ -1184,36 +1184,57 @@ void test_pal256_expand_math() {
 void test_pl8_synthetic() {
     std::printf("test_pl8_synthetic\n");
     // header: unknown_a=0, frame_count=2
-    // frame0: pixel_offset=20 (BE), w=2, h=2, x=0, y=0 -> 4 pixel bytes at offset 20
-    // frame1: pixel_offset=24 (BE), w=1, h=3, x=5, y=7 -> 3 pixel bytes at offset 24
+    // frame0: pixel_offset=20 (BE), w=4, h=2, x=0, y=0 -> 8 pixel bytes at offset 20
+    // frame1: pixel_offset=28 (BE), w=2, h=2, x=5, y=7 -> 4 pixel bytes at offset 28
+    // Pixels are stored as four streams (see formats/pl8/pl8.hpp): row-major
+    // pixel i is entry i/4 of stream i%4.
     std::vector<uint8_t> buf;
     auto push_u16le = [&](uint16_t v) { buf.push_back(v & 0xFF); buf.push_back((v >> 8) & 0xFF); };
     auto push_u16be = [&](uint16_t v) { buf.push_back((v >> 8) & 0xFF); buf.push_back(v & 0xFF); };
+    auto write = [&](const std::string& path) {
+        std::ofstream out(path, std::ios::binary);
+        out.write(reinterpret_cast<char*>(buf.data()), buf.size());
+    };
 
     push_u16le(0);   // unknown_a
     push_u16le(2);   // frame_count
 
-    push_u16be(20); buf.push_back(2); buf.push_back(2); push_u16le(0); push_u16le(0);   // frame0 descriptor
-    push_u16be(24); buf.push_back(1); buf.push_back(3); push_u16le(5); push_u16le(7);   // frame1 descriptor
+    push_u16be(20); buf.push_back(4); buf.push_back(2); push_u16le(0); push_u16le(0);   // frame0 descriptor
+    push_u16be(28); buf.push_back(2); buf.push_back(2); push_u16le(5); push_u16le(7);   // frame1 descriptor
 
     while (buf.size() < 20) buf.push_back(0xAA);  // padding up to pixel_offset 20
-    buf.insert(buf.end(), {11, 22, 33, 44});       // frame0 pixels (2x2)
-    buf.insert(buf.end(), {55, 66, 77});           // frame1 pixels (1x3)
+    // frame0, image rows {1,2,3,4} / {5,6,7,8}: streams {1,5} {2,6} {3,7} {4,8}
+    buf.insert(buf.end(), {1, 5, 2, 6, 3, 7, 4, 8});
+    // frame1, 2x2: one entry per stream, so stored order equals image order
+    buf.insert(buf.end(), {55, 66, 77, 88});
 
     std::string tmp = (fs::temp_directory_path() / "gaius_test.pl8").string();
-    { std::ofstream out(tmp, std::ios::binary); out.write(reinterpret_cast<char*>(buf.data()), buf.size()); }
+    write(tmp);
 
     PL8Sheet sheet = pl8::load(tmp);
     CHECK(sheet.frames.size() == 2);
     if (sheet.frames.size() == 2) {
-        CHECK(sheet.frames[0].width == 2 && sheet.frames[0].height == 2);
+        CHECK(sheet.frames[0].width == 4 && sheet.frames[0].height == 2);
         CHECK(sheet.frames[0].x == 0 && sheet.frames[0].y == 0);
-        CHECK((sheet.frames[0].pixels == std::vector<uint8_t>{11, 22, 33, 44}));
+        CHECK((sheet.frames[0].pixels == std::vector<uint8_t>{1, 2, 3, 4, 5, 6, 7, 8}));
 
-        CHECK(sheet.frames[1].width == 1 && sheet.frames[1].height == 3);
+        CHECK(sheet.frames[1].width == 2 && sheet.frames[1].height == 2);
         CHECK(sheet.frames[1].x == 5 && sheet.frames[1].y == 7);
-        CHECK((sheet.frames[1].pixels == std::vector<uint8_t>{55, 66, 77}));
+        CHECK((sheet.frames[1].pixels == std::vector<uint8_t>{55, 66, 77, 88}));
     }
+
+    // A frame whose pixel count isn't a multiple of 4 can't be split into
+    // streams: rejected, not guessed (no shipped file has one).
+    buf[15] = 3;  // frame1's height byte: now 2x3 = 6 pixels
+    buf.insert(buf.end(), {99, 99});
+    write(tmp);
+    bool threw = false;
+    try {
+        pl8::load(tmp);
+    } catch (const FormatError&) {
+        threw = true;
+    }
+    CHECK(threw);
     fs::remove(tmp);
 }
 
@@ -1387,6 +1408,69 @@ void test_pl8_corpus_sanity() {
     if (sheet.frames.size() == 50) {
         for (int i = 44; i <= 49; ++i) CHECK(sheet.frames[i].pixels.empty());
         for (int i = 0; i <= 43; ++i) CHECK(!sheet.frames[i].pixels.empty());
+    }
+}
+
+// Sprites and palette against the running game. DOSBox screenshots of the city
+// view (320x200, from a real play session) live in
+// GAIUS_TEST_ASSETS/gaius_test_screens/, never in the repo. Each case is a PL8
+// frame found verbatim in a screenshot, drawn with SHADE.256 -- the palette
+// the city view runs with (the screenshots' own palettes equal it in all 256
+// entries). Compared at 6-bit DAC level, since screenshot tools differ in how
+// they widen 6-bit colour to 8-bit.
+void test_pl8_matches_real_screenshots() {
+    std::printf("test_pl8_matches_real_screenshots (PL8 frames + SHADE.256 vs DOSBox captures)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    const fs::path screens = fs::path(dir) / "gaius_test_screens";
+    const fs::path shade = fs::path(dir) / "SHADE.256";
+    if (!fs::exists(screens) || !fs::exists(shade)) {
+        skip("gaius_test_screens/ or SHADE.256 not found under " + dir);
+        return;
+    }
+    const Palette pal = pal256::load(shade.string());
+
+    struct Case {
+        const char* sheet;
+        int frame;
+        const char* screenshot;
+        int x, y;
+    };
+    const Case cases[] = {
+        {"HOUSES.PL8", 1, "2049596-caesar-dos-main-game-screen.png", 144, 48},
+        {"FIXTS.PL8", 55, "2049596-caesar-dos-main-game-screen.png", 32, 16},
+        {"HOUSES2.PL8", 4, "2053010-caesar-dos-building-your-city.png", 64, 64},
+    };
+    for (const Case& c : cases) {
+        const fs::path sheet_path = fs::path(dir) / c.sheet;
+        const fs::path shot_path = screens / c.screenshot;
+        if (!fs::exists(sheet_path) || !fs::exists(shot_path)) {
+            skip(std::string(c.sheet) + " or " + c.screenshot + " not found");
+            continue;
+        }
+        const PL8Sheet sheet = pl8::load(sheet_path.string());
+        CHECK(c.frame < static_cast<int>(sheet.frames.size()));
+        if (c.frame >= static_cast<int>(sheet.frames.size())) continue;
+        const PL8Frame& fr = sheet.frames[c.frame];
+
+        int w, h, channels;
+        unsigned char* shot = stbi_load(shot_path.string().c_str(), &w, &h, &channels, 3);
+        CHECK(shot != nullptr && w == 320 && h == 200);
+        if (!shot) continue;
+        CHECK(c.x + fr.width <= w && c.y + fr.height <= h);
+
+        int mismatches = 0;
+        for (int y = 0; y < fr.height; ++y) {
+            for (int x = 0; x < fr.width; ++x) {
+                const RGB col = pal.colors[fr.pixels[static_cast<size_t>(y) * fr.width + x]];
+                const unsigned char* s = shot + ((c.y + y) * w + (c.x + x)) * 3;
+                if ((col.r >> 2) != (s[0] >> 2) || (col.g >> 2) != (s[1] >> 2) || (col.b >> 2) != (s[2] >> 2)) ++mismatches;
+            }
+        }
+        stbi_image_free(shot);
+        std::printf("  %s frame %d (%dx%d) at (%d,%d): %d mismatched pixels\n", c.sheet, c.frame, fr.width, fr.height,
+                    c.x, c.y, mismatches);
+        CHECK(mismatches == 0);
     }
 }
 
@@ -1923,6 +2007,7 @@ int main() {
     test_vpx_golden_image();
     test_pal256_corpus();
     test_pl8_corpus_sanity();
+    test_pl8_matches_real_screenshots();
     test_save_corpus_real();
     test_save_corpus_globals();
     test_save_corpus_simulation();

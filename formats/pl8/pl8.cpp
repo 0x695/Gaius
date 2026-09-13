@@ -84,7 +84,16 @@ PL8Sheet load(const std::string& path) {
                                    ", only " + std::to_string(available) + " bytes available)");
             }
         } else {
-            frame.pixels.assign(&data[pixel_offset], &data[pixel_offset] + pixel_count);
+            // Stored as four streams, one after another; pixel i (row-major)
+            // is entry i/4 of stream i%4 -- the same interleave as .VPX.
+            if (pixel_count % 4 != 0) {
+                throw FormatError("pl8: frame " + std::to_string(i) + " has " + std::to_string(pixel_count) +
+                                   " pixels, not a multiple of 4, so its four streams can't be split (" + path + ")");
+            }
+            const uint8_t* stored = &data[pixel_offset];
+            const size_t stream_len = pixel_count / 4;
+            frame.pixels.resize(pixel_count);
+            for (size_t p = 0; p < pixel_count; ++p) frame.pixels[p] = stored[(p % 4) * stream_len + p / 4];
         }
 
         sheet.frames.push_back(std::move(frame));

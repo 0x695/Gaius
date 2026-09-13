@@ -22,9 +22,10 @@
 //    renderer gives that building's seed tile. So a Hippodrome button
 //    shows a 4x2 block and a Well shows 1x1, in the colours they'll
 //    actually appear on the map. This is deliberate: the original's real
-//    icon art is not currently recoverable (P_BLOCKS.PL8's 16x16 frames
-//    decode as panel texture, and the font sheets don't decode at all --
-//    see ui/font.hpp), and inventing decorative icons would put invented
+//    icon art wasn't recoverable when this was written (P_BLOCKS.PL8 and
+//    the font sheets looked like noise; since 2026-09-13 PL8 decodes
+//    correctly, but which sheet holds the toolbar icons isn't identified
+//    yet -- see docs/FORMATS.md), and inventing decorative icons would put invented
 //    content on screen. Footprint-and-colour is information the project
 //    actually has, and it happens to be more useful than a pictogram
 //    when what you need to know is how much room a building takes.
