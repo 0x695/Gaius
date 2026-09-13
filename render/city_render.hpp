@@ -73,6 +73,10 @@ using systems::construction::kBuildingMetrics;
 
 // The engine's frame counters, for the few tiles that animate. Zero is a
 // valid still frame.
+// The draw loop's animation state. Water (DS:0x57EA) advances by one, mod 3,
+// on each drawn frame while the 32-step counter DS:0x6D3E is odd; the blink is
+// bit 2 of the 128-step counter DS:0x6D3A. Both counters advance once per
+// simulation step (systems::month::SimState::ticks).
 struct RenderPhase {
     int water = 0;  // 0..2 (DS:0x57EA)
     int blink = 0;  // 0..1 ((DS:0x6D3A >> 2) & 1)

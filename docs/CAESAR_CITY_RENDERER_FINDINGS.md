@@ -80,7 +80,12 @@ A search of the captures with the decoded sheets finds 13 `HOUSES`, 13 `HOUSES2`
 
 ## 6. Open
 
-- Animation timing: which frame counters advance when (`DS:0x57EA`, `0x6D3A`, `0x6D3C`, `0x6D3E`).
+- ~~Animation timing~~ **Read 2026-09-13.**
+  - **The counters.** On every simulation step, `0x1147E` advances the frame counters `DS:0x6D44`, `0x6D42`, `0x6D40`, `0x6D3E`, `0x6D3C`, `0x6D3A`, `0x6D38`, `0x6D36` and `0x6D34`, which wrap at 4, 8, 16, 32, 64, 128, 256, 512 and 1024 (dispatch findings section 20.1).
+  - **Water.** The draw loop (`0x1FF5A`) advances the water phase `DS:0x57EA` by one, mod 3, on each frame it draws while `0x6D3E` is odd.
+  - **Fire.** Burning tiles blink on bit 2 of `0x6D3A`.
+  - **In Gaius.** `gaius_viewer` drives `RenderPhase` from the simulation's step count the same way.
+  - **Still open.** The building animations gated on `0x6D3E`: school `0xEC` above 100 population units, prefecture `0xEE`, and the `7BB4` bit `0x10` variants.
 - The workshop records at `DS:0x585C` (the save's `table_720`), which drive the `0xF5`/`0xF6` bottom row. Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
 - The overlay map modes (`0x1FB94`, `SHADE.PL8`).
 - What moves the actors (their types' behaviour), `SPRITE2.PL8`, `FIXT3.PL8` and the province view.

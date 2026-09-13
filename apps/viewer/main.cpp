@@ -337,6 +337,7 @@ int main(int argc, char** argv) {
     bool show_sprites = have_sprites && test_layer < 0;
     formats::IndexedImage city_image;
     bool city_image_dirty = true;  // re-rendered whenever build mode or time changes the grid
+    render::RenderPhase render_phase;
 
     // The simulation clock (systems::month), seeded from the save.
     systems::month::SimState sim;
@@ -596,9 +597,22 @@ int main(int argc, char** argv) {
             }
 
             if (save_mode && show_sprites) {
+                // The draw loop's animation (renderer findings section 6): the
+                // water phase advances on each drawn frame while the 32-step
+                // counter DS:0x6D3E is odd, and burning tiles blink on bit 2
+                // of the 128-step counter DS:0x6D3A.
+                if ((sim.ticks % 32) & 1) {
+                    render_phase.water = (render_phase.water + 1) % 3;
+                    city_image_dirty = true;
+                }
+                const int blink = ((sim.ticks % 128) >> 2) & 1;
+                if (blink != render_phase.blink) {
+                    render_phase.blink = blink;
+                    city_image_dirty = true;
+                }
                 if (city_image_dirty) {
-                    render::render_city(state.city, sprites, 0, 0, viewer::kCityW, viewer::kCityH, city_image, {},
-                                        &state.objects);
+                    render::render_city(state.city, sprites, 0, 0, viewer::kCityW, viewer::kCityH, city_image,
+                                        render_phase, &state.objects);
                     city_image_dirty = false;
                 }
                 render_sprite_view(city_image, sprites.palette, cam, frame);
