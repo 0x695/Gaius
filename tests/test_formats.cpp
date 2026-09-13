@@ -2033,6 +2033,50 @@ void test_render_city_matches_screenshots() {
     }
 }
 
+// The control panel's icon table against a DOSBox capture of the city view,
+// which shows panel page 1: each command's POINTERS.PL8 frame, drawn at
+// (8 + 24 * slot, 180), matches the capture pixel for pixel.
+void test_ui_command_icons_match_screenshot() {
+    std::printf("test_ui_command_icons_match_screenshot (panel tables DS:0x11BA vs DOSBox capture)\n");
+    using C = gaius::systems::construction::CommandId;
+    const C page1[] = {C::Road, C::Plaza, C::ReservoirPipe, C::Well, C::Fountain, C::Wall, C::Tower, C::Barracks,
+                       C::Prefecture, C::Forum};
+    const int frames[] = {28, 7, 19, 8, 11, 12, 10, 16, 14, 17};
+    for (size_t i = 0; i < std::size(page1); ++i) CHECK(gaius::ui::command_icon_frame(page1[i]) == frames[i]);
+
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    const fs::path shot_path = fs::path(dir) / "gaius_test_screens" / "2049596-caesar-dos-main-game-screen.png";
+    const fs::path icons_path = fs::path(dir) / "POINTERS.PL8";
+    const fs::path shade = fs::path(dir) / "SHADE.256";
+    if (!fs::exists(shot_path) || !fs::exists(icons_path) || !fs::exists(shade)) {
+        skip("main-game screenshot, POINTERS.PL8 or SHADE.256 not found under " + dir);
+        return;
+    }
+    const PL8Sheet icons = pl8::load(icons_path.string());
+    const Palette pal = pal256::load(shade.string());
+    int w, h, channels;
+    unsigned char* shot = stbi_load(shot_path.string().c_str(), &w, &h, &channels, 3);
+    CHECK(shot != nullptr && w == 320 && h == 200);
+    if (!shot) return;
+    int compared = 0, mismatches = 0;
+    for (size_t slot = 0; slot < std::size(page1); ++slot) {
+        const PL8Frame& icon = icons.frames[static_cast<size_t>(gaius::ui::command_icon_frame(page1[slot]))];
+        const int x0 = 8 + 24 * static_cast<int>(slot), y0 = 180;
+        for (int y = 0; y < icon.height; ++y) {
+            for (int x = 0; x < icon.width; ++x) {
+                const RGB c = pal.colors[icon.pixels[static_cast<size_t>(y) * icon.width + x]];
+                const unsigned char* s = shot + ((y0 + y) * w + (x0 + x)) * 3;
+                ++compared;
+                if ((c.r >> 2) != (s[0] >> 2) || (c.g >> 2) != (s[1] >> 2) || (c.b >> 2) != (s[2] >> 2)) ++mismatches;
+            }
+        }
+    }
+    stbi_image_free(shot);
+    std::printf("  10 icons: %d/%d pixels match\n", compared - mismatches, compared);
+    CHECK(mismatches == 0);
+}
+
 // DS:0F64, the engine's character -> FONT1.PL8 frame table.
 void test_ui_game_font_table() {
     std::printf("test_ui_game_font_table (DS:0F64 char -> frame)\n");
@@ -2602,6 +2646,7 @@ int main() {
     test_ui_font_rendering();
     test_ui_toolbar_render();
     test_ui_game_font_table();
+    test_ui_command_icons_match_screenshot();
     test_ui_game_font_matches_screenshot();
     test_p32_expand_math();
     test_pal256_expand_math();

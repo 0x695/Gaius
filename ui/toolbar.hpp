@@ -107,7 +107,19 @@ private:
 // (or -1); `hovered` likewise, for mouse hover feedback. With `font` (the
 // game's FONT1.PL8, when the user's copy is available) the label is drawn in
 // the original's typeface; without it, in ui/font.hpp's placeholder.
+//
+// With `icons` (the game's POINTERS.PL8) and `icon_palette` (the city palette,
+// SHADE.256), each button shows its command's real toolbar icon, scaled to the
+// button; otherwise it shows the building's footprint.
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
-            int h, const GameFont* font = nullptr);
+            int h, const GameFont* font = nullptr, const formats::PL8Sheet* icons = nullptr,
+            const formats::Palette* icon_palette = nullptr);
+
+// The POINTERS.PL8 frame the original's control panel shows for a command, or
+// -1 if it has no button. Read from the panel's button tables (DS:0x1178,
+// DS:0x11BA, DS:0x11FC: 11 records per page of POINTERS frame + far pointer to
+// the click handler, which sets the command id; drawn by 0x211CB at y = 180,
+// x = 8 + 24 * slot). Two captures show pages 0 and 1 in exactly this order.
+int command_icon_frame(systems::construction::CommandId id);
 
 }  // namespace gaius::ui

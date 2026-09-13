@@ -95,7 +95,15 @@ Loaded alongside the city sheets (`0xFBD3`-`0xFC58`): `P_BLOCKS.PL8` and `POINTE
   - It advances 8 px for `FONT1`, 6 px for `MINIFONT`, and draws through `303E:13D6`.
   - **DEFINITIVE:** glyphs found in the captures and read back through this table spell the game's messages ("The province's funds are now at or below 1,000 Denarii. Excessive spending may bankrupt you"). `test_ui_game_font_matches_screenshot` draws the building menu's "Housing" pixel for pixel. Implemented in `ui/game_font.hpp`.
 - **`100F:168E`, a second text routine.** Frame = `DS:1044[char − 0x20] − 1`: letters with case folded to frames 0–25, everything else frame 26; it advances by each frame's width. That's `ROMFONT.PL8`'s 27 frames of 16×17. The credits capture's "PROGRAMMING" matches (STRONG INFERENCE on which screens use it).
-- **Panel icons are `POINTERS.PL8` frames.** They're drawn at y = 180, every 24 px from x = 8. The main city panel shows frames 28, 7, 19, 8, 11, 12, 10, 16, 14, 17, 18; the building menu shows another set. The frame order isn't stored as a plain byte or word table, so mapping icons to commands needs the panel code, which isn't traced yet.
+- **Panel icons are `POINTERS.PL8` frames, and the button tables are decoded (2026-09-13).**
+  - **Drawing.** `0x211CB` draws 11 buttons at y = 180, x = 8 + 24 · slot, skipping frame 3 (blank).
+  - **Which table.** The panel page `DS:0x6D0E` selects one: page 0 `DS:0x1178`, page 1 `DS:0x11BA`, page 2 `DS:0x11FC`, and the province view `DS:0x123E`.
+  - **The records.** Each is 6 bytes: a `POINTERS.PL8` frame word, then a far pointer to the button's click handler. The handler sets the command id (`DS:0x6D0C`), so the table gives every button's icon *and* command. (A search for the frames as a plain byte or word run missed it because of the 6-byte stride.)
+  - **Page 0:** Go to Forum 21, Maps 51, Clear Area 33, Housing 5, Bath Houses 9, and three sub-page buttons (ids `0x28`, `0x26`, `0x27`: frames 6, 22, 52).
+  - **Page 1:** Road 28, Plaza 7, Reservoir/pipe 19, Well 8, Fountain 11, Wall 12, Tower 10, Barracks 16, Prefecture 14, Forum 17, back to the main toolbar 18.
+  - **Page 2:** Temple 28, Hospital 23, School 30, Oracle 32, Heavy Industry 31, Market 20, Workshop 34, Theater 27, Coliseum 24, Hippodrome 25.
+  - **Checked against the running game.** The captures show page 1 (city view) and page 0 (building menu) in exactly this order, and `test_ui_command_icons_match_screenshot` matches the ten page-1 icons pixel for pixel.
+  - **In Gaius.** `ui::command_icon_frame` holds the table, and the toolbar draws the real icons when the game's files are present.
 - **`P_BLOCKS.PL8`** holds the frame, border and button pieces of the advisor and management screens: 31 of its 40 frames are found in those captures.
 
 ## 8. Walkers and other city actors (2026-09-13)

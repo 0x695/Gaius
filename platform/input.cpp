@@ -45,6 +45,13 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
         }
 
         case SDL_MOUSEMOTION: {
+            if ((event.motion.state & SDL_BUTTON_LMASK) && !(event.motion.state & SDL_BUTTON_MMASK)) {
+                Command drag;
+                drag.type = CommandType::SelectMove;
+                drag.x = event.motion.x;
+                drag.y = event.motion.y;
+                return drag;
+            }
             if (!(event.motion.state & SDL_BUTTON_MMASK)) {
                 Command hover;
                 hover.type = CommandType::Hover;

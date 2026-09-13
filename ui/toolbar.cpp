@@ -156,7 +156,7 @@ int Toolbar::hit_test(int lx, int ly) const {
 }
 
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
-            int h, const GameFont* font) {
+            int h, const GameFont* font, const formats::PL8Sheet* icons, const formats::Palette* icon_palette) {
     if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * h * 3) return;
 
     const Rect p = bar.panel();
@@ -188,7 +188,30 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
         fill_rect(rgb, w, h, b, kButtonFill);
 
         Rect inner{b.x + m.pad_px, b.y + m.pad_px, b.w - 2 * m.pad_px, b.h - 2 * m.pad_px};
-        draw_footprint_icon(rgb, w, h, inner, systems::construction::placement_spec(bar.tool(i)), tile_color);
+        const int frame = command_icon_frame(bar.tool(i));
+        const formats::PL8Frame* icon =
+            (icons && icon_palette && frame >= 0 && frame < static_cast<int>(icons->frames.size()) &&
+             !icons->frames[static_cast<size_t>(frame)].pixels.empty())
+                ? &icons->frames[static_cast<size_t>(frame)]
+                : nullptr;
+        if (icon) {
+            // The icon, scaled by whole pixels to fit the inner box, centred;
+            // index 0 is transparent.
+            const int scale = std::max(1, std::min(inner.w / icon->width, inner.h / icon->height));
+            const int ox = inner.x + (inner.w - icon->width * scale) / 2;
+            const int oy = inner.y + (inner.h - icon->height * scale) / 2;
+            for (int iy = 0; iy < icon->height; ++iy) {
+                for (int ix = 0; ix < icon->width; ++ix) {
+                    const uint8_t idx = icon->pixels[static_cast<size_t>(iy) * icon->width + ix];
+                    if (idx == 0) continue;
+                    const RGB c = icon_palette->colors[idx];
+                    for (int sy = 0; sy < scale; ++sy)
+                        for (int sx = 0; sx < scale; ++sx) put(rgb, w, h, ox + ix * scale + sx, oy + iy * scale + sy, c);
+                }
+            }
+        } else {
+            draw_footprint_icon(rgb, w, h, inner, systems::construction::placement_spec(bar.tool(i)), tile_color);
+        }
 
         RGB edge = (i == selected) ? kSelectedEdge : (i == hovered ? kHoverEdge : kButtonEdge);
         stroke_rect(rgb, w, h, b, edge);
@@ -198,6 +221,43 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
             Rect o{b.x - 1, b.y - 1, b.w + 2, b.h + 2};
             stroke_rect(rgb, w, h, o, kSelectedEdge);
         }
+    }
+}
+
+}  // namespace gaius::ui
+
+namespace gaius::ui {
+
+int command_icon_frame(systems::construction::CommandId id) {
+    using C = systems::construction::CommandId;
+    switch (id) {
+        // Page 0 (DS:0x1178)
+        case C::ClearArea: return 33;
+        case C::Housing: return 5;
+        case C::BathHouses: return 9;
+        // Page 1 (DS:0x11BA)
+        case C::Road: return 28;
+        case C::Plaza: return 7;
+        case C::ReservoirPipe: return 19;
+        case C::Well: return 8;
+        case C::Fountain: return 11;
+        case C::Wall: return 12;
+        case C::Tower: return 10;
+        case C::Barracks: return 16;
+        case C::Prefecture: return 14;
+        case C::Forum: return 17;
+        // Page 2 (DS:0x11FC)
+        case C::Temple: return 28;
+        case C::Hospital: return 23;
+        case C::School: return 30;
+        case C::Oracle: return 32;
+        case C::HeavyIndustry: return 31;
+        case C::Market: return 20;
+        case C::Workshop: return 34;
+        case C::Theater: return 27;
+        case C::Coliseum: return 24;
+        case C::Hippodrome: return 25;
+        default: return -1;
     }
 }
 

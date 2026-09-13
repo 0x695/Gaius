@@ -38,6 +38,11 @@ enum class CommandType {
     ToggleTime,   // pause / resume the simulation clock: Space, gamepad Y/North. The
                   // clock runs by default, so a device without either (touch) still
                   // sees the city evolve; pausing is enrichment, not a gate.
+    SelectMove,   // pointer moved with the primary button held (mouse left-drag). Lets
+                  // drag-built commands (roads, walls) follow the pointer the way the
+                  // original's drag does. Enrichment in the same sense as Hover: every
+                  // device can still place those one cell per Select, so nothing
+                  // depends on it.
     Hover,        // pointer moved with no button held. Mouse-only by nature: touch has
                   // no hover state and gamepad has no pointer, so those devices simply
                   // never emit this. UI that uses it must therefore treat it as

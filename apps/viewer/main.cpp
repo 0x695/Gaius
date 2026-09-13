@@ -55,6 +55,7 @@
 #include <vector>
 
 #include "apps/viewer/save_view.hpp"
+#include "formats/pl8/pl8.hpp"
 #include "render/city_render.hpp"
 #include "systems/month.hpp"
 #include "ui/game_font.hpp"
@@ -298,6 +299,8 @@ int main(int argc, char** argv) {
     bool have_sprites = false;
     ui::GameFont game_font;  // FONT1.PL8, drawn with the city palette
     bool have_font = false;
+    formats::PL8Sheet toolbar_icons;  // POINTERS.PL8
+    bool have_icons = false;
     if (save_mode) {
         std::vector<std::string> candidates;
         if (!assets_dir.empty()) candidates.push_back(assets_dir);
@@ -313,6 +316,16 @@ int main(int argc, char** argv) {
                     game_font = ui::load_game_font(dir, sprites.palette);
                     have_font = true;
                 } catch (const formats::FormatError&) {
+                }
+                for (const char* name : {"POINTERS.PL8", "pointers.pl8"}) {
+                    const fs::path p = fs::path(dir) / name;
+                    if (!fs::exists(p)) continue;
+                    try {
+                        toolbar_icons = formats::pl8::load(p.string());
+                        have_icons = true;
+                    } catch (const formats::FormatError&) {
+                    }
+                    break;
                 }
                 break;
             } catch (const formats::FormatError&) {
@@ -341,6 +354,7 @@ int main(int argc, char** argv) {
     // commands keep their neighbour snapshot in `drag`, and Clear Area draws
     // rubble from the simulation's random number generator.
     systems::construction::DragState drag;
+    int drag_last_x = -1, drag_last_y = -1;  // the last cell a click or drag placed on
     auto place_tool = [&](systems::construction::CommandId tool, int x, int y) {
         namespace construction = systems::construction;
         switch (tool) {
@@ -429,6 +443,7 @@ int main(int argc, char** argv) {
         // and must NOT also fall through to the map underneath it.
         auto handle_select_logical = [&](int lx, int ly) {
             if (!save_mode) return;
+            drag_last_x = drag_last_y = -1;
             int hit = toolbar.hit_test(lx, ly);
             if (hit >= 0) {
                 tool_index = hit;
@@ -442,6 +457,8 @@ int main(int argc, char** argv) {
             auto tool = kBuildTools[tool_index];
             bool ok = place_tool(tool, cell_x, cell_y);
             if (ok) city_image_dirty = true;
+            drag_last_x = cell_x;
+            drag_last_y = cell_y;
             std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x, cell_y,
                         ok ? "OK" : "rejected (terrain not buildable / off grid)");
         };
@@ -511,6 +528,31 @@ int main(int argc, char** argv) {
                         handle_select_logical(lx, ly);
                         break;
                     }
+                    case platform::CommandType::SelectMove: {
+                        // Dragging a drag-built command: the engine calls its
+                        // handler for each cell the cursor passes over, so step
+                        // one cell at a time from the last placed cell.
+                        if (!save_mode || drag_last_x < 0) break;
+                        const auto tool = kBuildTools[tool_index];
+                        if (systems::construction::placement_spec(tool).kind !=
+                            systems::construction::PlacementKind::DragAutoTiled) {
+                            break;
+                        }
+                        int lx = 0, ly = 0;
+                        if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly) || toolbar.contains(lx, ly)) break;
+                        const int tx = static_cast<int>(cam.x + lx / cam.zoom) / city_cell_px;
+                        const int ty = static_cast<int>(cam.y + ly / cam.zoom) / city_cell_px;
+                        while (drag_last_x != tx || drag_last_y != ty) {
+                            const int ddx = tx - drag_last_x, ddy = ty - drag_last_y;
+                            if (std::abs(ddx) >= std::abs(ddy)) {
+                                drag_last_x += ddx > 0 ? 1 : -1;
+                            } else {
+                                drag_last_y += ddy > 0 ? 1 : -1;
+                            }
+                            if (place_tool(tool, drag_last_x, drag_last_y)) city_image_dirty = true;
+                        }
+                        break;
+                    }
                     case platform::CommandType::Hover: {
                         if (!save_mode) break;
                         int lx = 0, ly = 0;
@@ -551,7 +593,8 @@ int main(int argc, char** argv) {
                 }
                 render_sprite_view(city_image, sprites.palette, cam, frame);
                 ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
-                           have_font ? &game_font : nullptr);
+                           have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
+                           have_sprites ? &sprites.palette : nullptr);
             } else if (save_mode) {
                 viewer::render_city_map_layer(state.city, layer, city_cell_px, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
@@ -561,7 +604,8 @@ int main(int argc, char** argv) {
                 // simply occludes the bottom, and handle_select_logical
                 // keeps clicks there from reaching the occluded cells.
                 ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
-                           have_font ? &game_font : nullptr);
+                           have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
+                           have_sprites ? &sprites.palette : nullptr);
             } else {
                 render_empire_frame(map, cam, frame);
             }
