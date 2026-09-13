@@ -1538,6 +1538,119 @@ void test_pl8_matches_real_screenshots() {
 //
 // Golden against these specific fixtures, the same way test_exepack_golden_
 // decode is golden against the analyzed US-build CSR.EXE.
+// The drag-built commands on small synthetic grids, against the lifted
+// handlers (findings section 18).
+void test_construction_drag_rules() {
+    std::printf("test_construction_drag_rules (Road/Wall/Plaza/Clear Area handlers)\n");
+    using namespace gaius::systems::construction;
+    auto f = fresh();
+    for (auto& row : f->city.tile) row.fill(0x1D);
+    DragState drag;
+
+    // A lone road piece, then one to its east: both horizontal.
+    f->city.operational_state[10][10] = 0x0F;
+    CHECK(place_road(f->city, drag, 10, 10));
+    CHECK(f->city.tile[10][10] == 0x37);
+    CHECK(f->city.operational_state[10][10] == 0);
+    CHECK(place_road(f->city, drag, 11, 10));
+    CHECK(f->city.tile[10][11] == 0x37 && f->city.tile[10][10] == 0x37);
+
+    // A road south of a lone piece turns both vertical.
+    CHECK(place_road(f->city, drag, 30, 30));
+    CHECK(place_road(f->city, drag, 30, 31));
+    CHECK(f->city.tile[31][30] == 0x36 && f->city.tile[30][30] == 0x36);
+
+    // Refused: below the buildable range.
+    f->city.tile[40][40] = 0x10;
+    CHECK(!place_road(f->city, drag, 40, 40));
+
+    // A road over water builds a crossing.
+    f->city.tile[50][50] = 0x4A;
+    CHECK(place_road(f->city, drag, 50, 50));
+    CHECK(f->city.tile[50][50] == 0x82);
+
+    // A wall across a vertical road makes a gate; walls tile like roads.
+    CHECK(place_wall(f->city, drag, 30, 30));
+    CHECK(f->city.tile[30][30] == 0x94);
+    CHECK(place_wall(f->city, drag, 60, 60));
+    CHECK(f->city.tile[60][60] == 0x92);
+
+    // Plaza paves a road piece once.
+    CHECK(place_plaza(f->city, 11, 10));
+    CHECK((f->city.operational_state[10][11] & 0x10) != 0);
+    CHECK(!place_plaza(f->city, 11, 10));
+    CHECK(!place_plaza(f->city, 12, 10));  // open ground
+
+    // Clear Area: a road to open ground, a crossing back to water, and a
+    // market demolished whole into rubble, one random draw per cell.
+    gaius::systems::month::Random random;
+    CHECK(clear_area(f->city, random, 10, 10));
+    CHECK(f->city.tile[10][10] == 0x1D);
+    CHECK(clear_area(f->city, random, 50, 50));
+    CHECK(f->city.tile[50][50] == 0x4A);
+    CHECK(place(f->city, CommandId::Market, 70, 70));
+    gaius::systems::month::Random expect = random;
+    CHECK(clear_area(f->city, random, 71, 71));  // any cell of the building
+    for (int dy = 0; dy < 2; ++dy) {
+        for (int dx = 0; dx < 2; ++dx) {
+            expect.advance();
+            CHECK(f->city.tile[70 + dy][70 + dx] == 0xA7 + (expect.walk & 3));
+            CHECK(f->city.operational_state[70 + dy][70 + dx] == 0);
+        }
+    }
+    CHECK(random.walk == expect.walk && random.lfsr == expect.lfsr);
+    CHECK(!clear_area(f->city, random, 12, 10));  // open ground: nothing to clear
+}
+
+// Every road network in four real saves, rebuilt cell by cell with
+// place_road: road pieces (0x36-0x40) are reset to open ground and placed
+// again in row order.
+void test_construction_road_rebuild_real_saves() {
+    std::printf("test_construction_road_rebuild_real_saves (place_road vs four real saves)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems::construction;
+    struct Case {
+        const char* name;
+        int roads, identical;
+    };
+    const Case cases[] = {{"CAESARXX.SAV", 40, 40}, {"CAESARWX.SAV", 90, 90}, {"CAESARVX.SAV", 141, 137}, {"CAESARUX.SAV", 153, 149}};
+    for (const Case& c : cases) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / c.name;
+        if (!fs::exists(p)) {
+            skip(std::string(c.name) + " not found");
+            continue;
+        }
+        CityState st = load(save::load(p.string()));
+        const auto saved = std::make_unique<CityMap>(st.city);
+        std::vector<std::pair<int, int>> roads;
+        for (int y = 0; y < kCityH; ++y) {
+            for (int x = 0; x < kCityW; ++x) {
+                if (saved->tile[y][x] >= 0x36 && saved->tile[y][x] <= 0x40) {
+                    roads.push_back({x, y});
+                    st.city.tile[y][x] = 0x1D;
+                }
+            }
+        }
+        DragState drag;
+        int refused = 0;
+        for (const auto& [x, y] : roads) refused += !place_road(st.city, drag, x, y);
+        int identical = 0, others_changed = 0;
+        for (int y = 0; y < kCityH; ++y) {
+            for (int x = 0; x < kCityW; ++x) {
+                const bool road = saved->tile[y][x] >= 0x36 && saved->tile[y][x] <= 0x40;
+                if (road) identical += st.city.tile[y][x] == saved->tile[y][x];
+                else others_changed += st.city.tile[y][x] != saved->tile[y][x];
+            }
+        }
+        std::printf("  %s: %d/%zu road tiles rebuilt identical (refused %d, other cells changed %d)\n", c.name,
+                    identical, roads.size(), refused, others_changed);
+        CHECK(static_cast<int>(roads.size()) == c.roads);
+        CHECK(identical == c.identical);
+        CHECK(refused == 0 && others_changed == 0);
+    }
+}
+
 // 2EF9:1425 from the image's initial state, computed independently.
 void test_month_random_sequence() {
     std::printf("test_month_random_sequence (2EF9:1425 from the image's initial state)\n");
@@ -2310,6 +2423,8 @@ int main() {
     test_pal256_corpus();
     test_pl8_corpus_sanity();
     test_pl8_matches_real_screenshots();
+    test_construction_drag_rules();
+    test_construction_road_rebuild_real_saves();
     test_month_random_sequence();
     test_month_calendar_and_draws();
     test_month_growth_changes_after_step_80();

@@ -98,7 +98,7 @@ target_link_libraries(gaius_ui PUBLIC gaius_systems)
 add_library(gaius_render STATIC
   render/city_render.cpp
 )
-target_link_libraries(gaius_render PUBLIC gaius_model)
+target_link_libraries(gaius_render PUBLIC gaius_systems)
 
 add_executable(render_city tools/render_city.cpp)
 target_link_libraries(render_city PRIVATE gaius_render stb_image_write)

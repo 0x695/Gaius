@@ -101,12 +101,10 @@ enum class PlacementKind {
     // Writes a seed tile across a width x height footprint via the
     // executable's shared multi-cell routine at 0x1232E.
     MultiCell,
-    // Drag-based, auto-tiling placement (road/wall/plaza/clear-area):
-    // the tile written depends on neighbouring tiles rather than being a
-    // fixed seed. The mechanism is partly traced (the 0x36-0x40 family,
-    // see docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 3) but not
-    // to the point of being implementable here -- deliberately NOT given
-    // a fake seed tile.
+    // Drag-built, one cell per call (road/wall/plaza/clear-area): the tile
+    // written depends on the cell's neighbours rather than a fixed seed.
+    // place() refuses these; use place_road / place_wall / place_plaza /
+    // clear_area below (transcribed 2026-09-13).
     DragAutoTiled,
     // Footprint is known but the seed tile is selected per-variant at
     // runtime (Forum has 8 grades, Workshop 8 goods types), from a table
@@ -153,5 +151,107 @@ bool can_place(const model::CityMap& city, CommandId id, int x, int y);
 // nothing if can_place() would have rejected it -- the executable does the
 // same, setting its failure flag at [0x6D0A] instead of writing.
 bool place(model::CityMap& city, CommandId id, int x, int y);
+
+// Per-building-tile metrics, the table at 3496:14B2 (3 bytes per tile from
+// 0xC8): footprint width and height in pixels (16 per cell), and how many
+// rows the building's sprite rises above its footprint. Used by demolition
+// (below) and by render::render_city; HOUSES.PL8 frame i is exactly
+// width x (height + extra) of tile 0xC8 + i for all 43 frames it holds.
+struct BuildingMetrics {
+    uint8_t width;
+    uint8_t height;
+    uint8_t extra;
+};
+inline constexpr std::array<BuildingMetrics, 50> kBuildingMetrics = {{
+    {16, 16, 0},  {16, 16, 0},  {16, 16, 0},  {16, 16, 0},  {32, 16, 0},  {32, 16, 8},  {32, 16, 15}, {16, 16, 12},  // C8-CF
+    {16, 16, 15}, {32, 16, 5},  {32, 16, 5},  {32, 16, 7},  {32, 16, 13}, {32, 32, 0},  {32, 32, 0},  {48, 48, 0},   // D0-D7
+    {16, 16, 3},  {16, 16, 7},  {16, 32, 4},  {16, 32, 5},  {16, 32, 5},  {32, 32, 5},  {32, 32, 5},  {48, 32, 16},  // D8-DF
+    {32, 32, 0},  {32, 32, 0},  {32, 32, 0},  {48, 48, 0},  {48, 48, 0},  {48, 48, 0},  {48, 48, 0},  {64, 64, 0},   // E0-E7
+    {16, 16, 12}, {16, 16, 16}, {32, 32, 16}, {32, 16, 16}, {32, 32, 0},  {32, 32, 0},  {16, 16, 3},  {48, 48, 4},   // E8-EF
+    {32, 16, 16}, {48, 32, 16}, {64, 32, 6},  {64, 64, 0},  {32, 32, 0},  {48, 48, 2},  {48, 48, 2},  {16, 16, 0},   // F0-F7
+    {16, 16, 0},  {16, 16, 0},                                                                                         // F8-F9
+}};
+
+}  // namespace gaius::systems::construction
+
+namespace gaius::systems::month {
+struct Random;
+}
+
+namespace gaius::systems::construction {
+
+// ---------------------------------------------------------------------------
+// Drag-built commands: Road (id 4), Wall (7), Plaza (23), Clear Area (2).
+// Transcribed 2026-09-13 from their DS:127C handlers (flat 0x131E7, 0x1415E,
+// 0x15098, 0x12B79) and helpers -- docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md
+// section 18. Dragging calls the handler once for each cell the cursor
+// passes over; each function here is one such call at (x, y) and returns
+// false where the engine refuses (setting its failure flag DS:0x6D0A).
+//
+// Road and Wall choose their tile from the cell's eight neighbours:
+//   1. a snapshot of the neighbour tiles, clockwise from north (routine
+//      0334:4161). A neighbour off the grid reads 0; a neighbour whose tile
+//      is 0 leaves the previous snapshot byte in place -- an engine quirk,
+//      kept, which is why the snapshot lives in DragState;
+//   2. a flag for each neighbour in the command's connectable tile ranges
+//      (0x17C20): roads 0x36-0x43, 0x82-0x89, 0x5E-0x61, 0x94-0x95; walls
+//      0x92-0xA3, 0xB3-0xB7;
+//   3. the first entry of the 161-entry pattern table at 3496:0A9A whose
+//      neighbour pattern fits the flags (0x17CB9): it gives the tile, and a
+//      mode for each orthogonal neighbour. No match leaves the modes as they
+//      were and refuses the cell;
+//   4. each orthogonal neighbour is re-tiled by its mode (road: 0x17EB0 ->
+//      0x17EC5 / 0x1834D / 0x1879C / 0x18C27; wall: 0x1C119 -> 0x1C12E /
+//      0x1C622 / 0x1CB19 / 0x1D010).
+// Walls use the same table and translate its road tile to a wall tile.
+//
+// Validated against four real saves: clearing every road piece (0x36-0x40)
+// and rebuilding the network cell by cell in row order reproduces 40/40,
+// 90/90, 137/141 and 149/153 road tiles. The four misses are the same cells
+// in both later saves, and the earlier CAESARWX rebuilds that area exactly:
+// in between, road cells beside those junctions were built over (one became
+// a well), and Clear Area doesn't re-tile a cleared road's neighbours -- so
+// the junction shapes are history a rebuild from the final grid can't see.
+
+// State the engine keeps between drag calls.
+struct DragState {
+    std::array<uint8_t, 8> neighbours{};  // 3496:0328, clockwise from north
+    std::array<int, 4> modes{};           // DS:0x57E2 / 57E0 / 57DE / 57DC: north, east, south, west
+};
+
+// One entry of the table at 3496:0A9A.
+struct RoadPattern {
+    std::array<uint8_t, 8> neighbours;  // per neighbour: 0 must not connect, 1 must connect, 2 either
+    uint8_t tile;                       // road tile to place (0x36-0x40)
+    std::array<uint8_t, 4> modes;       // re-tiling mode for north, east, south, west (0 = leave)
+};
+extern const std::array<RoadPattern, 161> kRoadPatterns;
+
+// Road (0x131E7). On open ground or an existing road piece (0x1D-0x41) it
+// places the pattern's tile, clears 7BB4 and re-tiles the neighbours. It also
+// builds crossings: water 0x4A/0x4E/0x52 -> 0x82, 0x56 -> 0x5E, 0x5A -> 0x86,
+// 0x45 -> 0x42, 0x44 -> 0x43 (each only if no neighbour already holds the
+// result), and a road across a wall makes a gate: 0x93 -> 0x95, 0x92 -> 0x94.
+bool place_road(model::CityMap& city, DragState& drag, int x, int y);
+
+// Wall (0x1415E). On open ground or an existing wall piece it places the
+// wall form of the pattern's tile (0x36->0x93, 0x37->0x92, 0x38->0x96,
+// 0x39->0x97, 0x3A->0x98, 0x3B->0x99, 0x3C->0xB3 ... 0x40->0xB7); across a
+// road it makes a gate (0x37 -> 0x95, 0x36 -> 0x94); 0x45 -> 0xA1 and
+// 0x44 -> 0xA0 when no neighbour holds the result.
+bool place_wall(model::CityMap& city, DragState& drag, int x, int y);
+
+// Plaza (0x15098): paves an existing road piece (0x36-0x43) by setting its
+// 7BB4 bit 0x10. The renderer and the coverage handlers both read that bit.
+bool place_plaza(model::CityMap& city, int x, int y);
+
+// Clear Area (0x12B79). Crossings revert to water (0x82/0x8A -> 0x4A,
+// 0x5E/0x72 -> 0x56, 0x86/0x8E -> 0x5A); 0x27-0x49 and 0x92-0xC9 become open
+// ground 0x1D; a reservoir 0xA4 restores the tile it stored in 7BB4; and a
+// building (>= 0xCA) is demolished whole (0x124F8): from its anchor, every
+// footprint cell becomes rubble 0xA7 + (random & 3), one generator draw per
+// cell. Demolishing a temple, 0xEF or 0xF5/0xF6 also removes it from a
+// runtime object table (DS:5BA4, DS:5B2C, DS:585C) that isn't modeled.
+bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
 
 }  // namespace gaius::systems::construction

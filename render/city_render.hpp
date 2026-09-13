@@ -47,6 +47,7 @@
 
 #include "formats/common/types.hpp"
 #include "model/city_state.hpp"
+#include "systems/construction.hpp"
 
 namespace gaius::render {
 
@@ -63,24 +64,10 @@ struct CitySprites {
 // Throws formats::FormatError if one is missing or malformed.
 CitySprites load_city_sprites(const std::string& asset_dir);
 
-// Per-building-tile sprite metrics, the table at 3496:14B2 (3 bytes per tile
-// from 0xC8): footprint width and height in pixels, and how many rows the
-// sprite extends above the footprint. HOUSES.PL8 frame i is exactly
-// width x (height + extra) of tile 0xC8 + i, for all 43 frames it holds.
-struct BuildingMetrics {
-    uint8_t width;
-    uint8_t height;
-    uint8_t extra;
-};
-inline constexpr std::array<BuildingMetrics, 50> kBuildingMetrics = {{
-    {16, 16, 0},  {16, 16, 0},  {16, 16, 0},  {16, 16, 0},  {32, 16, 0},  {32, 16, 8},  {32, 16, 15}, {16, 16, 12},  // C8-CF
-    {16, 16, 15}, {32, 16, 5},  {32, 16, 5},  {32, 16, 7},  {32, 16, 13}, {32, 32, 0},  {32, 32, 0},  {48, 48, 0},   // D0-D7
-    {16, 16, 3},  {16, 16, 7},  {16, 32, 4},  {16, 32, 5},  {16, 32, 5},  {32, 32, 5},  {32, 32, 5},  {48, 32, 16},  // D8-DF
-    {32, 32, 0},  {32, 32, 0},  {32, 32, 0},  {48, 48, 0},  {48, 48, 0},  {48, 48, 0},  {48, 48, 0},  {64, 64, 0},   // E0-E7
-    {16, 16, 12}, {16, 16, 16}, {32, 32, 16}, {32, 16, 16}, {32, 32, 0},  {32, 32, 0},  {16, 16, 3},  {48, 48, 4},   // E8-EF
-    {32, 16, 16}, {48, 32, 16}, {64, 32, 6},  {64, 64, 0},  {32, 32, 0},  {48, 48, 2},  {48, 48, 2},  {16, 16, 0},   // F0-F7
-    {16, 16, 0},  {16, 16, 0},                                                                                         // F8-F9
-}};
+// Per-building-tile sprite metrics (the table at 3496:14B2) live with the
+// other engine rules, in systems/construction.hpp.
+using systems::construction::BuildingMetrics;
+using systems::construction::kBuildingMetrics;
 
 // The engine's frame counters, for the few tiles that animate. Zero is a
 // valid still frame.

@@ -428,3 +428,51 @@ The generator has 45 call sites. In the monthly simulation path exactly five dra
 - `0x2DF7D`, four draws at step 105. Each one rolls `0286` against a threshold (`DS:0x6BE0`, `0x6BE2`, `0x6BE4`, `0x6BDE`) and, if it passes and a count is nonzero, halves `028C` until it fits that count to pick a target. That looks like the monthly event roll, but it isn't modeled.
 
 The other call sites are terrain generation (`0x6F0D`-`0x7079`), UI screens (`0x29158`, `0x2922F`, `0x27DFB`) and similar. `0x2898E` is only reached from `0x290C1`, and whether the yearly routine `0x28238` draws is still unchecked. Because terrain generation and screens draw too, a real session's sequence can't be recovered from a save.
+
+## 18. Roads, walls, plazas and Clear Area (2026-09-13)
+
+Closes section 14's first open item. Road (command 4), Wall (7), Plaza (23) and Clear Area (2) are read from their `DS:127C` handlers, together with the helpers and the neighbour pattern table, and implemented in `systems::construction` (`place_road`, `place_wall`, `place_plaza`, `clear_area`). Every handler recomputes the cursor cell (row `[0x6CB4] + ([0x6D5C]+8)/16`, column `[0x6CB6] + ([0x6D5E]+8)/16`) before each tile access, so the code was lifted with a pattern matcher that folds that idiom into cursor-relative accesses. Dragging calls a handler once for every cell the cursor passes over.
+
+Section 3's `0x17EC5` family is the second half of this mechanism: re-tiling the neighbours. Section 3 found it but couldn't place it.
+
+### 18.1 Choosing a tile from the neighbours
+
+- **`0334:4161` (flat `0x74A1`)** snapshots the eight neighbours into `3496:0328`, clockwise from north: N, NE, E, SE, S, SW, W, NW, confirmed from its jump table at flat `0x783B`. An off-grid neighbour reads 0. A neighbour whose tile *is* 0 skips the write, so the byte keeps the previous call's value. The buffer isn't in the executable image, so it starts at zero.
+- **`0x17C08`** clears eight flags at `3496:14AA`. **`0x17C20(lo, hi)`** sets the flag for each snapshot byte in `[lo, hi]` and returns how many there were. The connectable ranges are `0x36`-`0x43`, `0x82`-`0x89`, `0x5E`-`0x61` and `0x94`-`0x95` for roads, and `0x92`-`0xA3` and `0xB3`-`0xB7` for walls.
+- **`0x17CB9`** scans 161 sixteen-byte entries at `3496:0A9A`.
+  - Bytes 0-7 are a pattern: 0 = neighbour must be unflagged, 1 = flagged, 2 = either.
+  - The first entry that fits gives the tile (byte 8, always `0x36`-`0x40`) and a re-tiling mode 0-4 for each orthogonal neighbour (bytes 9-12, stored in `DS:0x57E2`, `0x57E0`, `0x57DE` and `0x57DC` for north, east, south and west).
+  - If nothing fits, it returns 0, which refuses the cell, and leaves the modes unchanged.
+  - The four single-neighbour entries fix which index is which direction.
+
+### 18.2 Re-tiling the neighbours
+
+- **Roads** use `0x17EB0`, which calls `0x17EC5` (north), `0x1834D` (east), `0x1879C` (south) and `0x18C27` (west).
+- **Walls** use `0x1C119`, which calls `0x1C12E`, `0x1C622`, `0x1CB19` and `0x1D010`.
+
+Each routine does nothing if the neighbour is off the grid, is in a protected set (crossings and gates) or has mode 0. Otherwise:
+- **mode 1** writes the straight piece;
+- **modes 2-4** keep a junction piece if the neighbour already has a compatible one, and otherwise write the corner, T or crossing piece.
+
+The exact sets are data in `systems/construction.cpp` (`kRoadRules`, `kWallRules`).
+
+### 18.3 The handlers
+
+- **Road (`0x131E7`)** refuses anything below `0x1D`. On `0x1D`-`0x41` it places the pattern's tile, clears `7BB4` and re-tiles the neighbours. It also has special cases:
+  - **Crossings:** water `0x4A`/`0x4E`/`0x52` → `0x82`, `0x56` → `0x5E`, `0x5A` → `0x86`, `0x45` → `0x42`, `0x44` → `0x43`. Each happens only if no neighbour already holds the result, and doesn't re-tile.
+  - **Gates, where a road crosses a wall:** `0x93` → `0x95` and `0x92` → `0x94`. These do re-tile the neighbours, using the pattern's modes.
+- **Wall (`0x1415E`)** covers open ground and existing wall pieces. It uses the same pattern table and converts the road tile to its wall form (`0x36`→`0x93`, `0x37`→`0x92`, `0x38`-`0x3B`→`0x96`-`0x99`, `0x3C`-`0x40`→`0xB3`-`0xB7`). Special cases: `0x37` → gate `0x95`, `0x36` → gate `0x94`, and `0x45`/`0x44` → `0xA1`/`0xA0`.
+- **Plaza (`0x15098`)** works only on road pieces `0x36`-`0x43`: it sets `7BB4` bit `0x10`, and refuses if the bit is already set. That bit is what the renderer draws as frame `0x41` and what raises a road's coverage (section 15).
+- **Clear Area (`0x12B79`)** reverts crossings to water (`0x82`/`0x8A` → `0x4A`, `0x5E`/`0x72` → `0x56`, `0x86`/`0x8E` → `0x5A`). It turns `0x27`-`0x49` into `0x1D` (clearing `7BB4`) and `0x92`-`0xC9` into `0x1D`, and restores a reservoir's (`0xA4`) stored tile from its `7BB4`. On buildings (`≥ 0xCA`) it calls **`0x124F8(col, row, 8)`**:
+  - It walks to the building's anchor through the `7BB4` part bits.
+  - It takes the footprint size from `3496:14B2`.
+  - Each footprint cell, in row order, becomes rubble `0xA7 + (2EF9:0286 & 3)` after one random draw, with `7BB4` zeroed.
+  - Temples (`0xE0`-`0xE7`), `0xF5`/`0xF6` and `0xEF` are first removed from runtime tables of 16-, 24- and 12-byte records (`DS:5BA4`, `DS:585C`, `DS:5B2C`, 30 entries each) by `0x1287C`, `0x12963` and `0x12A94`.
+  - Those record sizes × 30 are 480, 720 and 360 bytes. The first two match the save's unidentified `table_480` and `table_720`: very likely the same data (STRONG INFERENCE).
+  - This isn't modeled.
+
+### 18.4 Validation
+
+Roads can be checked against the four real saves directly. Every road piece (`0x36`-`0x40`) is reset to `0x1D`, and `place_road` is called on those cells in row order (`test_construction_road_rebuild_real_saves`). That rebuilds 40/40, 90/90, 137/141 and 149/153 road tiles, with nothing refused and no other cell touched.
+
+The four misses are the same cells in `CAESARVX` and `CAESARUX`, and `CAESARWX` rebuilds that area exactly. In between, road cells next to those junctions were built over (cell (21,80) went from a road corner to a well), and Clear Area doesn't re-tile a cleared road's neighbours. The junction shapes are history that a rebuild from the final grid can't reproduce. Walls, plazas and clearing have no equivalent evidence in these saves (they contain no walls), so they're pinned by `test_construction_drag_rules` against the lifted code.
