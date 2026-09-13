@@ -87,6 +87,7 @@ target_link_libraries(gaius_systems PUBLIC gaius_model)
 add_library(gaius_ui STATIC
   ui/metrics.cpp
   ui/font.cpp
+  ui/game_font.cpp
   ui/toolbar.cpp
 )
 target_link_libraries(gaius_ui PUBLIC gaius_systems)

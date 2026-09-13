@@ -34,6 +34,7 @@
 #include "systems/housing.hpp"
 #include "systems/service.hpp"
 #include "ui/font.hpp"
+#include "ui/game_font.hpp"
 #include "ui/metrics.hpp"
 #include "ui/toolbar.hpp"
 
@@ -1635,6 +1636,71 @@ void test_render_city_matches_screenshots() {
     }
 }
 
+// DS:0F64, the engine's character -> FONT1.PL8 frame table.
+void test_ui_game_font_table() {
+    std::printf("test_ui_game_font_table (DS:0F64 char -> frame)\n");
+    CHECK(gaius::ui::game_glyph_frame('a') == 0);
+    CHECK(gaius::ui::game_glyph_frame('z') == 25);
+    CHECK(gaius::ui::game_glyph_frame('A') == 26);
+    CHECK(gaius::ui::game_glyph_frame('Z') == 51);
+    CHECK(gaius::ui::game_glyph_frame('1') == 52);
+    CHECK(gaius::ui::game_glyph_frame('0') == 61);
+    CHECK(gaius::ui::game_glyph_frame('.') == 68);
+    CHECK(gaius::ui::game_glyph_frame(' ') == -1);
+    CHECK(gaius::ui::game_glyph_frame('\x01') == -1);
+    CHECK(gaius::ui::game_text_width("Housing", 1) == 56);
+}
+
+// The game's font against a DOSBox capture of the building menu, whose title
+// reads "Housing" at (204,12) in FONT1.PL8. Drawn over a sentinel colour so
+// only the pixels the glyphs cover are compared, at 6-bit DAC level.
+void test_ui_game_font_matches_screenshot() {
+    std::printf("test_ui_game_font_matches_screenshot (FONT1.PL8 via DS:0F64 vs DOSBox capture)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    const fs::path shot_path = fs::path(dir) / "gaius_test_screens" / "2053010-caesar-dos-building-your-city.png";
+    const fs::path shade = fs::path(dir) / "SHADE.256";
+    if (!fs::exists(shot_path) || !fs::exists(shade)) {
+        skip("building-menu screenshot or SHADE.256 not found under " + dir);
+        return;
+    }
+    gaius::ui::GameFont font;
+    try {
+        font = gaius::ui::load_game_font(dir, pal256::load(shade.string()));
+    } catch (const FormatError& e) {
+        skip(std::string("FONT1.PL8 not loadable: ") + e.what());
+        return;
+    }
+
+    const int w = 320, h = 200;
+    std::vector<uint8_t> rgb(static_cast<size_t>(w) * h * 3);
+    for (size_t i = 0; i < rgb.size(); i += 3) {
+        rgb[i] = 1;
+        rgb[i + 1] = 2;
+        rgb[i + 2] = 3;
+    }
+    gaius::ui::draw_game_text(rgb, w, h, 204, 12, "Housing", 1, font);
+
+    int sw, sh, sc;
+    unsigned char* shot = stbi_load(shot_path.string().c_str(), &sw, &sh, &sc, 3);
+    CHECK(shot != nullptr && sw == w && sh == h);
+    if (!shot) return;
+    int drawn = 0, mismatches = 0;
+    for (int y = 12; y < 12 + gaius::ui::kGameGlyphPx; ++y) {
+        for (int x = 204; x < 204 + 7 * gaius::ui::kGameGlyphPx; ++x) {
+            const uint8_t* p = &rgb[(static_cast<size_t>(y) * w + x) * 3];
+            if (p[0] == 1 && p[1] == 2 && p[2] == 3) continue;
+            const unsigned char* s = shot + (y * w + x) * 3;
+            ++drawn;
+            if ((p[0] >> 2) != (s[0] >> 2) || (p[1] >> 2) != (s[1] >> 2) || (p[2] >> 2) != (s[2] >> 2)) ++mismatches;
+        }
+    }
+    stbi_image_free(shot);
+    std::printf("  \"Housing\": %d/%d glyph pixels match\n", drawn - mismatches, drawn);
+    CHECK(drawn > 50);
+    CHECK(mismatches == 0);
+}
+
 void test_save_corpus_real() {
     std::printf("test_save_corpus_real (four saves from a real play session)\n");
     std::string dir = test_assets_dir();
@@ -2138,6 +2204,8 @@ int main() {
     test_ui_hit_test_matches_drawn_buttons();
     test_ui_font_rendering();
     test_ui_toolbar_render();
+    test_ui_game_font_table();
+    test_ui_game_font_matches_screenshot();
     test_p32_expand_math();
     test_pal256_expand_math();
     test_pl8_synthetic();

@@ -59,6 +59,8 @@ struct Rect {
     bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
 
+struct GameFont;  // ui/game_font.hpp
+
 // Maps a tile id to the colour the map view draws it in, so a button's
 // icon matches what placing it will actually look like. The viewer passes
 // its own layer colouring function; keeping it a parameter is what stops
@@ -102,8 +104,10 @@ private:
 };
 
 // Draws `bar` over an existing RGB24 frame. `selected` is a button index
-// (or -1); `hovered` likewise, for mouse hover feedback.
+// (or -1); `hovered` likewise, for mouse hover feedback. With `font` (the
+// game's FONT1.PL8, when the user's copy is available) the label is drawn in
+// the original's typeface; without it, in ui/font.hpp's placeholder.
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
-            int h);
+            int h, const GameFont* font = nullptr);
 
 }  // namespace gaius::ui

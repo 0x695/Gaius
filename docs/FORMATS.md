@@ -82,7 +82,7 @@ All in `tools/`, all built and smoke-tested against real files:
 
 ## What's next (see `GAIUS_ROADMAP.md`)
 
-- Map font frames to characters (`FONT1`/`FONT2`/`ROMFONT`, now decodable) and swap them in for `ui/font.hpp`'s placeholder; decode `MINIFONT.PL1`, a separate format.
+- `FONT1.PL8` is mapped (the engine's `DS:0F64` table; `ui/game_font.hpp`) and the toolbar draws its label with it. Still to do: `FONT2.PL8`, `ROMFONT.PL8` (its table, `DS:1044`, is known — `docs/CAESAR_CITY_RENDERER_FINDINGS.md` section 7), and `MINIFONT.PL1`, a separate format.
 - Tile → sprite mapping: **done** for the city view — `render::render_city`, traced in `docs/CAESAR_CITY_RENDERER_FINDINGS.md` and pixel-exact against the captures. Still open there: animation timing, walkers, the overlay map modes and the province view.
 - Match the palette for `PANEL1A`-`PANEL1D.VPX` (the panel variants), which `PANEL1.256` does not cover.
 - Phase 1: SDL2 viewer built on top of these decoders, plus the platform/input skeleton per `GAIUS_MASTERPLAN.md` section 5a.

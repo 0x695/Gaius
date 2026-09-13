@@ -53,6 +53,7 @@
 
 #include "apps/viewer/save_view.hpp"
 #include "render/city_render.hpp"
+#include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
@@ -283,6 +284,8 @@ int main(int argc, char** argv) {
     // folder above it. Without them the viewer shows the data layers only.
     render::CitySprites sprites;
     bool have_sprites = false;
+    ui::GameFont game_font;  // FONT1.PL8, drawn with the city palette
+    bool have_font = false;
     if (save_mode) {
         std::vector<std::string> candidates;
         if (!assets_dir.empty()) candidates.push_back(assets_dir);
@@ -294,6 +297,11 @@ int main(int argc, char** argv) {
                 sprites = render::load_city_sprites(dir);
                 have_sprites = true;
                 std::printf("city sprites: %s\n", dir.c_str());
+                try {
+                    game_font = ui::load_game_font(dir, sprites.palette);
+                    have_font = true;
+                } catch (const formats::FormatError&) {
+                }
                 break;
             } catch (const formats::FormatError&) {
             }
@@ -483,7 +491,8 @@ int main(int argc, char** argv) {
                     city_image_dirty = false;
                 }
                 render_sprite_view(city_image, sprites.palette, cam, frame);
-                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH);
+                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
+                           have_font ? &game_font : nullptr);
             } else if (save_mode) {
                 viewer::render_city_map_layer(state.city, layer, city_cell_px, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
@@ -492,7 +501,8 @@ int main(int argc, char** argv) {
                 // world math stays a single uniform mapping; the panel
                 // simply occludes the bottom, and handle_select_logical
                 // keeps clicks there from reaching the occluded cells.
-                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH);
+                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
+                           have_font ? &game_font : nullptr);
             } else {
                 render_empire_frame(map, cam, frame);
             }

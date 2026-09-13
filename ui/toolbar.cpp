@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/toolbar.hpp"
 
+#include "ui/game_font.hpp"
+
 #include <algorithm>
 
 #include "ui/font.hpp"
@@ -154,7 +156,7 @@ int Toolbar::hit_test(int lx, int ly) const {
 }
 
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
-            int h) {
+            int h, const GameFont* font) {
     if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * h * 3) return;
 
     const Rect p = bar.panel();
@@ -173,8 +175,13 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
     const char* label = (label_for >= 0 && label_for < bar.count())
                             ? systems::construction::command_name(bar.tool(label_for))
                             : "SELECT A BUILDING";
-    int tw = text_width(label, m.glyph_scale);
-    draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), label, m.glyph_scale, kLabelText);
+    if (font) {
+        int tw = game_text_width(label, m.glyph_scale);
+        draw_game_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), label, m.glyph_scale, *font);
+    } else {
+        int tw = text_width(label, m.glyph_scale);
+        draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), label, m.glyph_scale, kLabelText);
+    }
 
     for (int i = 0; i < bar.count(); ++i) {
         Rect b = bar.button(i);

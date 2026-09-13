@@ -7,9 +7,10 @@
 //
 // UPDATE 2026-09-13: the problem described below is solved. PL8 pixels are
 // four interleaved streams (see formats/pl8/pl8.hpp), and with that
-// FONT1.PL8 renders a legible font. What's left before this placeholder can
-// go is mapping frames to characters and drawing them; MINIFONT.PL1 is a
-// separate, still-undecoded format. The original diagnosis is kept below.
+// FONT1.PL8 renders a legible font, now drawn by ui/game_font.hpp through the
+// engine's own character table. This placeholder stays as the fallback when
+// the user's game files aren't available. MINIFONT.PL1 is a separate,
+// still-undecoded format. The original diagnosis is kept below.
 //
 // Caesar ships four font resources -- FONT1.PL8 and FONT2.PL8 (100
 // frames of 8x8 each), ROMFONT.PL8 (27 frames of 16x17) and
