@@ -145,8 +145,11 @@ inline bool is_buildable_terrain(uint8_t tile) {
 bool can_place(const model::CityMap& city, CommandId id, int x, int y);
 
 // Places `id` at (x,y): writes the seed tile across the footprint and
-// clears 7BB4 (operational_state) at each of those cells, matching the
-// handlers' own `mov 3496:[bx+0x7bb4], 0`. Returns false and changes
+// writes 7BB4 (operational_state) at each of those cells as its part index
+// within the building, 4*dy + dx -- 0 for the anchor and for every single-cell
+// building. (Corrected 2026-09-13: this previously wrote 0 everywhere, a
+// generalisation from the single-cell handlers; the engine's shared multi-cell
+// writer at 0x1232E writes the part index, and real saves confirm it.) Returns false and changes
 // nothing if can_place() would have rejected it -- the executable does the
 // same, setting its failure flag at [0x6D0A] instead of writing.
 bool place(model::CityMap& city, CommandId id, int x, int y);

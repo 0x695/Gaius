@@ -267,4 +267,23 @@ void apply_temple_stage(model::CityMap& city, ServiceState& service, int x, int 
 // tools/sim_check.
 void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y);
 
+// Routine 0x2C93F, water half. Wells (tile 0xB8) set C9D4.01 within radius 1,
+// reservoirs (0xA4) within radius 3, and supplied fountains within radius 6.
+// The engine decides "supplied" with a pipe-network trace (0x2CAE6 -> 0x2CBF1)
+// that isn't transcribed, and flips fountains between working (0xB9/0xBB) and
+// dry (0xBA/0xBD) tiles to match. Here a fountain counts as supplied exactly
+// when its tile is a working one (0xB9, 0xBB, or 0xBC, which the engine only
+// leaves in place when supplied), and no tile is flipped. Reproduces the saved
+// C9D4.01 of four real saves cell for cell -- but those saves exercise wells and
+// dry fountains only, no reservoir or working fountain.
+void apply_water(model::CityMap& city);
+
+// The service half of the engine's month-end, steps 100-105 of its 106-step
+// month: reset_tick, apply_water, then dispatch_tile over every cell (the four
+// quarter scans). derive_network_flags is left to the caller -- the engine runs
+// it with the reset, but only in one month of every eighteen (while DS:0x6D9B,
+// a month counter mod 18, is zero). Reproduces A2C4 and C9D4 bits 01, 04, 08,
+// 20, 40 and 80 of four real saves exactly.
+void rebuild_services(model::CityMap& city, ServiceState& service);
+
 }  // namespace gaius::systems::service

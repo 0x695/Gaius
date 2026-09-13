@@ -258,7 +258,7 @@ Everything `systems::service` implements was previously transcribed from the RE 
 ### 15.1 The tick
 
 - **`0x293A2` is a phased tick**, a switch over tick-phase numbers. One phase calls the reset `0x2C8D3` and then `0x2DA0D`; four phases call the scan `0x2BBBB` with start rows **0, 25, 50, 75**; a later phase publishes per-scan counters into saved globals, dividing some by building footprint area (`/4`, `/16`).
-- **`0x2BBBB`** loops 25 rows x 100 columns and does `cmp tile, 0x35; jbe skip; lcall [tile*4 + 0x153A]`. **It is the only instruction in the executable that references `0x153A` in any operand form** (exhaustive search). So DS:153A entries `0x00`-`0x35` never run: tile `0x00`'s handler (`0x297AC`, the one Phase 4 implemented from v5) is referenced only from its own table slot, with no direct callers.
+- **`0x2BBBB`** loops 25 rows x 100 columns and does `cmp tile, 0x35; jbe skip; lcall [tile*4 + 0x153A]`. **It is the only instruction in the executable that references `0x153A` in any operand form** (exhaustive search). So DS:153A entries `0x00`-`0x35` never run: tile `0x00`'s handler (`0x297AC`, the one Phase 4 implemented from v5) is referenced only from its own table slot, with no direct callers. **Corrected in section 16:** it is not dead code. Those slots belong to the adjacent `DS:1212` table, and `0x297AC` is housing tile `0xCA`'s development handler.
 - **`0x2C8D3`**, the reset, is exactly what Gaius already had: `C9D4 &= 0x12`, `A2C4 = 0`, `2D94 = 0x3F`, every cell. Land value is never reset.
 - **`0x2DA0D`**: for every cell, if `C9D4.10` set `0x02` and clear `0x10`, else clear `0x02`. Skipped while `DS:0x6D9B` is nonzero. The source bit is `C9D4.10`, not `7BB4.10` as previously documented.
 
@@ -304,7 +304,7 @@ A scan of the whole table, bounded at each handler's true end, found no other DS
 ### 15.4 Housing, located
 
 - The six `0xC8`-`0xD7` handlers share one template and differ only in tier parameters that rise with the tile id and cap at 31. `0xC8` is Housing's construction seed (section 13), the range ends where the temple family begins, and in real saves these tiles line the roads. **STRONG INFERENCE** that they are the manual's sixteen grades. The handlers never change the tile id, so the grade-change routine is still unfound.
-- `0x297AC` (tile `0x00`, unreachable), fully decoded: `land_value_allows(0x28)`; otherwise, if `A2C4 < 2` or `DS:0x6DC7` bit 0 is clear, write `0xC9`; otherwise, if `A2C4 > 2`, write `0xCB`; clear 7BB4 after either write.
+- **Corrected in section 16:** `0x297AC` is not tile `0x00`'s handler and is not unreachable -- it is `DS:1212`'s development handler for housing tile `0xCA`. Its decode was right; its attribution was wrong.
 - In the saves, all 146 cells of `0x00`-`0x1C` form bordered blobs far from the city and are byte-identical across all four saves.
 
 ### 15.5 The proof
@@ -313,7 +313,83 @@ A scan of the whole table, bounded at each handler's true end, found no other DS
 
 ### 15.6 Still open
 
-- Who calls `0x2DA7E` (the -8..+50 land-value step), and so how land value is actually bounded over time.
+- Who calls `0x2DA7E` (the -8..+50 land-value step), and so how land value is actually bounded over time. -- answered in section 16: the housing development pass.
 - The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from.
-- The housing grade-change routine; the identities of `0x94`/`95`, `0xA2`-`B2`, `0xB9`/`BB`/`BC` and `0xF5`/`F6`; what sets `C9D4.01` and `DS:0x6BF8`.
+- The housing grade-change routine; the identities of `0x94`/`95`, `0xA2`-`B2`, `0xB9`/`BB`/`BC` and `0xF5`/`F6`; what sets `C9D4.01` and `DS:0x6BF8`. -- the grade-change routine is answered in section 16.
 - What reads the C9D4 service bits.
+
+## 16. Housing, read directly -- and a correction to section 15 (2026-09-13)
+
+**Correction first.** Sections 11 and 15 treated the far pointers from `DS:153A` onward as one table indexed by tile id, and 15.1/15.4 concluded that its entries `0x00`-`0x35` -- including `0x297AC`, "tile `0x00`'s handler" -- were dead code. They aren't. `DS:153A` and `DS:1212` are adjacent tables: the monthly service scan (`0x2BBBB`) indexes `DS:153A` only for tiles above `0x35`, the housing development pass (`0x294CF`) indexes `DS:1212` only for tiles `0xC8` and up, and `DS:1212 + 0xCA*4` *is* `DS:153A`. So the slots read as "tiles `0x00`-`0x35`" are `DS:1212`'s entries for tiles `0xCA`-`0xFF`, verified byte for byte, and `0x297AC` is the development handler for housing tile `0xCA`. `CAESAR_CITY_STATE_v5.md` made the same misreading, which is why it agreed with section 11 22-for-22. What remains true: tiles `0x00`-`0x35` are never simulated by either table, and in real saves they are static terrain.
+
+### 16.1 The month
+
+A month is 106 steps, counted in `DS:0x6D9D` (dispatcher at `0x2936A`):
+
+- **Steps 0-99:** the housing development pass for row = step (`0x294CF`), then five other per-row routines (`0x2D2F5`, `0x2CE7C`, `0x2CD1C`, `0x2E209`, `0x2CD10`) that haven't been read.
+- **Steps 100-105** (jump table at `0x29466`): 100, the reset `0x2C8D3` and `0x2DA0D`; 101, population and water (`0x2C93F`) and `0x28215`; 102-105, the four quarter scans (`0x2BBBB` from rows 0, 25, 50 and 75), the last also publishing the scan counters and calling six monthly routines.
+- **Rollover** (`0x29476`): at step 106 the step resets and month `DS:0x6C1C` advances; at 12, month resets, year `DS:0x6C32` advances, `DS:0x6C7C` is set to 80 and `0x28238` runs. `DS:0x6D9B` counts months mod 18, and `0x2DA0D` only runs while it is 0.
+
+Across the four saves the month reads 9, 1, 4, 6 and the year -11, -7, -2, -1 -- consistent with BC dates (STRONG INFERENCE). Because services are rebuilt at the end of a month and houses develop during the next, houses always react to last month's services.
+
+### 16.2 Population and water (`0x2C93F`, step 101)
+
+- **Population units** `DS:0x6C10` are the sum, over every tile `0xC8`-`0xD7`, of the per-cell table at `3496:007E`: `1 1 2 3 3 5 6 5 6 4 4 3 3 2 2 1`. `DS:0x6C0E` is four times that. It matches the saves exactly (0, 63, 146) except `CAESARVX.SAV`, which is 2 high -- that save holds exactly one `0xCF`, the +2 of a `0xCB` -> `0xCF` upgrade made after the count.
+- **Water, `C9D4.01`:** wells (`0xB8`) radius 1, reservoirs (`0xA4`) radius 3, and fountains (`0xB9`-`0xBD`) radius 6 when a supply check (`0x2CAE6`, which traces pipes through `0x2CBF1`) succeeds; the same check flips fountains between working `0xB9`/`0xBB` and dry `0xBA`/`0xBD`. It matches the saved `C9D4.01` 10000/10000 in all four saves -- which contain wells and dry fountains, but no reservoir or working fountain.
+
+### 16.3 The development pass (`0x294CF`)
+
+For each cell of its row:
+
+- **Below `0xC8`:** land value is zeroed. A jump table at `0x295F8` sends `0xB9`/`0xBA` to `0x2BACE` (coverage > 10 and population > 50 -> `0xBD`, or `0xBB` if watered), `0xBB`-`0xBD` to `0x2BB48` (coverage < 10 -> `0xBA`, or `0xB9` if watered), and `0xA8`/`AB`/`AE`/`B1` to `0x29624`, which either decrements the tile or picks one of eight neighbours from a table at `3496:1DE4` and, if that neighbour is housing, calls `11C6:0A5A` -- both driven by the RNG in segment `2EF9`.
+- **`0xC8`-`0xD6`:** one `evolve_land_value` step with growth `DS:0x6BF6 + (random & 3) - 1`, drawn once per row. **`0xD7` and up:** land value zeroed.
+- **Then**, if the cell's `7BB4 & 0x0F` is 0, the pass copies its C9D4 byte to `DS:0x6DC7` and calls `DS:1212[tile]`. Handlers that cover extra columns advance the column counter themselves.
+
+### 16.4 Part indices
+
+`7BB4`'s low nibble is each cell's position within its building, `4*dy + dx`. The shared construction footprint writer (`0x1232E`) writes it for every footprint cell, the development handlers write it when houses merge, and the pass only develops part 0. It holds on every multi-cell building in all four saves (heavy industry reads `0` through `F`). `systems::construction::place` had written 0 everywhere; fixed.
+
+### 16.5 The development handlers (`DS:1212`)
+
+A is the anchor's A2C4 (signed), P the population units, and the letters the anchor's C9D4 service bits: W water `01`, N `02`, M market `08`, B bath houses `04`, S school/hospital `40`, E entertainment `80`. The exact absorbable-cell test for each growth step is in `systems/housing.cpp`.
+
+| tile | shape | land-value gate | demote | promote |
+|---|---|---|---|---|
+| `C8` | 1x1 | > 20 | A<0 -> `1D` | A>0 -> `C9` |
+| `C9` | 1x1 | > 30 | A<1 -> `C8` | A>1, W -> `CA` |
+| `CA` | 1x1 | > 40 | A<2 or no W -> `C9` | A>2 -> `CB` |
+| `CB` | 1x1 | > 48 | A<3 or no W -> `CA` | A>4, N, P>=25: pair `CC` if the right cell is open ground or `C8`-`CB`, else `CF` |
+| `CC` | pair | | A<5 or no W/N -> two `CB` | A>5, P>=50 -> `CD` |
+| `CD` | pair | | A<6 or no W/N -> `CC` | A>6, M, P>=75 -> `CE` |
+| `CE` | pair | | A<7 or no W/N/M -> `CD` | A>7, B, P>=100 -> `D1` |
+| `CF` | 1x1 | | A<5 or no W/N -> `CB` | A>6, M, P>=75 -> `D0` |
+| `D0` | 1x1 | | A<7 or no W/N/M -> `CF` | A>7, B, P>=100: pair `D1` over open ground, `C8`-`CB` or `CF`-`D0` |
+| `D1` | pair | | A<8 or no W/N/M/B -> `CE` | A>10, P>=125 -> `D2` |
+| `D2` | pair | | A<11 or no W/N/M/B -> `D1` | A>13, S, P>=150 -> `D3` |
+| `D3` | pair | | A<14 or no W/N/M/B/S -> `D2` | A>16, P>=175 -> `D4` |
+| `D4` | pair | | A<17 or no W/N/M/B/S -> `D3` | A>18, E, P>=200: 2x2 `D5` if the two cells below qualify |
+| `D5` | 2x2 | | A<19 or any bit missing -> two `D4` pairs | A>20, P>=225 -> `D6` |
+| `D6` | 2x2 | | A<21 or any bit missing -> `D5` | A>22, P>=250: 3x3 `D7` if the five new cells qualify |
+| `D7` | 3x3 | | A<23 or any bit missing -> a `D6` 2x2, a `D4` pair and three `D0` | -- |
+| `D8` | 1x1 | | -- | A>2, P>5 -> `D9` |
+| `D9` | 1x1 | | A<3 -> `D8` | A>5, P>=15: 1x2 downward `DA` over open ground, `C8`-`CB` or `D8`-`D9` |
+| `DA` | 1x2 | | A<6 -> `D9`, open ground below | A>10, P>=25 -> `DB` |
+| `DB` | 1x2 | | A<11 -> `DA` | A>14, P>=40 -> `DC` |
+| `DC` | 1x2 | | A<15 -> `DB` | A>17, P>=75: 2x2 `DD` |
+| `DD` | 2x2 | | A<18 -> `DC`, open ground on the right | A>20, P>=125 -> `DE` |
+| `DE` | 2x2 | | A<21 -> `DD` | A>23, P>=200: 3x2 `DF` |
+| `DF` | 3x2 | | A<24 -> `DE`, open ground on the right | -- |
+| `E8` | 1x1 | | -- | first sets 7BB4.10 = water; then A>12, P>=40: 2x2 `EA` |
+| `EA` | 2x2 | | A<12 -> two `E8` (7BB4 `0x40`), open ground below | then sets 7BB4.10 = water on all four cells |
+
+Every other id from `0xC8` up points at a bare `retf` (`0x296D9`).
+
+### 16.6 `land_value_allows` (`0x2DB49`), in full
+
+If the cell's land value exceeds the threshold: tile `0xA7`, and A2C4, 7BB4 and 54A4 zeroed. Then it calls `0334:28F9(10, col, row)`; if that returns nonzero it fills in an actor record (`DS:[0x6DBD]`, 50-byte records at `DS:0x5D86`) and calls `31E0:0634(5)` and `0x27A54`. Then `DS:0x6C3C` -= 2 (floored at 0), `DS:0x6C84` = 2, and it returns 1; otherwise it returns 0. `CAESAR_CITY_STATE_v5.md` had only the first sentence.
+
+### 16.7 Validation, and what's still open
+
+Validated against real saves: part indices on every building, population units (three exact, one explained), water (10000/10000), and -- through `rebuild_services` -- coverage and C9D4 bits `01`, `04`, `08`, `20`, `40` and `80` (10000/10000 each). The development handlers have no direct ground truth in four snapshots taken months apart, so the transcription is pinned by exact-write unit tests instead.
+
+Still open: the RNG in segment `2EF9`, which drives land-value growth and the `0xA8`-`0xB1` routine; the pipe tracer `0x2CBF1`; `0334:28F9` and the actor spawn; the five other per-row routines and six monthly routines; what `DS:0x6C3C` measures.

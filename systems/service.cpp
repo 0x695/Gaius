@@ -300,4 +300,26 @@ void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y) {
     }
 }
 
+void apply_water(model::CityMap& city) {
+    for (int y = 0; y < model::kCityH; ++y) {
+        for (int x = 0; x < model::kCityW; ++x) {
+            const uint8_t t = city.tile[y][x];
+            if (t == 0xB8) {
+                apply_flags(city, x, y, 1, 0x01);
+            } else if (t == 0xA4) {
+                apply_flags(city, x, y, 3, 0x01);
+            } else if (t == 0xB9 || t == 0xBB || t == 0xBC) {
+                apply_flags(city, x, y, 6, 0x01);
+            }
+        }
+    }
+}
+
+void rebuild_services(model::CityMap& city, ServiceState& service) {
+    reset_tick(city, service);
+    apply_water(city);
+    for (int y = 0; y < model::kCityH; ++y)
+        for (int x = 0; x < model::kCityW; ++x) dispatch_tile(city, service, x, y);
+}
+
 }  // namespace gaius::systems::service

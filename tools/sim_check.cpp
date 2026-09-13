@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius CLI tool: sim_check
 //
-// Validates systems::service against a real save. The engine rebuilds A2C4
-// (coverage) from nothing every tick -- routine 0x2C8D3 zeroes it, then every
-// dispatched tile adds to it -- and rebuilds C9D4's service bits the same way.
-// So one reset_tick plus one full dispatch pass over a save's own tile grid
-// should reproduce the A2C4 and service bits the engine itself saved, cell for
-// cell, to the extent that:
-//   - every handler that writes those layers has been transcribed, and
-//   - the save wasn't taken part-way through the engine's four-phase scan
-//     (routine 0x2BBBB covers 25 rows per tick phase).
-// Mismatches are broken down by row band (the scan's quarters) and by tile id,
-// so those two causes can be told apart.
+// Validates Gaius's simulation against a real save. The engine rebuilds A2C4
+// (coverage) and C9D4's service bits from nothing at the end of every month --
+// steps 100-105 of its 106-step month: reset, water, then the four quarter
+// scans -- and a save carries the result. So systems::service::rebuild_services
+// over a save's own tile grid should reproduce those layers cell for cell, to
+// the extent that every handler that writes them has been transcribed.
+// Mismatches are broken down by row band and by tile id, so a missing handler
+// shows up as a cluster.
+//
+// It also compares systems::housing::population_units with the engine's own
+// count (DS:0x6C10). That count is taken at step 101, and housing changes during
+// steps 0-99 of the next month, so a save taken mid-month can differ by the
+// population of whatever changed since.
 //
 // Land value is deliberately not compared: the engine never resets it, so it
 // carries history a single pass can't reproduce.
@@ -26,9 +28,22 @@
 
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
+#include "systems/housing.hpp"
 #include "systems/service.hpp"
 
 using namespace gaius;
+
+namespace {
+
+int saved_word(const formats::save::SaveFile& sf, uint16_t ds) {
+    const uint8_t* globals = sf.block("global_words_128").first;
+    for (int i = 0; i < 128; ++i) {
+        if (formats::save::kGlobalWordDsAddress[i] == ds) return globals[2 * i] | (globals[2 * i + 1] << 8);
+    }
+    return -1;
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -47,19 +62,8 @@ int main(int argc, char** argv) {
     const model::CityState st = model::load(sf);
     model::CityMap sim = st.city;
     systems::service::ServiceState svc;
-
-    // The housing tiers' base delta is a saved global; use this save's value.
-    const uint8_t* globals = sf.block("global_words_128").first;
-    for (int i = 0; i < 128; ++i) {
-        if (formats::save::kGlobalWordDsAddress[i] == 0x6BF8) {
-            svc.housing_coverage_base = globals[2 * i] | (globals[2 * i + 1] << 8);
-            break;
-        }
-    }
-
-    systems::service::reset_tick(sim, svc);
-    for (int y = 0; y < model::kCityH; ++y)
-        for (int x = 0; x < model::kCityW; ++x) systems::service::dispatch_tile(sim, svc, x, y);
+    svc.housing_coverage_base = saved_word(sf, 0x6BF8);
+    systems::service::rebuild_services(sim, svc);
 
     std::printf("%s\n  housing_coverage_base (DS:0x6BF8) = %d\n", argv[1], svc.housing_coverage_base);
 
@@ -100,9 +104,9 @@ int main(int argc, char** argv) {
         for (const auto& e : examples) std::printf("%s\n", e.c_str());
     }
 
-    // --- C9D4 service bits the handlers set ---
-    std::printf("  C9D4 service bits:");
-    for (uint8_t bit : {uint8_t{0x04}, uint8_t{0x08}, uint8_t{0x20}, uint8_t{0x40}, uint8_t{0x80}}) {
+    // --- C9D4 bits the month-end rebuild sets (01 is water) ---
+    std::printf("  C9D4 bits:");
+    for (uint8_t bit : {uint8_t{0x01}, uint8_t{0x04}, uint8_t{0x08}, uint8_t{0x20}, uint8_t{0x40}, uint8_t{0x80}}) {
         int bit_match = 0, saved_only = 0, sim_only = 0;
         for (int y = 0; y < model::kCityH; ++y) {
             for (int x = 0; x < model::kCityW; ++x) {
@@ -120,5 +124,10 @@ int main(int argc, char** argv) {
         std::printf("  0x%02X %d/10000 (saved-only %d, sim-only %d)", bit, bit_match, saved_only, sim_only);
     }
     std::printf("\n");
+
+    // --- Population ---
+    const int units = systems::housing::population_units(st.city);
+    std::printf("  population units: computed %d, saved DS:0x6C10 %d (saved population DS:0x6C0E %d)\n", units,
+                saved_word(sf, 0x6C10), saved_word(sf, 0x6C0E));
     return 0;
 }

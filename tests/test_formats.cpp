@@ -670,12 +670,11 @@ void test_service_dispatch_tile() {
     }
 }
 
-// systems::housing (Phase 4, Layer 3). land_value_allows and tick_tile_00
-// transcribe CAESAR_CITY_STATE_v5.md routine 0x2DB49/0x297AC directly --
-// these tests catch a transcription slip, same spirit as
-// test_service_bit_table_fixtures. The population tests check the
-// documented SHAPE only (monotonic + top-grade dip), not real numbers --
-// see systems/housing.hpp for why no real numbers exist to check against.
+// systems::housing (Phase 4, Layer 3), transcribed from the disassembly:
+// land_value_allows (0x2DB49), the DS:1212 development handlers and the row
+// pass (0x294CF), and the population table (3496:007E). Each handler case pins
+// one transition exactly -- tiles, 7BB4 part indices and the column skip -- so a
+// transcription slip fails loudly. Real-save checks: test_save_corpus_population.
 void test_housing_land_value_allows() {
     std::printf("test_housing_land_value_allows (CAESAR_CITY_STATE_v5.md routine 0x2DB49)\n");
     CityMap city;
@@ -703,35 +702,251 @@ void test_housing_land_value_allows() {
     CHECK(city3.tile[5][5] == 0);
 }
 
-void test_housing_tick_tile_00() {
-    std::printf("test_housing_tick_tile_00 (0x297AC handler, threshold 0x28=40)\n");
-    CityMap city;
-    city.land_value[7][7] = 41;
-    tick_tile_00(city, 7, 7);
-    CHECK(city.tile[7][7] == 0xA7);
+void test_housing_development() {
+    std::printf("test_housing_development (DS:1212 handlers and row pass 0x294CF, exact writes)\n");
+    const uint8_t all = 0x01 | 0x02 | 0x04 | 0x08 | 0x40 | 0x80;
+    auto put = [](CityMap& c, int x, int y, uint8_t tile, int coverage, uint8_t flags) {
+        c.tile[y][x] = tile;
+        c.coverage[y][x] = static_cast<uint8_t>(coverage);
+        c.service_flags[y][x] = flags;
+    };
+    auto T = [](const CityMap& c, int x, int y) { return static_cast<int>(c.tile[y][x]); };
+    auto P = [](const CityMap& c, int x, int y) { return static_cast<int>(c.operational_state[y][x]); };
+    auto at_pop = [](int units) {
+        DevelopmentContext c;
+        c.population_units = units;
+        return c;
+    };
+    const DevelopmentContext none;
 
-    CityMap city2;
-    city2.land_value[7][7] = 40;  // exactly at threshold -- must not transition
-    tick_tile_00(city2, 7, 7);
-    CHECK(city2.tile[7][7] == 0);
+    {  // C8: coverage below 0 -> open ground 0x1D; above 0 -> C9; exactly 0 -> stays
+        auto f = fresh();
+        put(f->city, 10, 10, 0xC8, -1, 0);
+        put(f->city, 11, 10, 0xC8, 1, 0);
+        put(f->city, 12, 10, 0xC8, 0, 0);
+        CHECK(develop_building(f->city, 10, 10, 0, none) == 0);
+        develop_building(f->city, 11, 10, 0, none);
+        develop_building(f->city, 12, 10, 0, none);
+        CHECK(T(f->city, 10, 10) == 0x1D);
+        CHECK(T(f->city, 11, 10) == 0xC9);
+        CHECK(T(f->city, 12, 10) == 0xC8);
+    }
+    {  // C8 with land value above 20: land_value_allows fires first
+        auto f = fresh();
+        put(f->city, 10, 10, 0xC8, 5, 0);
+        f->city.land_value[10][10] = 21;
+        develop_building(f->city, 10, 10, 0, none);
+        CHECK(T(f->city, 10, 10) == 0xA7);
+    }
+    {  // C9 promotes only with water
+        auto f = fresh();
+        put(f->city, 10, 10, 0xC9, 2, 0);
+        develop_building(f->city, 10, 10, 0, none);
+        CHECK(T(f->city, 10, 10) == 0xC9);
+        develop_building(f->city, 10, 10, 0x01, none);
+        CHECK(T(f->city, 10, 10) == 0xCA);
+    }
+    {  // CB merges rightwards over open ground into a CC pair
+        auto f = fresh();
+        put(f->city, 10, 10, 0xCB, 5, 0x03);
+        f->city.tile[10][11] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, 0x03, at_pop(25)) == 1);
+        CHECK(T(f->city, 10, 10) == 0xCC && P(f->city, 10, 10) == 0);
+        CHECK(T(f->city, 11, 10) == 0xCC && P(f->city, 11, 10) == 1);
+    }
+    {  // ...becomes a one-cell CF when the cell to its right is taken
+        auto f = fresh();
+        put(f->city, 10, 10, 0xCB, 5, 0x03);
+        f->city.tile[10][11] = 0xF0;
+        CHECK(develop_building(f->city, 10, 10, 0x03, at_pop(25)) == 0);
+        CHECK(T(f->city, 10, 10) == 0xCF);
+        CHECK(T(f->city, 11, 10) == 0xF0);
+    }
+    {  // ...and does nothing below the population gate
+        auto f = fresh();
+        put(f->city, 10, 10, 0xCB, 5, 0x03);
+        f->city.tile[10][11] = 0x20;
+        develop_building(f->city, 10, 10, 0x03, at_pop(24));
+        CHECK(T(f->city, 10, 10) == 0xCB);
+    }
+    {  // CC demotion splits the pair into two independent CB houses
+        auto f = fresh();
+        put(f->city, 10, 10, 0xCC, 4, 0x03);
+        f->city.tile[10][11] = 0xCC;
+        f->city.operational_state[10][11] = 1;
+        CHECK(develop_building(f->city, 10, 10, 0x03, none) == 1);
+        CHECK(T(f->city, 10, 10) == 0xCB && P(f->city, 10, 10) == 0);
+        CHECK(T(f->city, 11, 10) == 0xCB && P(f->city, 11, 10) == 0);
+    }
+    {  // CF -> D0 needs the market bit and 75 population units
+        auto f = fresh();
+        put(f->city, 10, 10, 0xCF, 7, 0x0B);
+        develop_building(f->city, 10, 10, 0x0B, at_pop(74));
+        CHECK(T(f->city, 10, 10) == 0xCF);
+        develop_building(f->city, 10, 10, 0x0B, at_pop(75));
+        CHECK(T(f->city, 10, 10) == 0xD0);
+    }
+    {  // D0 forms a pair by absorbing a neighbouring CF
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD0, 8, 0x0F);
+        f->city.tile[10][11] = 0xCF;
+        CHECK(develop_building(f->city, 10, 10, 0x0F, at_pop(100)) == 1);
+        CHECK(T(f->city, 10, 10) == 0xD1 && T(f->city, 11, 10) == 0xD1 && P(f->city, 11, 10) == 1);
+    }
+    {  // D4 grows into a 2x2 D5 over open ground below
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD4, 19, all);
+        f->city.tile[10][11] = 0xD4;
+        f->city.operational_state[10][11] = 1;
+        f->city.tile[11][10] = 0x20;
+        f->city.tile[11][11] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, all, at_pop(200)) == 1);
+        CHECK(T(f->city, 10, 10) == 0xD5 && P(f->city, 10, 10) == 0);
+        CHECK(T(f->city, 11, 10) == 0xD5 && P(f->city, 11, 10) == 1);
+        CHECK(T(f->city, 10, 11) == 0xD5 && P(f->city, 10, 11) == 4);
+        CHECK(T(f->city, 11, 11) == 0xD5 && P(f->city, 11, 11) == 5);
+    }
+    {  // ...but not over a civic building
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD4, 19, all);
+        f->city.tile[11][10] = 0xF0;
+        f->city.tile[11][11] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, all, at_pop(200)) == 0);
+        CHECK(T(f->city, 10, 10) == 0xD4);
+    }
+    {  // D5 demotes into two stacked D4 pairs
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD5, 18, all);
+        CHECK(develop_building(f->city, 10, 10, all, none) == 1);
+        CHECK(T(f->city, 10, 10) == 0xD4 && P(f->city, 11, 10) == 1);
+        CHECK(T(f->city, 10, 11) == 0xD4 && P(f->city, 10, 11) == 0 && P(f->city, 11, 11) == 1);
+    }
+    {  // D6 grows into a 3x3 D7 and skips two columns
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD6, 23, all);
+        for (int y = 10; y < 13; ++y)
+            for (int x = 10; x < 13; ++x)
+                if (x > 11 || y > 11) f->city.tile[y][x] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, all, at_pop(250)) == 2);
+        for (int y = 0; y < 3; ++y) {
+            for (int x = 0; x < 3; ++x) {
+                CHECK(T(f->city, 10 + x, 10 + y) == 0xD7);
+                CHECK(P(f->city, 10 + x, 10 + y) == 4 * y + x);
+            }
+        }
+    }
+    {  // D7 demotion breaks the 3x3 into a D6 2x2, a D4 pair and three D0 singles
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD7, 22, all);
+        CHECK(develop_building(f->city, 10, 10, all, none) == 2);
+        CHECK(T(f->city, 10, 10) == 0xD6 && T(f->city, 11, 11) == 0xD6 && P(f->city, 11, 11) == 5);
+        CHECK(T(f->city, 12, 10) == 0xD0 && T(f->city, 12, 11) == 0xD0 && T(f->city, 12, 12) == 0xD0);
+        CHECK(T(f->city, 10, 12) == 0xD4 && T(f->city, 11, 12) == 0xD4 && P(f->city, 11, 12) == 1);
+    }
+    {  // Temple stages: D8 -> D9 -> DA, growing downwards
+        auto f = fresh();
+        put(f->city, 10, 10, 0xD8, 3, 0);
+        develop_building(f->city, 10, 10, 0, at_pop(15));
+        CHECK(T(f->city, 10, 10) == 0xD9);
+        f->city.coverage[10][10] = 6;
+        f->city.tile[11][10] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, 0, at_pop(15)) == 0);
+        CHECK(T(f->city, 10, 10) == 0xDA && T(f->city, 10, 11) == 0xDA && P(f->city, 10, 11) == 4);
+    }
+    {  // DA shrinks back, leaving open ground below
+        auto f = fresh();
+        put(f->city, 10, 10, 0xDA, 5, 0);
+        f->city.tile[11][10] = 0xDA;
+        f->city.operational_state[11][10] = 4;
+        develop_building(f->city, 10, 10, 0, none);
+        CHECK(T(f->city, 10, 10) == 0xD9 && T(f->city, 10, 11) == 0x1D && P(f->city, 10, 11) == 0);
+    }
+    {  // DC widens into a 2x2 DD
+        auto f = fresh();
+        put(f->city, 10, 10, 0xDC, 18, 0);
+        f->city.tile[10][11] = 0x20;
+        f->city.tile[11][11] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, 0, at_pop(75)) == 1);
+        CHECK(T(f->city, 11, 11) == 0xDD && P(f->city, 11, 11) == 5);
+    }
+    {  // DE widens into a 3x2 DF; DF shrinks back with open ground on the right
+        auto f = fresh();
+        put(f->city, 10, 10, 0xDE, 24, 0);
+        f->city.tile[10][12] = 0x20;
+        f->city.tile[11][12] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, 0, at_pop(200)) == 1);
+        CHECK(T(f->city, 12, 11) == 0xDF && P(f->city, 12, 11) == 6);
+        f->city.coverage[10][10] = 23;
+        CHECK(develop_building(f->city, 10, 10, 0, none) == 1);
+        CHECK(T(f->city, 10, 10) == 0xDE && T(f->city, 12, 10) == 0x1D && T(f->city, 12, 11) == 0x1D);
+    }
+    {  // E8 grows into a 2x2 EA
+        auto f = fresh();
+        put(f->city, 10, 10, 0xE8, 13, 0x01);
+        f->city.tile[10][11] = 0x20;
+        f->city.tile[11][10] = 0x20;
+        f->city.tile[11][11] = 0x20;
+        CHECK(develop_building(f->city, 10, 10, 0x01, at_pop(40)) == 1);
+        CHECK(T(f->city, 11, 11) == 0xEA && P(f->city, 11, 11) == 5);
+    }
+    {  // E8's connected bit (7BB4.10) simply records whether it has water
+        auto f = fresh();
+        put(f->city, 10, 10, 0xE8, 0, 0x01);
+        develop_building(f->city, 10, 10, 0x01, none);
+        CHECK((P(f->city, 10, 10) & 0x10) != 0);
+        f->city.service_flags[10][10] = 0;
+        develop_building(f->city, 10, 10, 0, none);
+        CHECK((P(f->city, 10, 10) & 0x10) == 0);
+    }
+    {  // EA shrinks to two E8 on the top row, with open ground below
+        auto f = fresh();
+        put(f->city, 10, 10, 0xEA, 11, 0);
+        CHECK(develop_building(f->city, 10, 10, 0, none) == 1);
+        CHECK(T(f->city, 10, 10) == 0xE8 && T(f->city, 11, 10) == 0xE8 && P(f->city, 11, 10) == 0x40);
+        CHECK(T(f->city, 10, 11) == 0x1D && T(f->city, 11, 11) == 0x1D);
+    }
+    {  // The row pass: land value, fountains, anchors only, and column skipping
+        auto f = fresh();
+        CityMap& c = f->city;
+        DevelopmentContext rc;
+        rc.population_units = 60;
+        rc.land_value_growth = 3;
+        c.tile[5][0] = 0x20;
+        c.land_value[5][0] = -5;  // below 0xC8: zeroed
+        put(c, 1, 5, 0xC8, 0, 0x20);
+        c.land_value[5][1] = 4;  // housing with C9D4.20: grows by 3
+        put(c, 2, 5, 0xD7, 30, all);
+        c.land_value[5][2] = 9;         // 0xD7 and above: zeroed
+        put(c, 3, 5, 0xCC, 4, 0x03);   // this pair demotes...
+        put(c, 4, 5, 0xCC, 2, 0x03);   // ...and its right half, now a CB that would demote, is skipped
+        c.operational_state[5][4] = 1;
+        put(c, 5, 5, 0xC9, 2, 0x01);   // a non-anchor cell is never developed
+        c.operational_state[5][5] = 1;
+        put(c, 6, 5, 0xB9, 11, 0x01);  // small fountain grows; watered -> BB
+        put(c, 7, 5, 0xBB, 9, 0x00);   // big fountain shrinks; dry -> BA
+        develop_row(c, 5, rc);
+        CHECK(c.land_value[5][0] == 0);
+        CHECK(c.land_value[5][1] == 7);
+        CHECK(c.land_value[5][2] == 0);
+        CHECK(c.tile[5][3] == 0xCB && c.tile[5][4] == 0xCB);
+        CHECK(c.tile[5][5] == 0xC9);
+        CHECK(c.tile[5][6] == 0xBB);
+        CHECK(c.tile[5][7] == 0xBA);
+    }
 }
 
 void test_housing_population() {
-    std::printf("test_housing_population (manual: monotonic density, slight drop at top grade)\n");
-    // Monotonic increase from grade 1 to grade 15.
-    for (int g = 1; g < 15; ++g) {
-        int lower = provisional_density_per_grade(static_cast<HousingGrade>(g));
-        int higher = provisional_density_per_grade(static_cast<HousingGrade>(g + 1));
-        CHECK(higher > lower);
-    }
-    // "the fanciest houses actually have a slight drop in density"
-    int grade15 = provisional_density_per_grade(HousingGrade::Grade15);
-    int grade16 = provisional_density_per_grade(HousingGrade::Grade16);
-    CHECK(grade16 < grade15);
-    CHECK(grade16 > 0);  // a drop, not a collapse to zero/negative
-
-    CHECK(population(10, HousingGrade::Grade1) == 10 * provisional_density_per_grade(HousingGrade::Grade1));
-    CHECK(population(0, HousingGrade::Grade10) == 0);
+    std::printf("test_housing_population (units per cell from 3496:007E; population = 4 x units)\n");
+    CHECK(kPopulationUnitsPerCell.size() == 16);
+    CHECK(kPopulationUnitsPerCell[0] == 1 && kPopulationUnitsPerCell[6] == 6 && kPopulationUnitsPerCell[15] == 1);
+    auto f = fresh();
+    f->city.tile[0][0] = 0xC9;  // 1
+    f->city.tile[0][1] = 0xCC;  // 3
+    f->city.tile[0][2] = 0xCC;  // 3 -- a pair counts once per cell
+    f->city.tile[1][0] = 0xD4;  // 3
+    f->city.tile[1][1] = 0xE0;  // a temple: not housing
+    CHECK(population_units(f->city) == 10);
+    CHECK(population(f->city) == 40);
 }
 
 // systems::construction (Phase 5). kCommandNames is a transcription of a
@@ -839,7 +1054,7 @@ void test_construction_placement_specs() {
 }
 
 void test_construction_place() {
-    std::printf("test_construction_place (terrain gate 0x1D..0x35, footprint writes, 7BB4 clear)\n");
+    std::printf("test_construction_place (terrain gate 0x1D..0x35, footprint writes, 7BB4 part index)\n");
     // Fill a patch with buildable terrain; leave the rest at 0x00 (not buildable).
     CityMap city;
     for (int y = 10; y < 30; ++y)
@@ -862,6 +1077,9 @@ void test_construction_place() {
         for (int x = 20; x < 23; ++x) CHECK(city.tile[y][x] == 0xF1);
     CHECK(city.tile[20][23] == 0x20);  // one past the width -- untouched
     CHECK(city.tile[22][20] == 0x20);  // one past the height -- untouched
+    // Each footprint cell records its part index, 4*dy + dx (engine routine 0x1232E).
+    for (int y = 20; y < 22; ++y)
+        for (int x = 20; x < 23; ++x) CHECK(city.operational_state[y][x] == 4 * (y - 20) + (x - 20));
 
     // Terrain gate: a footprint that overlaps non-buildable ground is rejected
     // wholesale, and must not partially write.
@@ -1146,7 +1364,7 @@ void test_save_corpus_real() {
     save::SaveFile ux = save::load((saves / "CAESARUX.SAV").string());
     CityState st = gaius::model::load(ux);
 
-    struct Component { int cells, w, h; };
+    struct Component { int cells, w, h, r0, c0; };
     auto components = [&](uint8_t tid) {
         std::vector<Component> out;
         std::vector<uint8_t> seen(10000, 0);
@@ -1174,7 +1392,7 @@ void test_save_corpus_real() {
                         stack.push_back({ny, nx});
                     }
                 }
-                out.push_back({n, c1 - c0 + 1, r1 - r0 + 1});
+                out.push_back({n, c1 - c0 + 1, r1 - r0 + 1, r0, c0});
             }
         }
         return out;
@@ -1197,6 +1415,10 @@ void test_save_corpus_real() {
             CHECK(cp.w == w);
             CHECK(cp.h == h);
             CHECK(cp.cells == w * h);
+            // ...and the engine wrote each cell's part index, 4*dy + dx.
+            for (int dy = 0; dy < cp.h; ++dy)
+                for (int dx = 0; dx < cp.w; ++dx)
+                    CHECK((st.city.operational_state[cp.r0 + dy][cp.c0 + dx] & 0x0F) == 4 * dy + dx);
         }
     }
 }
@@ -1279,7 +1501,7 @@ void test_save_corpus_simulation() {
         }
     }
 
-    const uint8_t bits[5] = {0x04, 0x08, 0x20, 0x40, 0x80};
+    const uint8_t bits[6] = {0x01, 0x04, 0x08, 0x20, 0x40, 0x80};
     for (const char* n : names) {
         save::SaveFile sf = save::load((saves / n).string());
         auto saved = std::make_unique<CityState>(gaius::model::load(sf));
@@ -1290,23 +1512,64 @@ void test_save_corpus_simulation() {
             if (save::kGlobalWordDsAddress[i] == 0x6BF8)
                 f->svc.housing_coverage_base = globals[2 * i] | (globals[2 * i + 1] << 8);
 
-        reset_tick(f->city, f->svc);
-        for (int y = 0; y < gaius::model::kCityH; ++y)
-            for (int x = 0; x < gaius::model::kCityW; ++x) dispatch_tile(f->city, f->svc, x, y);
+        rebuild_services(f->city, f->svc);
 
         int coverage_match = 0;
-        int bit_match[5] = {0, 0, 0, 0, 0};
+        int bit_match[6] = {0, 0, 0, 0, 0, 0};
         for (int y = 0; y < gaius::model::kCityH; ++y) {
             for (int x = 0; x < gaius::model::kCityW; ++x) {
                 if (f->city.coverage[y][x] == saved->city.coverage[y][x]) ++coverage_match;
-                for (int b = 0; b < 5; ++b) {
+                for (int b = 0; b < 6; ++b) {
                     if ((f->city.service_flags[y][x] & bits[b]) == (saved->city.service_flags[y][x] & bits[b]))
                         ++bit_match[b];
                 }
             }
         }
         CHECK(coverage_match == 10000);
-        for (int b = 0; b < 5; ++b) CHECK(bit_match[b] == 10000);
+        for (int b = 0; b < 6; ++b) CHECK(bit_match[b] == 10000);
+    }
+}
+
+// population_units against the engine's own count, DS:0x6C10 (stored x4 at
+// DS:0x6C0E), in four real saves. The engine counts at step 101 of each month
+// and houses change during steps 0-99 of the next, so a save taken mid-month
+// can hold tiles that changed after the count. Three saves match exactly.
+// CAESARVX.SAV is 2 units higher and holds exactly one 0xCF: the +2 of a single
+// 0xCB -> 0xCF upgrade made after that month's count.
+void test_save_corpus_population() {
+    std::printf("test_save_corpus_population (population_units vs saved DS:0x6C10)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    fs::path saves = fs::path(dir) / "gaius_test_saves";
+    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    for (const char* n : names) {
+        if (!fs::exists(saves / n)) {
+            skip("real save fixture missing: " + (saves / n).string());
+            return;
+        }
+    }
+    auto word_at_ds = [](const save::SaveFile& sf, uint16_t ds) -> int {
+        const uint8_t* blk = sf.block("global_words_128").first;
+        for (size_t i = 0; i < 128; ++i)
+            if (save::kGlobalWordDsAddress[i] == ds) return blk[2 * i] | (blk[2 * i + 1] << 8);
+        return -1;
+    };
+    for (const char* n : names) {
+        save::SaveFile sf = save::load((saves / n).string());
+        auto st = std::make_unique<CityState>(gaius::model::load(sf));
+        const int units = population_units(st->city);
+        const int saved = word_at_ds(sf, 0x6C10);
+        CHECK(word_at_ds(sf, 0x6C0E) == 4 * saved);
+        if (std::string(n) == "CAESARVX.SAV") {
+            int cf_cells = 0;
+            for (int y = 0; y < gaius::model::kCityH; ++y)
+                for (int x = 0; x < gaius::model::kCityW; ++x)
+                    if (st->city.tile[y][x] == 0xCF) ++cf_cells;
+            CHECK(cf_cells == 1);
+            CHECK(units - saved == kPopulationUnitsPerCell[0xCF - 0xC8] - kPopulationUnitsPerCell[0xCB - 0xC8]);
+        } else {
+            CHECK(units == saved);
+        }
     }
 }
 
@@ -1568,7 +1831,7 @@ int main() {
     test_service_building_handlers();
     test_service_dispatch_tile();
     test_housing_land_value_allows();
-    test_housing_tick_tile_00();
+    test_housing_development();
     test_housing_population();
     test_construction_command_table_fixtures();
     test_construction_command_table_corpus();
@@ -1590,6 +1853,7 @@ int main() {
     test_save_corpus_real();
     test_save_corpus_globals();
     test_save_corpus_simulation();
+    test_save_corpus_population();
     test_exepack_golden_decode();
 
     std::printf("\n=== %d checks run, %d failed, %d test(s) skipped ===\n", g_ran, g_failures, g_skipped);

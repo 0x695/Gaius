@@ -68,7 +68,12 @@ bool place(model::CityMap& city, CommandId id, int x, int y) {
     for (int cy = y; cy < y + spec.height; ++cy) {
         for (int cx = x; cx < x + spec.width; ++cx) {
             city.tile[cy][cx] = spec.seed_tile;
-            city.operational_state[cy][cx] = 0;  // matches the handlers' `mov 3496:[bx+0x7bb4], 0`
+            // 7BB4 records which part of the building each cell is: 4*dy + dx
+            // (0 = anchor). Transcribed from the engine's shared footprint writer
+            // (flat 0x1232E, `mov es:[bx+0x7bb4], cl` with cl = dy*4 + dx) and
+            // confirmed on every multi-cell building in four real saves. The
+            // housing pass only dispatches anchors, so this is load-bearing.
+            city.operational_state[cy][cx] = static_cast<uint8_t>(4 * (cy - y) + (cx - x));
         }
     }
     return true;
