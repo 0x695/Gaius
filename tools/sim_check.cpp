@@ -15,6 +15,14 @@
 // steps 0-99 of the next month, so a save taken mid-month can differ by the
 // population of whatever changed since.
 //
+// The water pass rewrites fountain tiles and their levels (7BB4), so those are
+// compared too.
+//
+// Some saves are written mid-month. One written between steps 101 and 102 (the
+// reset and water have run, none of the scans) shows as zero saved coverage and
+// service bits other than water; a house that changed after the last scan shows
+// as a small cluster of coverage mismatches around it.
+//
 // Land value is deliberately not compared: the engine never resets it, so it
 // carries history a single pass can't reproduce.
 //
@@ -124,6 +132,20 @@ int main(int argc, char** argv) {
         std::printf("  0x%02X %d/10000 (saved-only %d, sim-only %d)", bit, bit_match, saved_only, sim_only);
     }
     std::printf("\n");
+
+    // --- Tiles and 7BB4 the water pass rewrites (fountain states and levels) ---
+    int tile_diff = 0, level_diff = 0;
+    for (int y = 0; y < model::kCityH; ++y) {
+        for (int x = 0; x < model::kCityW; ++x) {
+            if (sim.tile[y][x] != st.city.tile[y][x]) {
+                ++tile_diff;
+                std::printf("    tile (row %2d, col %2d) saved 0x%02X  sim 0x%02X\n", y, x, st.city.tile[y][x],
+                            sim.tile[y][x]);
+            }
+            if (sim.operational_state[y][x] != st.city.operational_state[y][x]) ++level_diff;
+        }
+    }
+    std::printf("  tiles changed by the rebuild: %d, 7BB4 bytes changed: %d\n", tile_diff, level_diff);
 
     // --- Population ---
     const int units = systems::housing::population_units(st.city);

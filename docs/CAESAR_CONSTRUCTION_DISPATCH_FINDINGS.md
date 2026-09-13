@@ -334,7 +334,7 @@ Across the four saves the month reads 9, 1, 4, 6 and the year -11, -7, -2, -1 --
 
 ### 16.2 Population and water (`0x2C93F`, step 101)
 
-- **Population units** `DS:0x6C10` are the sum, over every tile `0xC8`-`0xD7`, of the per-cell table at `3496:007E`: `1 1 2 3 3 5 6 5 6 4 4 3 3 2 2 1`. `DS:0x6C0E` is four times that. It matches the saves exactly (0, 63, 146) except `CAESARVX.SAV`, which is 2 high -- that save holds exactly one `0xCF`, the +2 of a `0xCB` -> `0xCF` upgrade made after the count.
+- **Population units** `DS:0x6C10` are the sum, over every tile `0xC8`-`0xD7`, of the per-cell table at `3496:007E`: `1 1 2 3 3 5 6 5 6 4 4 3 3 2 2 1`. `DS:0x6C0E` is four times that. It matches the saves exactly (0, 63, 146) except `CAESARVX.SAV`, which is 2 high -- that save holds exactly one `0xCF`, the +2 of a `0xCB` -> `0xCF` upgrade made after the count. The second session's saves (section 23) match too, except `CAESARXW.SAV` (1 low) and `CAESARXQ.SAV` (32 high). `0x2C93F` is the only routine that writes `DS:0x6C10`, and it counts every `0xC8`-`0xD7` cell with no condition (flat `0x2CA83`-`0x2CABA`), so those are houses that changed after the count as well.
 - **Water, `C9D4.01`:** wells (`0xB8`) radius 1, reservoirs (`0xA4`) radius 3, and fountains (`0xB9`-`0xBD`) radius 6 when a supply check (`0x2CAE6`, which traces pipes through `0x2CBF1`) succeeds; the same check flips fountains between working `0xB9`/`0xBB` and dry `0xBA`/`0xBD`. It matches the saved `C9D4.01` 10000/10000 in all four saves -- which contain wells and dry fountains, but no reservoir or working fountain.
 
 ### 16.3 The development pass (`0x294CF`)
@@ -473,9 +473,11 @@ The exact sets are data in `systems/construction.cpp` (`kRoadRules`, `kWallRules
 
 ### 18.4 Validation
 
-Roads can be checked against the four real saves directly. Every road piece (`0x36`-`0x40`) is reset to `0x1D`, and `place_road` is called on those cells in row order (`test_construction_road_rebuild_real_saves`). That rebuilds 40/40, 90/90, 137/141 and 149/153 road tiles, with nothing refused and no other cell touched.
+Roads can be checked against the four real saves directly. Every road piece (`0x36`-`0x40`) is reset to `0x1D`, and `place_road` is called on those cells in row order (`test_construction_road_rebuild_real_saves`). That rebuilds 40/40, 90/90, 137/141 and 149/153 road tiles, with nothing refused and no other cell touched. The second session's seven saves (section 23) rebuild 63/76, 146/162, 146/162, 195/210, 198/213, 198/213 and 199/214, again with nothing refused.
 
-The four misses are the same cells in `CAESARVX` and `CAESARUX`, and `CAESARWX` rebuilds that area exactly. In between, road cells next to those junctions were built over (cell (21,80) went from a road corner to a well), and Clear Area doesn't re-tile a cleared road's neighbours. The junction shapes are history that a rebuild from the final grid can't reproduce. Walls, plazas and clearing have no equivalent evidence in these saves (they contain no walls), so they're pinned by `test_construction_drag_rules` against the lifted code.
+The four misses are the same cells in `CAESARVX` and `CAESARUX`, and `CAESARWX` rebuilds that area exactly. In between, road cells next to those junctions were built over (cell (21,80) went from a road corner to a well), and Clear Area doesn't re-tile a cleared road's neighbours. The junction shapes are history that a rebuild from the final grid can't reproduce.
+
+The second session's misses are the same kind. Most are one row of T pieces (`0x3C`) along row 38, columns 65-73, whose south arms point at houses: the road that ran south of them has been built over, so a rebuild lays straight pieces (`0x37`). The rest sit next to wells built over road cells (rows 42-44, columns 55-56 in `CAESARXQ.SAV`). Walls, plazas and clearing have no equivalent evidence in these saves (they contain no walls), so they're pinned by `test_construction_drag_rules` against the lifted code.
 
 ## 19. Forum, Workshop, water and the month's economy (2026-09-13)
 
@@ -539,6 +541,8 @@ Each routine decrements its count before searching.
 - **Turns (`3496:1BA0`):** for each class, the direction leaving for each direction entering, or 8 to stop. Classes 1 and 2 are straight vertical and horizontal pieces; 3-6 are the four corners.
 
 With this, the four real saves' coverage and service bits (including water) still match cell for cell (`tools/sim_check`). They hold only wells and dry fountains, so the tracer itself is pinned by `test_service_fountain_supply`.
+
+**Validated with reservoirs (2026-09-14).** The second session's seven saves (section 23) hold two to four reservoirs and two to four working fountains. In all eleven saves one rebuild reproduces `C9D4.01`, every fountain tile and every fountain level in `7BB4`, cell for cell (`test_save_corpus_simulation`, `tools/sim_check`).
 
 ### 19.3 The economy at step 101 (`0x28215`)
 
@@ -840,3 +844,27 @@ Each history is a circular buffer of (year - 1, value) word pairs. Its index wor
 - **In the saves.** `CAESARUX.SAV`'s index 12 holds year -2 in every buffer, with population units 146, treasury 3144, `0x6BC6` 71, `0x6BC4` 76 and `0x6BB6` -81.
 - **Not established.** What `0x6BC6` and `0x6BC4` (both 0-100) and `0x6BB6` (negative) mean to the player. They are probably ratings and a balance, the data behind the Forum's history graphs.
 - **In Gaius.** `systems::month` writes the five records when the year turns. The routines before them aren't transcribed, so a value one of those would change is recorded as it stood.
+
+## 23. The second save session (2026-09-14)
+
+Seven more saves of the same scenario (province 20, `EMPIRE2.047`), from a new city. In play order, with what each holds:
+
+| Save | Month, year | Treasury | Population units | Reservoirs / working fountains | Highest housing grade |
+|---|---|---|---|---|---|
+| `CAESARXW.SAV` | 4, -8 | 6054 | 49 | 2 / 2 | `0xCC` |
+| `CAESARXV.SAV` | 1, -1 | 2142 | 140 | 4 / 4 | `0xD0` |
+| `CAESARXU.SAV` | 9, 0 | 992 | 301 | 4 / 4 | `0xD0` |
+| `CAESARXT.SAV` | 7, 4 | 186 | 415 | 4 / 4 | `0xD2` |
+| `CAESARXS.SAV` | 7, 7 | 96 | 505 | 4 / 4 | `0xD2` |
+| `CAESARXR.SAV` | 10, 8 | 13 | 509 | 4 / 4 | `0xD1` |
+| `CAESARXQ.SAV` | 6, 14 | 300 | 382 | 4 / 4 | `0xCB` |
+
+No two are less than a year apart, so the month-apart check of `run_month` is still open. What they do show:
+
+- **Round trip and economy.** All seven load and re-serialize byte-identical, and step 101's economy reproduces all five outputs in each.
+- **Service and water.** Coverage, the six service bits, fountain tiles and fountain levels match cell for cell in five saves outright, which between them hold every housing grade up to `0xD2`, reservoirs and working fountains (section 19.2).
+- **A save taken between steps 101 and 102.** `CAESARXS.SAV` has zero coverage everywhere and no service bits except water, while its population count matches the tiles exactly. That is the state after step 100's reset and step 101's population and water pass, before step 102's first scan; reset plus water alone reproduces it cell for cell. (The step counter isn't saved, section 17.)
+- **A house changed after the scan.** `CAESARXW.SAV` misses 43 coverage cells around the houses south of the row-38 road and has one more building cell than the published count; its population is one unit off. That's a house that developed after the month's scans (STRONG INFERENCE: one save can't show which house).
+- **Year 0 exists.** The year word `DS:0x6C32` runs -8, -1, 0, 4, ... 14, so it's a plain signed counter, not a BC/AD year with no zero.
+- **`CAESARXQ.SAV` has rubble** (nine cells of `0xA7`/`0xAA`/`0xAD`/`0xB0`, section 21), and its tiles count 32 population units more than the saved count.
+- **`DS:0x6BF8` isn't always 2.** It's -1 in `CAESARXW.SAV`, 2 in `XV`-`XT` and 0 from `XS` on; step 101's economy recomputes it correctly each time.

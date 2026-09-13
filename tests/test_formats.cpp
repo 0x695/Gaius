@@ -68,6 +68,13 @@ void skip(const std::string& reason) {
     std::printf("  SKIP: %s\n", reason.c_str());
 }
 
+// Every real save fixture in GAIUS_TEST_ASSETS/gaius_test_saves/, in play
+// order. Two sessions of one scenario (province 20, EMPIRE2.047): XX-UX
+// (2026-09-12, years -11 to -1) and XW-XQ (2026-09-14, years -8 to 14).
+constexpr std::array<const char*, 11> kRealSaves = {
+    "CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV", "CAESARXW.SAV", "CAESARXV.SAV",
+    "CAESARXU.SAV", "CAESARXT.SAV", "CAESARXS.SAV", "CAESARXR.SAV", "CAESARXQ.SAV"};
+
 std::string test_assets_dir() {
     const char* env = std::getenv("GAIUS_TEST_ASSETS");
     return env ? std::string(env) : std::string();
@@ -1669,11 +1676,11 @@ void test_construction_drag_rules() {
     CHECK(!clear_area(f->city, random, 12, 10));  // open ground: nothing to clear
 }
 
-// Every road network in four real saves, rebuilt cell by cell with
+// Every road network in eleven real saves, rebuilt cell by cell with
 // place_road: road pieces (0x36-0x40) are reset to open ground and placed
 // again in row order.
 void test_construction_road_rebuild_real_saves() {
-    std::printf("test_construction_road_rebuild_real_saves (place_road vs four real saves)\n");
+    std::printf("test_construction_road_rebuild_real_saves (place_road vs eleven real saves)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     using namespace gaius::systems::construction;
@@ -1681,7 +1688,10 @@ void test_construction_road_rebuild_real_saves() {
         const char* name;
         int roads, identical;
     };
-    const Case cases[] = {{"CAESARXX.SAV", 40, 40}, {"CAESARWX.SAV", 90, 90}, {"CAESARVX.SAV", 141, 137}, {"CAESARUX.SAV", 153, 149}};
+    const Case cases[] = {{"CAESARXX.SAV", 40, 40}, {"CAESARWX.SAV", 90, 90}, {"CAESARVX.SAV", 141, 137}, {"CAESARUX.SAV", 153, 149},
+                          {"CAESARXW.SAV", 76, 63},   {"CAESARXV.SAV", 162, 146}, {"CAESARXU.SAV", 162, 146},
+                          {"CAESARXT.SAV", 210, 195}, {"CAESARXS.SAV", 213, 198}, {"CAESARXR.SAV", 213, 198},
+                          {"CAESARXQ.SAV", 214, 199}};
     for (const Case& c : cases) {
         fs::path p = fs::path(dir) / "gaius_test_saves" / c.name;
         if (!fs::exists(p)) {
@@ -2098,7 +2108,7 @@ void test_actors_real_saves() {
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     using namespace gaius::systems;
-    for (const char* name : {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"}) {
+    for (const char* name : kRealSaves) {
         fs::path p = fs::path(dir) / "gaius_test_saves" / name;
         if (!fs::exists(p)) {
             skip(std::string(name) + " not found");
@@ -2148,10 +2158,10 @@ void test_actors_real_saves() {
 
 // 0x28215's four routines, recomputed from each real save's own inputs.
 void test_month_economy_matches_saves() {
-    std::printf("test_month_economy_matches_saves (0x28621/0x28694/0x28800/0x28826 vs four real saves)\n");
+    std::printf("test_month_economy_matches_saves (0x28621/0x28694/0x28800/0x28826 vs eleven real saves)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
-    for (const char* name : {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"}) {
+    for (const char* name : kRealSaves) {
         fs::path p = fs::path(dir) / "gaius_test_saves" / name;
         if (!fs::exists(p)) {
             skip(std::string(name) + " not found");
@@ -2170,14 +2180,17 @@ void test_month_economy_matches_saves() {
 }
 
 void test_month_state_from_saves() {
-    std::printf("test_month_state_from_saves (calendar globals from four real saves)\n");
+    std::printf("test_month_state_from_saves (calendar globals from eleven real saves)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     struct Case {
         const char* name;
         int month, year;
     };
-    const Case cases[] = {{"CAESARXX.SAV", 9, -11}, {"CAESARWX.SAV", 1, -7}, {"CAESARVX.SAV", 4, -2}, {"CAESARUX.SAV", 6, -1}};
+    const Case cases[] = {{"CAESARXX.SAV", 9, -11}, {"CAESARWX.SAV", 1, -7}, {"CAESARVX.SAV", 4, -2}, {"CAESARUX.SAV", 6, -1},
+                          {"CAESARXW.SAV", 4, -8},  {"CAESARXV.SAV", 1, -1}, {"CAESARXU.SAV", 9, 0},
+                          {"CAESARXT.SAV", 7, 4},   {"CAESARXS.SAV", 7, 7},  {"CAESARXR.SAV", 10, 8},
+                          {"CAESARXQ.SAV", 6, 14}};
     for (const Case& c : cases) {
         fs::path p = fs::path(dir) / "gaius_test_saves" / c.name;
         if (!fs::exists(p)) {
@@ -2189,7 +2202,8 @@ void test_month_state_from_saves() {
         std::printf("  %s: month %d, year %d, population units %d\n", c.name, sim.month, sim.year, sim.population_units);
         CHECK(sim.month == c.month && sim.year == c.year);
         CHECK(sim.population_units == gaius::systems::housing::population_units(st.city) ||
-              std::string(c.name) == "CAESARVX.SAV");  // VX: one upgrade after the count
+              std::string(c.name) == "CAESARVX.SAV" || std::string(c.name) == "CAESARXW.SAV" ||
+              std::string(c.name) == "CAESARXQ.SAV");  // houses that changed after the count
     }
 }
 
@@ -2560,11 +2574,11 @@ void test_ui_game_font_matches_screenshot() {
 }
 
 void test_save_corpus_real() {
-    std::printf("test_save_corpus_real (four saves from a real play session)\n");
+    std::printf("test_save_corpus_real (eleven saves from two real play sessions)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     fs::path saves = fs::path(dir) / "gaius_test_saves";
-    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    const auto& names = kRealSaves;
     for (const char* n : names) {
         if (!fs::exists(saves / n)) {
             skip("real save fixture missing: " + (saves / n).string());
@@ -2658,7 +2672,7 @@ void test_save_corpus_globals() {
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     fs::path saves = fs::path(dir) / "gaius_test_saves";
-    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    const auto& names = kRealSaves;
     for (const char* n : names) {
         if (!fs::exists(saves / n)) {
             skip("real save fixture missing: " + (saves / n).string());
@@ -2838,7 +2852,7 @@ void test_save_corpus_simulation() {
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     fs::path saves = fs::path(dir) / "gaius_test_saves";
-    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    const auto& names = kRealSaves;
     for (const char* n : names) {
         if (!fs::exists(saves / n)) {
             skip("real save fixture missing: " + (saves / n).string());
@@ -2857,7 +2871,16 @@ void test_save_corpus_simulation() {
             if (save::kGlobalWordDsAddress[i] == 0x6BF8)
                 f->svc.housing_coverage_base = globals[2 * i] | (globals[2 * i + 1] << 8);
 
-        rebuild_services(f->city, f->svc);
+        // CAESARXS.SAV was written between steps 101 and 102: the reset and the
+        // water pass had run (population matches too) but none of the four
+        // scans, so its coverage and every service bit but water are still zero.
+        const bool before_scans = std::string(n) == "CAESARXS.SAV";
+        if (before_scans) {
+            reset_tick(f->city, f->svc);
+            apply_water(f->city);
+        } else {
+            rebuild_services(f->city, f->svc);
+        }
 
         int coverage_match = 0;
         int bit_match[6] = {0, 0, 0, 0, 0, 0};
@@ -2870,8 +2893,25 @@ void test_save_corpus_simulation() {
                 }
             }
         }
-        CHECK(coverage_match == 10000);
+        // CAESARXW.SAV: a house next to the road at row 38 changed after the last
+        // scan (one more building cell than the published count, population one
+        // unit off), and the coverage around it differs in 43 cells.
+        const bool changed_after_scan = std::string(n) == "CAESARXW.SAV";
+        CHECK(coverage_match == (changed_after_scan ? 9957 : 10000));
         for (int b = 0; b < 6; ++b) CHECK(bit_match[b] == 10000);
+        // The water pass also rewrites fountain tiles (0xB9/0xBA, 0xBB-0xBD) and
+        // their levels in 7BB4. Seven of these saves have reservoirs and working
+        // fountains; the rebuild leaves every tile and 7BB4 byte as saved.
+        int tiles_changed = 0, levels_changed = 0;
+        for (int y = 0; y < gaius::model::kCityH; ++y) {
+            for (int x = 0; x < gaius::model::kCityW; ++x) {
+                tiles_changed += f->city.tile[y][x] != saved->city.tile[y][x];
+                levels_changed += f->city.operational_state[y][x] != saved->city.operational_state[y][x];
+            }
+        }
+        CHECK(tiles_changed == 0);
+        CHECK(levels_changed == 0);
+        if (before_scans) continue;  // its published counts are the previous month's
         // The scan counters against what the engine published at its last step 105.
         using gaius::model::global_word;
         std::printf("  %s: roads %d (saved %d), building cells %d (saved %d), markets/4 %d (%d), industry/16 %d (%d), "
@@ -2880,22 +2920,25 @@ void test_save_corpus_simulation() {
                     f->svc.market_count / 4, global_word(*saved, 0x6BEE), f->svc.industry_count / 16,
                     global_word(*saved, 0x6BEA), f->svc.school_count / 4, global_word(*saved, 0x6BEC));
         CHECK(f->svc.road_count == global_word(*saved, 0x6BF0));
-        CHECK(f->svc.building_count == global_word(*saved, 0x6BF2));
+        CHECK(f->svc.building_count == global_word(*saved, 0x6BF2) + (changed_after_scan ? 1 : 0));
     }
 }
 
 // population_units against the engine's own count, DS:0x6C10 (stored x4 at
-// DS:0x6C0E), in four real saves. The engine counts at step 101 of each month
+// DS:0x6C0E), in eleven real saves. The engine counts at step 101 of each month
 // and houses change during steps 0-99 of the next, so a save taken mid-month
-// can hold tiles that changed after the count. Three saves match exactly.
-// CAESARVX.SAV is 2 units higher and holds exactly one 0xCF: the +2 of a single
-// 0xCB -> 0xCF upgrade made after that month's count.
+// can hold tiles that changed after the count (0x2C93F is the only writer of
+// DS:0x6C10, and it counts every 0xC8-0xD7 cell unconditionally). Eight saves
+// match exactly. CAESARVX.SAV is 2 units higher and holds exactly one 0xCF: the
+// +2 of a single 0xCB -> 0xCF upgrade made after that month's count.
+// CAESARXW.SAV is 1 low and CAESARXQ.SAV 32 high, the same way (not pinned to
+// individual houses: one save can't show which houses changed).
 void test_save_corpus_population() {
     std::printf("test_save_corpus_population (population_units vs saved DS:0x6C10)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     fs::path saves = fs::path(dir) / "gaius_test_saves";
-    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV"};
+    const auto& names = kRealSaves;
     for (const char* n : names) {
         if (!fs::exists(saves / n)) {
             skip("real save fixture missing: " + (saves / n).string());
@@ -2921,6 +2964,10 @@ void test_save_corpus_population() {
                     if (st->city.tile[y][x] == 0xCF) ++cf_cells;
             CHECK(cf_cells == 1);
             CHECK(units - saved == kPopulationUnitsPerCell[0xCF - 0xC8] - kPopulationUnitsPerCell[0xCB - 0xC8]);
+        } else if (std::string(n) == "CAESARXW.SAV") {
+            CHECK(units - saved == -1);
+        } else if (std::string(n) == "CAESARXQ.SAV") {
+            CHECK(units - saved == 32);
         } else {
             CHECK(units == saved);
         }

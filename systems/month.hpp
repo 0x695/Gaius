@@ -99,7 +99,7 @@ void run_month(model::CityMap& city, SimState& sim);
 // Routine 0x28215, run at step 101 after population and water: four routines
 // that turn the city's state into the inputs the next month's housing uses.
 // Reads and writes the save's global words (model::global_word). Checked by
-// recomputing each of four real saves' outputs from its own inputs.
+// recomputing each of eleven real saves' outputs from its own inputs.
 //   0x28621  DS:0x6BF4 = population units <= 100 ? table 3496:006E[units / 8]
 //            : clamp(units / 20 / (2 * workshops, if any) + DS:0x6C36 / 20 - 2, 0, 6)
 //   0x28694  DS:0x6BCC (a 0-100 percentage) = the population share left over

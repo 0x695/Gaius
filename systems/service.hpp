@@ -110,8 +110,8 @@ struct ServiceState {
 
     // DS:0x6BF8 -- the base delta the housing tiers add to coverage (see
     // apply_housing_tier). It is a saved global (global_words_128 index 105,
-    // save+0xD2) and holds 2 in all four real saves captured so far; what sets
-    // it is not traced. The default is that observed value, not a derived one.
+    // save+0xD2), set by step 101's economy (systems::month::run_economy). Real
+    // saves hold 2, 0 or -1. The default is the first session's value.
     int housing_coverage_base = 2;
 
     // The scan counters routine 0x2BBBB's handlers bump, zeroed at step 102
@@ -309,8 +309,9 @@ void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y);
 // C9D4.01 within radius 6 and a dry 0xBA becomes 0xB9, 0xBD becomes 0xBB; if
 // not, 0xB9 becomes 0xBA and 0xBB/0xBC become 0xBD (the engine also plays a
 // sound). Cells are visited in row order, so a fountain sees the levels its
-// earlier neighbours were just given. Reproduces the saved C9D4.01 of four real
-// saves cell for cell -- which contain wells and dry fountains, no reservoir.
+// earlier neighbours were just given. Reproduces the saved C9D4.01, fountain
+// tiles and fountain levels (7BB4) of eleven real saves cell for cell; seven of
+// them have reservoirs and working fountains.
 void apply_water(model::CityMap& city);
 
 // Routine 0x2CAE6. A fountain's 7BB4 byte is its water level. The level drops

@@ -211,6 +211,8 @@ namespace gaius::systems::construction {
 // in between, road cells beside those junctions were built over (one became
 // a well), and Clear Area doesn't re-tile a cleared road's neighbours -- so
 // the junction shapes are history a rebuild from the final grid can't see.
+// The second session's seven saves (2026-09-14) rebuild 63/76 to 199/214 for
+// the same reason: a row of T pieces whose south road was built over.
 
 // State the engine keeps between drag calls.
 struct DragState {
