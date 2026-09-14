@@ -52,6 +52,8 @@ enum class CommandType {
                   // enrichment (a label preview) and never as the only way to learn
                   // something -- otherwise it would become a mouse-only code path,
                   // which masterplan 5a point 4 exists to prevent.
+    CycleScreen,  // next screen -- city, province, Forum: M, gamepad Back. Touch and mouse
+                  // reach the same screens through the strip of buttons along the top.
     CancelDrag,   // the original's cancel gesture for a drag-built command (Road, Wall,
                   // Plaza, Clear Area): "press the right button while still holding down
                   // the left" (manual, Building Roads). Right-click while the left button

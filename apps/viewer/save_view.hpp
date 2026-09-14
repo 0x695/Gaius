@@ -162,6 +162,44 @@ inline void render_city_map_layer(const model::CityMap& city, SaveLayer layer, i
     }
 }
 
+// The maps panel's overlays, drawn from the modeled layers rather than the
+// original's overlay art. Which bits mean what is the service layer's reading
+// (systems/service.hpp, findings sections 15-16): C9D4 bits 0x01/0x02 water
+// (0x02 the fountains' pipes, STRONG INFERENCE), 0x20 the reach of forums and
+// prefectures (economy::population_tax); roads are tiles 0x36-0x43 and houses
+// the grades 0xC8-0xD7. The manual's Trouble overlay isn't modeled.
+enum class Overlay { Water, Administration, LandValue, Roads, Housing };
+inline constexpr const char* kOverlayNames[] = {"Water", "Admin", "Land value", "Roads", "Housing"};
+inline constexpr int kOverlayCount = 5;
+
+// Whether cell (x, y) shows on the overlay, and in what colour.
+inline bool overlay_color(const model::CityMap& city, Overlay overlay, int x, int y, formats::RGB& c) {
+    const uint8_t flags = city.service_flags[y][x];
+    const uint8_t tile = city.tile[y][x];
+    switch (overlay) {
+        case Overlay::Water:
+            if ((flags & 0x03) == 0) return false;
+            c = (flags & 0x02) ? formats::RGB{40, 110, 230} : formats::RGB{120, 180, 240};
+            return true;
+        case Overlay::Administration:
+            if ((flags & 0x20) == 0) return false;
+            c = {230, 190, 60};
+            return true;
+        case Overlay::LandValue:
+            c = land_value_color(city.land_value[y][x]);
+            return true;
+        case Overlay::Roads:
+            if (tile < 0x36 || tile > 0x43) return false;
+            c = {220, 200, 150};
+            return true;
+        case Overlay::Housing:
+            if (tile < 0xC8 || tile > 0xD7) return false;
+            c = heat_color(static_cast<uint8_t>((tile - 0xC8) * 17));
+            return true;
+    }
+    return false;
+}
+
 inline void render_city_layer(const formats::save::SaveFile& save, SaveLayer layer, int cell_px, double cam_x,
                                double cam_y, double zoom, int view_w, int view_h, std::vector<uint8_t>& out) {
     auto block = save.block(layer_block_name(layer));

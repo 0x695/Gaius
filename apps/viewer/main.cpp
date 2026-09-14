@@ -26,6 +26,9 @@
 //                                                              save-file mode)
 //   left-click / tap / gamepad A                            -> place current
 //     build tool at the clicked cell (save-file mode only)
+//   M / gamepad Back / the City, Province, Forum buttons    -> switch screen
+//   on the province: the command bar, then click the map    -> build, place a fort, or order a Cohort
+//                                                              (click the Cohort, then a point or an army)
 //   F11                                                     -> cycle window mode
 //   Escape / window close                                   -> quit
 //
@@ -47,6 +50,7 @@
 #include <SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -55,9 +59,14 @@
 #include <vector>
 
 #include "apps/viewer/save_view.hpp"
+#include "apps/viewer/screens.hpp"
 #include "formats/pl8/pl8.hpp"
 #include "render/city_render.hpp"
+#include "render/province_render.hpp"
+#include "systems/campaign.hpp"
 #include "systems/month.hpp"
+#include "systems/province.hpp"
+#include "ui/panel.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
@@ -216,10 +225,20 @@ int main(int argc, char** argv) {
     std::string assets_dir;
     int run_months = 0;
     bool start_paused = false;
+    std::string start_screen;       // --screen city|province|forum
+    int start_forum_tab = 0;        // --forum-tab 0..4
+    std::vector<int> test_actions;  // --test-action N: a page action applied before the first frame
+    bool test_battle = false;       // --test-battle: the first Cohort meets a new army
+    bool test_promotion = false;    // --test-promotion: a promotion is offered now
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--paused") == 0) start_paused = true;
+        if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) start_screen = argv[++i];
+        if (std::strcmp(argv[i], "--forum-tab") == 0 && i + 1 < argc) start_forum_tab = std::atoi(argv[++i]);
+        if (std::strcmp(argv[i], "--test-action") == 0 && i + 1 < argc) test_actions.push_back(std::atoi(argv[++i]));
+        if (std::strcmp(argv[i], "--test-battle") == 0) test_battle = true;
+        if (std::strcmp(argv[i], "--test-promotion") == 0) test_promotion = true;
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -302,6 +321,9 @@ int main(int argc, char** argv) {
     bool have_font = false;
     formats::PL8Sheet toolbar_icons;  // POINTERS.PL8
     bool have_icons = false;
+    render::ProvinceSprites province_sprites;  // FIXT3.PL8, SPRITE2.PL8
+    bool have_province_sprites = false;
+    std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
         if (!assets_dir.empty()) candidates.push_back(assets_dir);
@@ -313,6 +335,12 @@ int main(int argc, char** argv) {
                 sprites = render::load_city_sprites(dir);
                 have_sprites = true;
                 std::printf("city sprites: %s\n", dir.c_str());
+                game_dir = dir;
+                try {
+                    province_sprites = render::load_province_sprites(dir);
+                    have_province_sprites = true;
+                } catch (const formats::FormatError&) {
+                }
                 try {
                     game_font = ui::load_game_font(dir, sprites.palette);
                     have_font = true;
@@ -333,11 +361,14 @@ int main(int argc, char** argv) {
             }
         }
         if (!have_sprites) std::printf("city sprites not found (pass --assets <game dir>); showing data layers only\n");
+        if (game_dir.empty()) game_dir = fs::absolute(in_path).parent_path().string();
     }
     const int city_cell_px = have_sprites ? render::kCellPx : kCityCellPx;
     bool show_sprites = have_sprites && test_layer < 0;
     formats::IndexedImage city_image;
     bool city_image_dirty = true;  // re-rendered whenever build mode or time changes the grid
+    formats::IndexedImage province_image;
+    bool province_image_dirty = true;
     render::RenderPhase render_phase;
 
     // The simulation clock (systems::month), seeded from the save.
@@ -361,11 +392,13 @@ int main(int argc, char** argv) {
     auto advance_month = [&]() {
         systems::month::run_month(state, sim);
         city_image_dirty = true;
+        province_image_dirty = true;
         report_month();
     };
     auto advance_step = [&]() {
         systems::month::run_step(state, sim);
         city_image_dirty = true;
+        province_image_dirty = true;
         if (sim.step == 0) report_month();
     };
 
@@ -470,6 +503,267 @@ int main(int argc, char** argv) {
         return placed;
     };
 
+    // ---- The screens: the city, the province, the Forum, a promotion offer and
+    // a battle. The last two open themselves when the simulation asks and stop
+    // time until they're answered.
+    enum class Screen { City, Province, Maps, Forum, Promotion, Battle, Ending };
+    Screen screen = Screen::City;
+    int overlay = 0;             // viewer::Overlay on the maps panel
+    bool ending_caesar = false;  // the ending page: Caesar, or dismissed
+    bool quit_requested = false;
+    if (start_screen == "maps") screen = Screen::Maps;
+    if (start_screen == "province") screen = Screen::Province;
+    if (start_screen == "forum") screen = Screen::Forum;
+    Screen battle_return = Screen::Province;
+    viewer::ForumTab forum_tab =
+        static_cast<viewer::ForumTab>(std::clamp(start_forum_tab, 0, static_cast<int>(viewer::kForumTabCount) - 1));
+    bool promotion_to_caesar = false;
+    viewer::BattleView battle_view;
+    int shore_variant = 0;  // DS:0x079C, kept from one generated city to the next
+
+    auto install_hooks = [&]() {
+        // The yearly routine offers a promotion. The player answers on the
+        // promotion screen, so the hook leaves it unanswered and stops time;
+        // the answer is applied from there (administration::accept_promotion,
+        // defer_promotion), which is all 0x29023 would have done with it.
+        sim.on_promotion = [&](model::CityState&, bool to_caesar) {
+            promotion_to_caesar = to_caesar;
+            screen = Screen::Promotion;
+            time_running = false;
+            return 0;
+        };
+        // A Cohort reaches the army it attacks: the battle screen, with time stopped.
+        sim.on_battle = [&](model::CityState&, int cohort, int army) {
+            if (screen == Screen::Battle) return;
+            battle_return = screen == Screen::City ? Screen::City : Screen::Province;
+            battle_view = viewer::BattleView{};
+            battle_view.cohort = cohort;
+            battle_view.army = army;
+            screen = Screen::Battle;
+            time_running = false;
+            std::printf("battle: the Cohort in slot %d meets the army in slot %d\n", cohort, army);
+        };
+    };
+    if (save_mode) install_hooks();
+
+    // 0x0F81B: an accepted promotion (DS:0x6C26 = 1) moves the governor to the
+    // new province: its map EMPIRE2.0NN (0x0FF1C writes the province number in
+    // three digits) and a new city (systems::campaign::start_province).
+    auto start_new_province = [&]() {
+        const int province = model::global_word(state, 0x6CA6);
+        char name[16];
+        std::snprintf(name, sizeof name, "EMPIRE2.%03d", province);
+        fs::path path = fs::path(game_dir) / name;
+        if (!fs::exists(path)) {
+            std::string lower = name;
+            for (char& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            path = fs::path(game_dir) / lower;
+        }
+        formats::empire2::EmpireMap province_map;
+        try {
+            province_map = formats::empire2::load(path.string());
+        } catch (const std::exception& e) {
+            std::printf("can't start the new province, %s: %s\n", name, e.what());
+            return false;
+        }
+        systems::month::Random random = sim.random;
+        const int difficulty = sim.difficulty;
+        systems::campaign::start_province(state, province_map, random, difficulty, shore_variant);
+        sim = systems::month::sim_state_from_save(state);
+        sim.random = random;
+        sim.difficulty = difficulty;
+        install_hooks();
+        city_image_dirty = province_image_dirty = true;
+        std::printf("new province: %s (%s), funds %d Dn\n", viewer::province_name(province), name,
+                    model::global_word(state, systems::economy::kFunds));
+        return true;
+    };
+
+    auto current_page = [&]() -> ui::Page {
+        switch (screen) {
+            case Screen::Forum: return viewer::forum_page(state, forum_tab);
+            case Screen::Promotion: return viewer::promotion_page(state, promotion_to_caesar);
+            case Screen::Battle: return viewer::battle_page(state, battle_view);
+            case Screen::Ending: return viewer::ending_page(state, ending_caesar);
+            default: return ui::Page{};
+        }
+    };
+    const auto page_screen = [&]() {
+        return screen == Screen::Forum || screen == Screen::Promotion || screen == Screen::Battle ||
+               screen == Screen::Ending;
+    };
+    auto apply_page_action = [&](int action) {
+        namespace admin = systems::administration;
+        namespace battle = systems::battle;
+        if (screen == Screen::Forum) {
+            if (!viewer::apply_forum_action(state, action, forum_tab)) screen = Screen::City;
+        } else if (screen == Screen::Promotion) {
+            if (action == viewer::kActionAccept) {
+                if (promotion_to_caesar) {
+                    admin::become_caesar(state);
+                    std::printf("you are Caesar\n");
+                    ending_caesar = true;
+                    screen = Screen::Ending;
+                    return;
+                } else {
+                    admin::accept_promotion(state, sim.difficulty);
+                    std::printf("promotion accepted: %s\n", viewer::rank_name(model::global_word(state, admin::kRank)));
+                    if (model::global_word(state, 0x6C26) == 1) start_new_province();
+                }
+            } else if (action == viewer::kActionWait9 || action == viewer::kActionWait24) {
+                admin::defer_promotion(state, action == viewer::kActionWait9 ? 9 : 24);
+            } else {
+                return;
+            }
+            screen = Screen::City;
+            time_running = true;
+        } else if (screen == Screen::Battle) {
+            if (action >= viewer::kActionTactic && action < viewer::kActionTactic + 4) {
+                // The screen draws the generator once a frame while it waits (systems/battle.hpp).
+                sim.random.advance();
+                battle_view.last = battle::fight_round(state, battle_view.cohort, battle_view.army,
+                                                       static_cast<battle::Tactic>(action - viewer::kActionTactic),
+                                                       sim.random);
+                battle_view.has_round = true;
+            } else if (action == viewer::kActionRetreat) {
+                battle::retreat(state, battle_view.cohort);
+                battle_view.retreated = true;
+            } else if (action == viewer::kActionContinue) {
+                screen = battle_return;
+                time_running = true;
+            }
+        } else if (screen == Screen::Ending) {
+            if (action == viewer::kActionQuit) quit_requested = true;
+            if (action == viewer::kActionContinue) screen = Screen::City;  // governing on, time still stopped
+        }
+        city_image_dirty = province_image_dirty = true;
+    };
+
+    // The province toolbar (DS:0x123E): construction ids with the manual's names.
+    struct ProvinceCommand {
+        const char* label;
+        int id;
+    };
+    static constexpr ProvinceCommand kProvinceCommands[] = {
+        {"Clear", 35}, {"Road", 36}, {"Wall", 37},   {"Tower", 41},  {"Highway", 42},
+        {"Fort", 29},  {"Halt", 30}, {"Patrol", 31}, {"Attack", 32}, {"Home", 33}};
+    constexpr int kProvinceCommandCount = sizeof(kProvinceCommands) / sizeof(kProvinceCommands[0]);
+    int province_command = 1;
+    int order_cohort = -1;             // the Cohort a Patrol or Attack order is being given to
+    int patrol_x = -1, patrol_y = -1;  // the patrol's first point
+    systems::construction::DragState province_drag;
+    int province_drag_x = -1, province_drag_y = -1;
+
+    // The province actor of a type range standing on a cell (+0x12/+0x13), or -1.
+    auto province_actor_at = [&](int x, int y, int type_lo, int type_hi) {
+        for (int i = 0; i < model::kActorCount; ++i) {
+            const model::Actor& a = state.objects[static_cast<size_t>(i)];
+            if (a.active() != 0 && a.type() >= type_lo && a.type() <= type_hi && a.raw_x() == x && a.raw_y() == y)
+                return i;
+        }
+        return -1;
+    };
+    // One province construction command on a cell, charged the way the build
+    // routine charges it: the terrain's cost shift, the pleb gate and the funds.
+    auto province_place = [&](int id, int x, int y) {
+        namespace province = systems::province;
+        namespace economy = systems::economy;
+        if (x < 0 || y < 0 || x >= province::kMapW || y >= province::kMapW) return false;
+        if (!economy::enough_plebs(state, id)) {
+            std::printf("fewer than 50 pleb groups: nothing can be built\n");
+            return false;
+        }
+        const uint8_t tile = state.empire.cells[static_cast<size_t>(y) * province::kMapW + x] & 0x7F;
+        const int cost = economy::kConstructionCost[static_cast<size_t>(id)] << economy::province_cost_shift(id, tile);
+        if (!economy::can_afford(state, cost)) {
+            if (economy::grant_emergency_funds(state))
+                std::printf("Rome sends 500 Dn in emergency funds\n");
+            else
+                std::printf("not enough funds: %d Dn\n", cost);
+            return false;
+        }
+        province::Built built = province::Built::Refused;
+        switch (id) {
+            case 35: built = province::clear_province(state, x, y); break;
+            case 36: built = province::place_province_road(state, province_drag, x, y); break;
+            case 37: built = province::place_great_wall(state, province_drag, x, y); break;
+            case 41: built = province::place_great_tower(state, x, y); break;
+            case 42: built = province::place_highway(state, province_drag, x, y); break;
+            case 29:
+                built = province::place_fort(state, x, y) >= 0 ? province::Built::Charged : province::Built::Refused;
+                break;
+            default: break;
+        }
+        if (built == province::Built::Charged) economy::charge(state, cost);
+        if (built != province::Built::Refused) province_image_dirty = true;
+        return built != province::Built::Refused;
+    };
+    // A click on the province map with the selected command.
+    auto province_click = [&](int x, int y) {
+        namespace province = systems::province;
+        const ProvinceCommand& command = kProvinceCommands[province_command];
+        if (command.id < 30 || command.id > 33) {
+            const bool ok = province_place(command.id, x, y);
+            province_drag_x = x;
+            province_drag_y = y;
+            std::printf("%s at (%d,%d): %s\n", command.label, x, y, ok ? "OK" : "refused");
+            return;
+        }
+        if (order_cohort < 0) {
+            const int cohort = province_actor_at(x, y, province::kCohortType, province::kCohortType);
+            if (cohort < 0) {
+                std::printf("%s: click a Cohort\n", command.label);
+                return;
+            }
+            if (command.id == 30 || command.id == 33) {
+                const bool ok = command.id == 30 ? province::order_halt(state, cohort)
+                                                 : province::order_go_home(state, cohort);
+                std::printf("%s: %s\n", command.label, ok ? "OK" : "refused");
+                return;
+            }
+            order_cohort = cohort;
+            patrol_x = patrol_y = -1;
+            std::printf(command.id == 31 ? "Patrol: click the first point\n" : "Attack: click an army\n");
+            return;
+        }
+        bool ok = false;
+        if (command.id == 31) {
+            if (patrol_x < 0) {
+                patrol_x = x;
+                patrol_y = y;
+                std::printf("Patrol: click the second point\n");
+                return;
+            }
+            ok = province::order_patrol(state, order_cohort, patrol_x, patrol_y, x, y);
+        } else {
+            const int army = province_actor_at(x, y, province::kArmyType, province::kSeaArmyType);
+            if (army < 0) {
+                std::printf("Attack: click an army\n");
+                return;
+            }
+            ok = province::order_attack(state, order_cohort, army);
+        }
+        std::printf("%s: %s\n", command.label, ok ? "OK" : "refused");
+        order_cohort = -1;
+        patrol_x = patrol_y = -1;
+    };
+    auto province_label = [&]() -> std::string {
+        const ProvinceCommand& command = kProvinceCommands[province_command];
+        std::string s = command.label;
+        const int cost = systems::economy::kConstructionCost[static_cast<size_t>(command.id)];
+        if (cost > 0) s += ", " + std::to_string(cost) + " Dn";
+        if (command.id >= 30 && command.id <= 33) {
+            // FONT1 has no colon (DS:0F64 draws it as '0').
+            if (order_cohort < 0)
+                s += ", pick a Cohort";
+            else if (command.id == 31)
+                s += patrol_x < 0 ? ", first point" : ", second point";
+            else
+                s += ", pick an army";
+        }
+        return s + " - Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn";
+    };
+
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 3;
@@ -539,6 +833,34 @@ int main(int argc, char** argv) {
         bool running = true;
         int frame_count = 0;
 
+        // Pages, the screen strip and the province bar are laid out at 1x: the
+        // same 320 x 200 constraint ui/toolbar.hpp describes -- at 2x a Forum
+        // page's dozen rows would not fit the logical screen.
+        const ui::Metrics page_metrics = ui::metrics_for(ui::Breakpoint::Desktop);
+        const std::vector<ui::PanelButton> screen_tabs = {
+            {"City", 900}, {"Province", 901}, {"Maps", 902}, {"Forum", 903}};
+        std::vector<ui::PanelButton> overlay_buttons;
+        for (int i = 0; i < viewer::kOverlayCount; ++i) overlay_buttons.push_back({viewer::kOverlayNames[i], 1100 + i});
+        const ui::PanelLayout overlay_bar = ui::bar_layout(overlay_buttons, page_metrics, kLogicalW, kLogicalH);
+        const ui::PanelLayout strip = ui::strip_layout(screen_tabs, page_metrics, kLogicalW);
+        std::vector<ui::PanelButton> province_buttons;
+        for (int i = 0; i < kProvinceCommandCount; ++i) province_buttons.push_back({kProvinceCommands[i].label, 1000 + i});
+        const ui::PanelLayout province_bar = ui::bar_layout(province_buttons, page_metrics, kLogicalW, kLogicalH);
+        Camera pcam(40.0 * render::kProvincePx, 40.0 * render::kProvincePx);
+        pcam.visible_h = kLogicalH - province_bar.frame.h;
+        pcam.clamp();
+        int page_hovered = -1;
+        const auto strip_hit = [&](int lx, int ly) {
+            for (size_t i = 0; i < strip.tabs.size(); ++i)
+                if (strip.tabs[i].contains(lx, ly)) return static_cast<int>(i);
+            return -1;
+        };
+        const auto switch_to = [&](int i) {
+            screen = i == 0 ? Screen::City : i == 1 ? Screen::Province : i == 2 ? Screen::Maps : Screen::Forum;
+            order_cohort = patrol_x = patrol_y = -1;
+            province_image_dirty = true;
+        };
+
         // One handler for "the primary action happened at this logical
         // point", shared by the real input path and --test-click. The
         // toolbar gets first refusal: a click on the panel selects a tool
@@ -546,8 +868,39 @@ int main(int argc, char** argv) {
         auto handle_select_logical = [&](int lx, int ly) {
             if (!save_mode) return;
             drag_last_x = drag_last_y = -1;
+            province_drag_x = province_drag_y = -1;
             drag_undo.clear();
             drag_refund = 0;
+            if (page_screen()) {
+                const ui::Page page = current_page();
+                const int action = ui::hit_test(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), lx, ly);
+                if (action >= 0) apply_page_action(action);
+                return;
+            }
+            if (const int tab = strip_hit(lx, ly); tab >= 0) {
+                switch_to(tab);
+                return;
+            }
+            if (screen == Screen::Maps) {
+                for (size_t i = 0; i < overlay_bar.buttons.size(); ++i) {
+                    if (overlay_bar.buttons[i].contains(lx, ly)) overlay = static_cast<int>(i);
+                }
+                return;
+            }
+            if (screen == Screen::Province) {
+                for (size_t i = 0; i < province_bar.buttons.size(); ++i) {
+                    if (province_bar.buttons[i].contains(lx, ly)) {
+                        province_command = static_cast<int>(i);
+                        order_cohort = patrol_x = patrol_y = -1;
+                        std::printf("province command: %s\n", kProvinceCommands[i].label);
+                        return;
+                    }
+                }
+                if (province_bar.frame.contains(lx, ly)) return;
+                province_click(static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx,
+                               static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx);
+                return;
+            }
             int hit = toolbar.hit_test(lx, ly);
             if (hit >= 0) {
                 if (hit == tool_index && cycle_variant()) return;  // tapping the selected button again
@@ -568,9 +921,38 @@ int main(int argc, char** argv) {
                         ok ? "OK" : "rejected (terrain not buildable / off grid)");
         };
 
+        if (save_mode && test_promotion) {
+            model::set_global_word(state, 0x6CA4, (model::global_word(state, 0x6CA6) + 1) % 50);
+            sim.on_promotion(state, false);
+        }
+        if (save_mode && test_battle) {
+            // A five-strong army on the first Cohort's cell, in the first free slot.
+            int cohort = -1, army = -1;
+            for (int i = 0; i < model::kActorCount; ++i) {
+                const model::Actor& a = state.objects[static_cast<size_t>(i)];
+                if (a.active() != 0 && a.type() == systems::province::kCohortType && cohort < 0) cohort = i;
+                if (a.active() == 0 && army < 0) army = i;
+            }
+            if (cohort >= 0 && army >= 0) {
+                model::Actor& a = state.objects[static_cast<size_t>(army)];
+                a.raw = state.objects[static_cast<size_t>(cohort)].raw;
+                a.raw[0x07] = systems::province::kArmyType;
+                a.raw[0x08] = static_cast<uint8_t>(army);
+                a.raw[0x09] = 0;
+                a.raw[systems::battle::kArmySize] = 5;
+                a.raw[0x31] = systems::province::kLinger;
+                sim.on_battle(state, cohort, army);
+            } else {
+                std::printf("--test-battle: no Cohort or no free slot\n");
+            }
+        }
         for (const auto& c : test_clicks) {
             std::printf("--test-click (%d,%d): ", c.x, c.y);
             handle_select_logical(c.x, c.y);
+        }
+        for (int action : test_actions) {
+            std::printf("--test-action %d\n", action);
+            if (save_mode && page_screen()) apply_page_action(action);
         }
 
         Uint32 last_step_ms = SDL_GetTicks();
@@ -594,8 +976,19 @@ int main(int argc, char** argv) {
                         window.set_mode(next);
                         break;
                     }
+                    case platform::CommandType::CycleScreen:
+                        if (save_mode && (!page_screen() || screen == Screen::Forum))
+                            switch_to(screen == Screen::City ? 1 : screen == Screen::Province ? 2
+                                                              : screen == Screen::Maps    ? 3
+                                                                                          : 0);
+                        break;
                     case platform::CommandType::Secondary:
-                        if (save_mode) {
+                        if (save_mode && screen == Screen::Province) {
+                            // Right-click forgets an order being given.
+                            order_cohort = patrol_x = patrol_y = -1;
+                            break;
+                        }
+                        if (save_mode && screen == Screen::City) {
                             // With sprites: city view, then each data layer, then back.
                             if (show_sprites) {
                                 show_sprites = false;
@@ -619,7 +1012,11 @@ int main(int argc, char** argv) {
                         if (save_mode) cycle_variant();
                         break;
                     case platform::CommandType::CycleTool:
-                        if (save_mode) {
+                        if (save_mode && screen == Screen::Province) {
+                            province_command = (province_command + 1) % kProvinceCommandCount;
+                            order_cohort = patrol_x = patrol_y = -1;
+                            std::printf("province command: %s\n", kProvinceCommands[province_command].label);
+                        } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + 1) % kBuildToolCount;
                             std::printf("build tool: %s\n",
                                         systems::construction::command_name(kBuildTools[tool_index]));
@@ -640,7 +1037,26 @@ int main(int argc, char** argv) {
                         // Dragging a drag-built command: the engine calls its
                         // handler for each cell the cursor passes over, so step
                         // one cell at a time from the last placed cell.
-                        if (!save_mode || drag_last_x < 0) break;
+                        if (save_mode && screen == Screen::Province) {
+                            // Clear, Road, Wall and Highway follow the pointer cell by cell.
+                            const int id = kProvinceCommands[province_command].id;
+                            if (province_drag_x < 0 || !(id == 35 || id == 36 || id == 37 || id == 42)) break;
+                            int lx = 0, ly = 0;
+                            if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly) || province_bar.frame.contains(lx, ly))
+                                break;
+                            const int tx = static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx;
+                            const int ty = static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx;
+                            while (province_drag_x != tx || province_drag_y != ty) {
+                                const int ddx = tx - province_drag_x, ddy = ty - province_drag_y;
+                                if (std::abs(ddx) >= std::abs(ddy))
+                                    province_drag_x += ddx > 0 ? 1 : -1;
+                                else
+                                    province_drag_y += ddy > 0 ? 1 : -1;
+                                province_place(id, province_drag_x, province_drag_y);
+                            }
+                            break;
+                        }
+                        if (!save_mode || screen != Screen::City || drag_last_x < 0) break;
                         const auto tool = kBuildTools[tool_index];
                         if (systems::construction::placement_spec(tool).kind !=
                             systems::construction::PlacementKind::DragAutoTiled) {
@@ -682,22 +1098,33 @@ int main(int argc, char** argv) {
                     case platform::CommandType::Hover: {
                         if (!save_mode) break;
                         int lx = 0, ly = 0;
-                        hovered = window.window_to_logical(cmd->x, cmd->y, &lx, &ly) ? toolbar.hit_test(lx, ly) : -1;
+                        const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
+                        hovered = inside && screen == Screen::City ? toolbar.hit_test(lx, ly) : -1;
+                        page_hovered = -1;
+                        if (inside && page_screen()) {
+                            const ui::Page page = current_page();
+                            page_hovered =
+                                ui::hit_test(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), lx, ly);
+                        }
                         break;
                     }
                     case platform::CommandType::PanBegin:
                         break;
                     case platform::CommandType::PanEnd:
                         break;
-                    case platform::CommandType::PanMove:
-                        cam.x -= cmd->dx / cam.zoom;
-                        cam.y -= cmd->dy / cam.zoom;
-                        cam.clamp();
+                    case platform::CommandType::PanMove: {
+                        Camera& c = screen == Screen::Province ? pcam : cam;
+                        c.x -= cmd->dx / c.zoom;
+                        c.y -= cmd->dy / c.zoom;
+                        c.clamp();
                         break;
-                    case platform::CommandType::Zoom:
-                        cam.zoom *= std::pow(1.1, cmd->zoom_delta);
-                        cam.clamp();
+                    }
+                    case platform::CommandType::Zoom: {
+                        Camera& c = screen == Screen::Province ? pcam : cam;
+                        c.zoom *= std::pow(1.1, cmd->zoom_delta);
+                        c.clamp();
                         break;
+                    }
                     default:
                         break;
                 }
@@ -705,9 +1132,17 @@ int main(int argc, char** argv) {
 
             if (time_running) {
                 const Uint32 now = SDL_GetTicks();
-                for (int budget = 8; budget > 0 && now - last_step_ms >= kStepMs; --budget) {
+                // A battle or a promotion offer stops time mid-step.
+                for (int budget = 8; budget > 0 && time_running && now - last_step_ms >= kStepMs; --budget) {
                     advance_step();
                     last_step_ms += kStepMs;
+                    if (sim.dismissed) {
+                        sim.dismissed = false;
+                        ending_caesar = false;
+                        screen = Screen::Ending;
+                        time_running = false;
+                        std::printf("dismissed: three tributes missed\n");
+                    }
                 }
                 if (now - last_step_ms >= kStepMs) last_step_ms = now;  // behind: drop the backlog
             }
@@ -716,7 +1151,63 @@ int main(int argc, char** argv) {
             const std::string funds_text =
                 save_mode ? "Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn"
                           : std::string();
-            if (save_mode && show_sprites) {
+            const ui::GameFont* font = have_font ? &game_font : nullptr;
+            if (save_mode && page_screen()) {
+                const ui::Page page = current_page();
+                frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
+                ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
+                           page_metrics, font, page_hovered);
+            } else if (save_mode && screen == Screen::Province) {
+                if (have_province_sprites) {
+                    if (province_image_dirty) {
+                        render::render_province(state.empire, province_sprites, state.objects, province_image);
+                        province_image_dirty = false;
+                    }
+                    render_sprite_view(province_image, province_sprites.palette, pcam, frame);
+                } else {
+                    render_empire_frame(state.empire, pcam, frame);
+                }
+                const std::string label = province_label();
+                ui::render_bar(province_buttons, province_command, province_bar, frame, kLogicalW, kLogicalH,
+                               page_metrics, font, label.c_str());
+                ui::render_strip(screen_tabs, 1, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+            } else if (save_mode && screen == Screen::Maps) {
+                // The city under the overlay: cells it marks take its colour
+                // over a third of the city's, the rest are dimmed.
+                if (have_sprites) {
+                    if (city_image_dirty) {
+                        render::render_city(state.city, sprites, 0, 0, viewer::kCityW, viewer::kCityH, city_image,
+                                            render_phase, &state.objects);
+                        city_image_dirty = false;
+                    }
+                    render_sprite_view(city_image, sprites.palette, cam, frame);
+                } else {
+                    viewer::render_city_map_layer(state.city, viewer::SaveLayer::Tiles, city_cell_px, cam.x, cam.y,
+                                                  cam.zoom, kLogicalW, kLogicalH, frame);
+                }
+                for (int vy = 0; vy < kLogicalH; ++vy) {
+                    const int cy = static_cast<int>(cam.y + vy / cam.zoom) / city_cell_px;
+                    for (int vx = 0; vx < kLogicalW; ++vx) {
+                        const int cx = static_cast<int>(cam.x + vx / cam.zoom) / city_cell_px;
+                        if (cx < 0 || cy < 0 || cx >= viewer::kCityW || cy >= viewer::kCityH) continue;
+                        const size_t i = (static_cast<size_t>(vy) * kLogicalW + vx) * 3;
+                        formats::RGB c;
+                        if (viewer::overlay_color(state.city, static_cast<viewer::Overlay>(overlay), cx, cy, c)) {
+                            frame[i] = static_cast<uint8_t>((frame[i] + 2 * c.r) / 3);
+                            frame[i + 1] = static_cast<uint8_t>((frame[i + 1] + 2 * c.g) / 3);
+                            frame[i + 2] = static_cast<uint8_t>((frame[i + 2] + 2 * c.b) / 3);
+                        } else {
+                            frame[i] = static_cast<uint8_t>(frame[i] / 3);
+                            frame[i + 1] = static_cast<uint8_t>(frame[i + 1] / 3);
+                            frame[i + 2] = static_cast<uint8_t>(frame[i + 2] / 3);
+                        }
+                    }
+                }
+                const std::string label = std::string("Maps - ") + viewer::kOverlayNames[overlay];
+                ui::render_bar(overlay_buttons, overlay, overlay_bar, frame, kLogicalW, kLogicalH, page_metrics, font,
+                               label.c_str());
+                ui::render_strip(screen_tabs, 2, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+            } else if (save_mode && show_sprites) {
                 // The draw loop's animation (renderer findings section 6): the
                 // water phase advances on each drawn frame while the 32-step
                 // counter DS:0x6D3E is odd, and burning tiles blink on bit 2
@@ -761,7 +1252,10 @@ int main(int argc, char** argv) {
             } else {
                 render_empire_frame(map, cam, frame);
             }
+            if (save_mode && screen == Screen::City)
+                ui::render_strip(screen_tabs, 0, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
             window.present_rgb24(frame);
+            if (quit_requested) running = false;
             ++frame_count;
 
             if (screenshot_frames > 0 && frame_count >= screenshot_frames) {

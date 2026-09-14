@@ -10,7 +10,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 ## At a glance
 
-*As of 2026-09-14.*
+*As of 2026-09-15.*
 
 | Phase | Area | Status | What's left |
 |---|---|---|---|
@@ -20,15 +20,15 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
-| 6 | Economy & military | **Systems done** | Province view and battle screen in the viewer |
-| 7 | Forum, advisors, ratings | **In progress** — plebs, ratings, promotion, new province done | Forum UI, maps panel |
-| 8 | Format completeness & save write-back | Started | Save loader, formats, music, terrain generation |
+| 6 | Economy & military | **Done** | The original battle screen's art |
+| 7 | Forum, advisors, ratings | **Done** | The original screens' art and advisor texts; the Trouble overlay |
+| 8 | Format completeness & save write-back | Started | Save writer and loader, start screen, formats, music |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3379 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3429 checks.
 
-**Critical path now:** the Forum UI and a province view in `gaius_viewer`, which make the single-player loop playable. Phase 9 is unblocked alongside.
+**Critical path now:** the single-player loop is playable in `gaius_viewer` from a save -- build, govern from the Forum, fight in the province, get promoted to a new province or dismissed. Next is Phase 8: writing saves so a game can be kept, and the start screen for a new game. Phase 9 is unblocked alongside.
 
 ---
 
@@ -240,7 +240,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 ## Phase 6 — Economy & military
 
-**Status: Systems done** (2026-09-14). Every system the phase names is transcribed and, where a save can show it, checked against real saves; what's left is presenting the province and the battle in `gaius_viewer`.
+**Status: Done** (2026-09-15). Every system the phase names is transcribed and, where a save can show it, checked against real saves; the province view and the battle screen are in `gaius_viewer`.
 
 **Goal:** Heavy Industry, Workshops and Markets, and the Cohort battle system.
 
@@ -257,18 +257,17 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **The DOS process juggling isn't needed** (findings sections 26.5, 27) — `csr.exe cohort` resumes a game after the external Cohort 2 fought the battle, and `cohort.csr` (read back by `0x23272`) carries the result; Gaius resolves battles itself (`systems::battle`).
 - [x] **Province costs** (findings section 25.1) — the terrain under the cursor shifts a province command's cost and charge; the build routine refuses construction under 50 pleb groups.
 
-**Open**
-- [ ] **A province view and the battle screen in `gaius_viewer`** — drawing the province map (`SPRITE2.PL8` actors, the map tiles) with its toolbar, and the battle screen's rounds, on the systems above.
+- [x] **A province view and the battle screen in `gaius_viewer`** (2026-09-15, findings section 32) — `render::render_province` draws the map from `FIXT3.PL8` (frame = tile, STRONG INFERENCE) with `SPRITE2.PL8` armies and Cohorts; the province toolbar builds, places forts and gives the Cohort orders; `SimState::on_battle` opens the battle page, round by round.
 
-**Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **Met in the simulation**; not yet on screen.
+**Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **Met.**
 
-**RE blockers:** none left. Still unread and not needed for the simulation: the battle and Tribune screens' drawing, the messages, and the Cohort 2 hand-over.
+**Still open, not blocking:** the original battle screen's art, the messages, and the Cohort 2 hand-over.
 
 ---
 
 ## Phase 7 — Forum, advisors, ratings & win/loss
 
-**Status: In progress.** The simulation side is done -- the plebs (with Phase 6), the ratings and promotion (2026-09-14), a new game and a new province with the city's terrain (2026-09-15); the rest is the screens.
+**Status: Done** (2026-09-15). The plebs (with Phase 6), the ratings and promotion (2026-09-14), a new game and a new province with the city's terrain, and the screens: the Forum, promotion, the maps panel and the ending (2026-09-15).
 
 **Goal:** the administrative layer — seven advisors, four ratings (Peace, Culture, Prosperity, Empire), promotion, the annual tribute, plebs.
 
@@ -276,12 +275,12 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **`systems::plebs`** (2026-09-14, done in Phase 6, findings section 29) — each duty's need, welfare growing or shrinking the pleb count, the assignment, and the fire, collapse and road-wear thresholds their coverage sets. Every save reproduced.
 - [x] **`systems::administration`** (2026-09-14, findings section 30) — Peace, Culture, Prosperity and Empire, their population caps and average; promotion's requirements, the new province's pick, accepting or waiting 9 or 24 years, Caesar; the yearly notice. The average in all 17 saves, Culture in 14, Peace and Prosperity across the one pair of consecutive years.
 - [x] **`systems::campaign`** (2026-09-15, findings section 31) — a new game (`0x056B8`), a new province's reset (`0x05730`: funds by rank, plebs, the Legion, cleared city, the Prima Cohors, the highway's entry) and the city's random terrain (`0x06F05`: lakes, erosion, shores, grass, the river). Every save's shores obey the transcribed rule.
-- [ ] **Forum UI** — seven advisors, promotion flow, tribute, game over after three missed tributes (the settlement already counts them: `economy::settle_accounts`).
-- [ ] **Maps panel** — Urbanization, Water, Administration, Road, Land Value, Trouble overlays, drawn from the modeled layers.
+- [x] **Forum UI** (2026-09-15, findings section 32) — `systems::forum` transcribes the buttons (every arrow's limits, the Tribune's duty transfers, the Military Advisor's Cohort cycling and mobilizing, salary and donation); `gaius_viewer`'s Forum has the Treasurer, Tribune, Legion, ratings and governor pages. Promotion opens its page and an accepted one starts the new province from its `EMPIRE2.0NN`; the third missed tribute (`SimState::dismissed`) and becoming Caesar end the game. The layouts are Gaius's own; the names are the executable's tables (provinces, emblems, Cohort states).
+- [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay isn't modeled.
 
-**Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute.
+**Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 
-**RE blockers:** none expected to be hard. Flag any manual formula the executable contradicts back into RE.
+**Still open, not blocking:** the original Forum art and layout (`FORUM32`, `P_BLOCKS.PL8`), the advisors' texts (`0x0D007`), the Trouble overlay.
 
 ---
 
@@ -298,7 +297,8 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [ ] **Save loader RE** — read order and `DS:0x6BFE` done (2026-09-14, findings section 25.2); still the biggest asymmetry: the block table is written correctly, but reading unknown fields the way the original does isn't proven.
 - [ ] **Remaining formats** — `CONTFRM.GD8` (varies by build, so probably localizable layout data), `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, the VAS win/lose animation. `EDATA.CSR` is stable across builds.
 - [ ] **Music** — `.MDI` is standard MIDI and needs no decoder; `.XMI`/`.XM2` only for bit-exact 1993 audio.
-- [ ] **Overlay map modes and the province view** in the renderer.
+- [ ] **Overlay map modes and the province view** in the renderer — the province view is drawn (2026-09-15, findings section 32.3, frame = tile by STRONG INFERENCE with no capture to check it), and the maps panel tints the city from the modeled layers; the original overlays' own art isn't read.
+- [ ] **The start screen** — funding, difficulty and name, and a new game's first province (`systems::campaign::new_game` is ready).
 - [x] **City terrain generation** (2026-09-15, findings section 31.2) — `campaign::generate_city`. Still open: the start screen and the first province's choice.
 - [ ] **Bindiff the two `CSR.EXE` builds** whenever an item here stalls; differences are often faster to read than one disassembly.
 
@@ -356,8 +356,8 @@ Phase 2  Normalized model + save round trip       done
 Phase 3  Service propagation                      done, validated on 17 saves
 Phase 4  Housing / population / the month         done, validated on 17 saves
 Phase 5  Construction dispatcher + build mode     done
-Phase 6  Economy + military                       city economy done; battles next
-Phase 7  Forum / ratings / win-loss               unblocked
+Phase 6  Economy + military                       done
+Phase 7  Forum / ratings / win-loss               done
 Phase 8  Format completeness + save loader        started
 Phase 9  Platform packaging + polish              unblocked; parallel to 6-8
 Phase 10 Editor + IGDK integration                last

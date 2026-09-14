@@ -29,7 +29,9 @@
 #include "formats/save/save.hpp"
 #include "formats/vpx/vpx.hpp"
 #include "model/city_state.hpp"
+#include "apps/viewer/screens.hpp"
 #include "render/city_render.hpp"
+#include "render/province_render.hpp"
 #include "stb_image.h"
 #include "systems/actors.hpp"
 #include "systems/administration.hpp"
@@ -39,6 +41,7 @@
 #include "systems/province.hpp"
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
+#include "systems/forum.hpp"
 #include "systems/housing.hpp"
 #include "systems/military.hpp"
 #include "systems/month.hpp"
@@ -3361,6 +3364,146 @@ void test_campaign_terrain_matches_saves() {
 }
 
 // 0x05730 and friends on a city in the middle of a game.
+void test_forum_controls() {
+    std::printf("test_forum_controls (0xE637-0xEB2C arrows, 0xEB45-0xEC8D duties, 0xE54C-0xE60E Cohorts)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    // Rates stop at their limits.
+    set_global_word(*st, 0x6C04, 24);
+    CHECK(forum::adjust(*st, forum::Control::PopulationTax, 1) == 25);
+    CHECK(forum::adjust(*st, forum::Control::PopulationTax, 1) == 25);
+    CHECK(forum::adjust(*st, forum::Control::IndustrialTax, -1) == 0);
+    set_global_word(*st, military::kConscription, 50);
+    CHECK(forum::adjust(*st, forum::Control::Conscription, 1) == 50);
+    set_global_word(*st, 0x6C2E, 2);  // savings
+    forum::adjust(*st, forum::Control::Donation, 1);
+    forum::adjust(*st, forum::Control::Donation, 1);
+    CHECK(forum::adjust(*st, forum::Control::Donation, 1) == 2);
+
+    // Duties: from the unassigned first, then from the last duty after this one.
+    set_global_word(*st, plebs::kUnassigned, 1);
+    set_global_word(*st, plebs::kFirePrevention, 0);
+    set_global_word(*st, plebs::kRoadMaintenance, 3);
+    set_global_word(*st, plebs::kArmyDuty, 32);
+    CHECK(forum::raise_duty(*st, forum::Duty::FirePrevention) && global_word(*st, plebs::kUnassigned) == 0);
+    CHECK(global_word(*st, military::kAuxiliaries) == 2);
+    CHECK(forum::raise_duty(*st, forum::Duty::FirePrevention) && global_word(*st, plebs::kArmyDuty) == 31);
+    CHECK(global_word(*st, military::kAuxiliaries) == 1 && global_word(*st, plebs::kFirePrevention) == 2);
+    CHECK(!forum::raise_duty(*st, forum::Duty::ArmyDuty));  // army duty takes only unassigned plebs
+    CHECK(forum::raise_duty(*st, forum::Duty::Construction) && global_word(*st, plebs::kArmyDuty) == 30);
+    CHECK(forum::lower_duty(*st, forum::Duty::RoadMaintenance) && global_word(*st, plebs::kUnassigned) == 1 &&
+          global_word(*st, plebs::kRoadMaintenance) == 2);
+
+    // Cohorts numbered 0 and 3.
+    for (int number : {0, 3}) {
+        const int slot = actors::spawn(*st, military::kCohortType, 5, 5);
+        st->objects[static_cast<size_t>(slot)].raw[0x2A] = static_cast<uint8_t>(number);
+        st->objects[static_cast<size_t>(slot)].raw[0x31] = military::kCohortMobilized;
+    }
+    set_global_word(*st, 0x6C12, 2);
+    set_global_word(*st, forum::kSelectedCohort, 0);
+    forum::next_cohort(*st);
+    CHECK(global_word(*st, forum::kSelectedCohort) == 3);  // steps past the empty numbers
+    forum::next_cohort(*st);
+    CHECK(global_word(*st, forum::kSelectedCohort) == 3);  // 3 is not below the count of 2: no step
+    forum::previous_cohort(*st);
+    CHECK(global_word(*st, forum::kSelectedCohort) == 0);
+    set_global_word(*st, forum::kSelectedCohort, 3);
+    const int slot = forum::selected_cohort_slot(*st);
+    CHECK(slot >= 0 && forum::toggle_mobilized(*st) &&
+          st->objects[static_cast<size_t>(slot)].raw[0x31] == military::kCohortDemobilized);
+    CHECK(forum::toggle_mobilized(*st) && st->objects[static_cast<size_t>(slot)].raw[0x31] == military::kCohortMobilized);
+}
+
+void test_ui_panel_pages() {
+    std::printf("test_ui_panel_pages (Forum, promotion and battle pages: layout inside the screen, hit-test round trip)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    const int slot = actors::spawn(*st, military::kCohortType, 5, 5);
+    st->objects[static_cast<size_t>(slot)].raw[0x31] = military::kCohortMobilized;
+    const int army = actors::spawn(*st, province::kArmyType, 6, 5);
+    const gaius::ui::Metrics m = gaius::ui::metrics_for(gaius::ui::Breakpoint::Desktop);
+    std::vector<gaius::ui::Page> pages;
+    for (int t = 0; t < gaius::viewer::kForumTabCount; ++t)
+        pages.push_back(gaius::viewer::forum_page(*st, static_cast<gaius::viewer::ForumTab>(t)));
+    pages.push_back(gaius::viewer::promotion_page(*st, false));
+    gaius::viewer::BattleView bv;
+    bv.cohort = slot;
+    bv.army = army;
+    pages.push_back(gaius::viewer::battle_page(*st, bv));
+    pages.push_back(gaius::viewer::ending_page(*st, false));
+    pages.push_back(gaius::viewer::ending_page(*st, true));
+    bool inside = true, round_trip = true;
+    const auto in_screen = [](gaius::ui::Rect r) { return r.w == 0 || (r.x >= 0 && r.y >= 0 && r.x + r.w <= 320 && r.y + r.h <= 200); };
+    for (const gaius::ui::Page& page : pages) {
+        const gaius::ui::PanelLayout lay = gaius::ui::layout(page, m, 320, 200);
+        for (const auto& r : lay.tabs) inside = inside && in_screen(r);
+        for (size_t i = 0; i < lay.rows.size(); ++i)
+            inside = inside && in_screen(lay.rows[i]) && in_screen(lay.up[i]) && in_screen(lay.down[i]);
+        for (const auto& r : lay.buttons) inside = inside && in_screen(r);
+        for (size_t i = 0; i < lay.buttons.size(); ++i)
+            round_trip = round_trip && gaius::ui::hit_test(page, lay, lay.buttons[i].x + 1, lay.buttons[i].y + 1) ==
+                                           page.buttons[i].action;
+        for (size_t i = 0; i < lay.rows.size(); ++i) {
+            if (page.rows[i].up_action < 0) continue;
+            round_trip = round_trip &&
+                         gaius::ui::hit_test(page, lay, lay.up[i].x + 1, lay.up[i].y + 1) == page.rows[i].up_action &&
+                         gaius::ui::hit_test(page, lay, lay.down[i].x + 1, lay.down[i].y + 1) == page.rows[i].down_action;
+        }
+        // Nothing but the frame between the title and the first row.
+        CHECK(gaius::ui::hit_test(page, lay, lay.title.x + 1, lay.title.y + 1) == -1);
+    }
+    CHECK(inside);
+    CHECK(round_trip);
+
+    // A Forum action through the page reaches the state: the population tax's up arrow.
+    gaius::viewer::ForumTab tab = gaius::viewer::kTreasurer;
+    const int up = gaius::viewer::kActionControl + 2 * static_cast<int>(forum::Control::PopulationTax) + 1;
+    CHECK(gaius::viewer::apply_forum_action(*st, up, tab) && global_word(*st, 0x6C04) == 1);
+    CHECK(gaius::viewer::apply_forum_action(*st, gaius::viewer::kActionTab + gaius::viewer::kLegion, tab) &&
+          tab == gaius::viewer::kLegion);
+    CHECK(!gaius::viewer::apply_forum_action(*st, gaius::viewer::kActionClose, tab));
+}
+
+void test_province_render_corpus() {
+    std::printf("test_province_render_corpus (FIXT3.PL8 frames cover every province tile in every save)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    gaius::render::ProvinceSprites sprites;
+    try {
+        sprites = gaius::render::load_province_sprites(assets);
+    } catch (const gaius::formats::FormatError&) {
+        skip("FIXT3.PL8 / SPRITE2.PL8 not found");
+        return;
+    }
+    CHECK(sprites.terrain.frames.size() == 125);
+    int saves = 0;
+    bool covered = true, actors_drawn = true;
+    for (const char* name : kRealSaves) {
+        const std::string path = std::string(assets) + "/gaius_test_saves/" + name;
+        if (!std::filesystem::exists(path)) continue;
+        auto st = std::make_unique<CityState>(load(gaius::formats::save::load(path)));
+        ++saves;
+        for (uint8_t cell : st->empire.cells)
+            covered = covered && gaius::render::province_frame(cell) < static_cast<int>(sprites.terrain.frames.size());
+        for (const auto& a : st->objects)
+            if (a.active() && a.type() >= 11) actors_drawn = actors_drawn && a.frame() < sprites.units.frames.size();
+        gaius::formats::IndexedImage img;
+        gaius::render::render_province(st->empire, sprites, st->objects, img);
+        // The top-left cell draws the frame of its tile.
+        const auto& f = sprites.terrain.frames[static_cast<size_t>(gaius::render::province_frame(st->empire.at(0, 0)))];
+        CHECK(img.width == 640 && img.height == 640 && img.pixels[0] == f.pixels[0]);
+    }
+    CHECK(saves > 0 && covered && actors_drawn);
+}
+
 void test_campaign_start_province() {
     std::printf("test_campaign_start_province (0x5730 reset, 0x621F Prima Cohors, 0x6307 highway, 0x56B8 new game)\n");
     using namespace gaius::systems;
@@ -4701,6 +4844,9 @@ int main() {
     test_campaign_terrain();
     test_campaign_terrain_matches_saves();
     test_campaign_start_province();
+    test_forum_controls();
+    test_ui_panel_pages();
+    test_province_render_corpus();
     test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();

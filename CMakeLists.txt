@@ -92,6 +92,7 @@ add_library(gaius_systems STATIC
   systems/plebs.cpp
   systems/administration.cpp
   systems/campaign.cpp
+  systems/forum.cpp
 )
 target_link_libraries(gaius_systems PUBLIC gaius_model)
 
@@ -103,6 +104,7 @@ add_library(gaius_ui STATIC
   ui/font.cpp
   ui/game_font.cpp
   ui/toolbar.cpp
+  ui/panel.cpp
 )
 target_link_libraries(gaius_ui PUBLIC gaius_systems)
 
@@ -110,6 +112,7 @@ target_link_libraries(gaius_ui PUBLIC gaius_systems)
 # Pure, like gaius_ui: renders into an indexed image, no SDL.
 add_library(gaius_render STATIC
   render/city_render.cpp
+  render/province_render.cpp
 )
 target_link_libraries(gaius_render PUBLIC gaius_systems)
 

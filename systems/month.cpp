@@ -313,7 +313,7 @@ void run_step(model::CityState& state, SimState& sim) {
     // turns: the accounts, the history writes, the Legion, the ratings,
     // promotion and the yearly notice.
     if (sim.year != year_before) {
-        economy::run_year(state, sim.industrial_rate_sum);
+        if (economy::run_year(state, sim.industrial_rate_sum).dismissed) sim.dismissed = true;
         record_history(state, sim.year);
         military::run_year(state);
         administration::run_ratings(state);

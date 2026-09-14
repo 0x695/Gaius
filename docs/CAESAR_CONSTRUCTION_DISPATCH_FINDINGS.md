@@ -1288,3 +1288,71 @@ A draw, then seven passes, repeated from the start until the river fits (`DS:0x4
 - Who calls `0x06F05` isn't traced, so where the terrain is made within a province's start is inferred; `start_province` makes it first.
 - The start screen (funding, difficulty, name) and the first province's choice for a new game.
 
+
+
+## 32. The screens: the Forum's buttons, the province view and the game's name tables (2026-09-15)
+
+`systems::forum` transcribes what the Forum screens' buttons do; `render::render_province` draws the province view; `gaius_viewer` puts them on screen with the promotion, battle, maps and ending screens (section 32.4).
+
+### 32.1 The Forum's buttons
+
+Every arrow moves its word by one per click, and only while inside its limit (section 25.2):
+
+| Word | Up / down | Limits |
+|---|---|---|
+| `DS:0x6C04` population tax | `0x0E7AE` / `0x0E7C0` | 0-25, then `DS:0x6D8B` = 4 |
+| `DS:0x6C02` industrial tax | `0x0E7D2` / `0x0E7E4` | 0-25, then `DS:0x6D8B` = 4 |
+| `DS:0x6C08` army wages | `0x0E637` / `0x0E644` | 0-999 |
+| `DS:0x6C06` conscription | `0x0E650` / `0x0E65C` | 0-50 |
+| `DS:0x6C46` welfare | `0x0EB13` / `0x0EB2C` | 0-9999 (clamped after the step), `DS:0x6D8B` = 6 |
+| `DS:0x6C2C` salary | `0x0C164` / `0x0C171` | 0-9999 |
+| `DS:0x6C28` donation | `0x0C2C3` / `0x0C2D1` | 0 up to the savings `DS:0x6C2E` |
+
+`DS:0x6D8B` looks like the page to redraw (4 the Treasurer's, 6 the Tribune's; STRONG INFERENCE).
+
+**The Tribune's duties.** A duty's up arrow takes one pleb group from the unassigned `DS:0x6C58`, or with none from the duties after it, last first:
+
+- fire prevention (`0x0EB45`): unassigned, army duty, construction, road, building maintenance;
+- building maintenance (`0x0EBA5`): unassigned, army, construction, road;
+- road maintenance (`0x0EBF8`): unassigned, army, construction;
+- construction (`0x0EC3E`): unassigned, army;
+- army duty (`0x0EC77`): unassigned only.
+
+Each down arrow (`0x0EB8F`, `0x0EBE2`, `0x0EC28`, `0x0EC61`, `0x0EC8D`) gives one back to the unassigned. The screen's draw routine (`0x0E85A`) sets the auxiliaries `DS:0x6C52` = army duty / 16 every time it draws.
+
+**The Military Advisor's Cohort.** `DS:0x6C0A` is the number (+0x2A) of the Cohort on display. `0x0E54C` finds the active type-13 actor with that number. Next (`0x0E59C`): while the number is below the Cohort count `DS:0x6C12`, step it up until a Cohort has it (at most to 11), and 10 or more wraps to 0 -- so a number already at the count doesn't move. Previous (`0x0E60E`): step down until a Cohort has it, not below 0. The centre button (`0x0E5D5`) sets state 10 if the Cohort is in state 14, and 14 otherwise.
+
+### 32.2 The name tables
+
+Read from the decompressed image, each a run of fixed-width fields:
+
+- **Provinces**, `DS:0x2CAE`, 50 fields of 16: Sicilia, Campania, Latium, ... Tingitania, Moesia -- the 50 `EMPIRE2.0NN` scenarios. The race names (section 27) end just before.
+- **Cohort emblems**, `DS:0x45BE`, 10 fields of 12: Eagle, Rabbit, Snake, Fish, Horse, Pig, Wolf, Hero, Explorer, Protector.
+- **Cohort states**, `DS:0x4772`, 16 fields of 16: "nothing" for 0-9, then waiting, patrolling, attacking, retiring, demobilized for states 10-14, then "nothing".
+
+The Military Advisor capture shows the Prima Cohors (number 0, state 10) as "EAGLE" and "WAITING", which fits the emblem indexed by the number and the state word by the state; that each table is indexed so is STRONG INFERENCE.
+
+**A new province's map file.** `0x0FF1C` loads `DS:0x0F4C` into `3496:2752`, then writes the province `DS:0x6CA6` as three decimal digits into offsets 8-10 of the name at `DS:0x0F58` and loads that: `EMPIRE2.0NN`.
+
+### 32.3 The province view
+
+With `DS:0x6CAE` = 1 the map draw (`0x06369` -> `0x065D9`) scrolls the province by whole cells, `DS:0x6CB2` and `DS:0x6CB0`, which `0x066FE` clamps to 0-20 and 0-29. The actor list builder `0x06834` takes the active actors of type 11 and up inside the window (the city's `0x06733` takes those below 11) and draws them through the same `0x06931` -> `0x06946`: frame +0x00 from `SPRITE2.PL8`, bottom edge at y + 8.
+
+`FIXT3.PL8` has 125 frames of 16 x 16, one for each province tile 0x00-0x7C, and its frames run water, shores, grass, roads, walls, the city and towns in the province tiles' order. `render_province` draws frame = tile & 0x7F: STRONG INFERENCE, since no capture of the province view exists. `test_province_render_corpus` checks that every save's province tiles and province actors' frames exist in the two sheets.
+
+### 32.4 In the viewer
+
+`gaius_viewer` switches between the city, the province, the maps panel and the Forum (a strip of buttons along the top; M or gamepad Back). The layouts are Gaius's own, drawn in `FONT1.PL8` when the user's files provide it. `FONT1` has no colon or slash: the `DS:0F64` table draws ':' as '0' and '/' as nothing.
+
+- **The Forum** has five pages -- the Treasurer, the Tribune of the Plebs, the Legion, the ratings and the governor -- with the arrows of section 32.1.
+- **Promotion.** `SimState::on_promotion` opens the promotion page and stops time; its buttons call `accept_promotion`, `defer_promotion` or `become_caesar`. An accepted promotion loads the new `EMPIRE2.0NN` and runs `campaign::start_province`.
+- **Battle.** `SimState::on_battle` opens the battle page and stops time. Each tactic runs `battle::fight_round` after one generator draw; the original draws once a frame while it waits.
+- **The province view** has the province toolbar: Clear, Road, Wall, Tower, Highway, Fort, and the four Cohort orders. Each command is charged with the terrain's cost shift and refused below 50 pleb groups (section 25.1). For an order, click the Cohort, then a point or an army.
+- **The maps panel** tints the city by one of the modeled layers: water, the administration's reach, land value, roads or housing.
+- **Dismissal.** `SimState::dismissed` (the third missed tribute) opens an ending page, and so does becoming Caesar.
+
+### 32.5 Open
+
+- The original screens' art and layout (`FORUM32`, `P_BLOCKS.PL8`, the advisor text picker `0x0D007`), and the manual's Trouble overlay.
+- The start screen (funding, difficulty, name) and a new game's first province.
+- The construction need `DS:0x6C3E` on the Tribune's page, which the save doesn't keep.

@@ -112,6 +112,10 @@ struct SimState {
     // years, 3 to wait 24; anything else leaves it unanswered, offered again
     // next year. Without it nothing is answered.
     std::function<int(model::CityState& state, bool to_caesar)> on_promotion;
+    // Set when a year's settlement dismisses the governor: the third missed
+    // tribute in a row (economy::Settlement::dismissed, DS:0x6D6A = 0x3C, the
+    // game's end). The caller clears it.
+    bool dismissed = false;
     Random random;
     service::ServiceState service;
 };
