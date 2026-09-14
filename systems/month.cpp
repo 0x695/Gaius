@@ -8,6 +8,7 @@
 
 #include "formats/save/save.hpp"
 #include "systems/actors.hpp"
+#include "systems/administration.hpp"
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
@@ -147,7 +148,7 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
             // 0x2E209: a draw, then the province's towns and the highway.
             sim.random.advance();
             if (state) {
-                province::develop_towns(*state, sim.town_counter);
+                sim.linked_towns = province::develop_towns(*state, sim.town_counter);
                 province::connect_highway(*state);
             }
         }
@@ -309,13 +310,25 @@ void run_step(model::CityState& state, SimState& sim) {
     model::set_global_word(state, 0x6C1C, sim.month);
     model::set_global_word(state, 0x6C32, sim.year);
     // The calendar (0x29472) calls the yearly routine 0x28238 when the year
-    // turns: the accounts, the history writes, then the Legion. The routines
-    // after it (the ratings 0x28C43, promotion 0x29023, 0x2933B) aren't
-    // transcribed.
+    // turns: the accounts, the history writes, the Legion, the ratings,
+    // promotion and the yearly notice.
     if (sim.year != year_before) {
         economy::run_year(state, sim.industrial_rate_sum);
         record_history(state, sim.year);
         military::run_year(state);
+        administration::run_ratings(state);
+        const administration::Offer offer = administration::check_promotion(state, sim.random);
+        if ((offer == administration::Offer::Promotion || offer == administration::Offer::Caesar) && sim.on_promotion) {
+            const int choice = sim.on_promotion(state, offer == administration::Offer::Caesar);
+            if (offer == administration::Offer::Caesar) {
+                if (choice == 1) administration::become_caesar(state);
+            } else if (choice == 1) {
+                administration::accept_promotion(state, sim.difficulty);
+            } else if (choice == 2 || choice == 3) {
+                administration::defer_promotion(state, choice == 2 ? 9 : 24);
+            }
+        }
+        administration::yearly_notice(state, sim.random, sim.province_wear_threshold, sim.linked_towns);
     }
 }
 

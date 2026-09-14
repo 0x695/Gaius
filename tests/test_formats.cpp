@@ -32,6 +32,7 @@
 #include "render/city_render.hpp"
 #include "stb_image.h"
 #include "systems/actors.hpp"
+#include "systems/administration.hpp"
 #include "systems/battle.hpp"
 #include "systems/plebs.hpp"
 #include "systems/province.hpp"
@@ -3093,6 +3094,187 @@ void test_economy_province_costs() {
     CHECK(economy::enough_plebs(*st, 36));
 }
 
+// The four ratings on made-up cities.
+void test_administration_ratings() {
+    std::printf("test_administration_ratings (0x28C43: peace, culture, prosperity, empire, 0x28FEF cap)\n");
+    using namespace gaius::systems;
+    CHECK(administration::population_cap(72, 1, 146) == 6);  // 150 > 146 at b = 3
+    CHECK(administration::population_cap(4, 1, 146) == 4);
+    CHECK(administration::population_cap(50, 2, 509) == 12);  // 600 > 509 at b = 6
+    CHECK(administration::population_cap(50, 1, 0) == 2);
+
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    set_global_word(*st, administration::kPeace, 99);
+    administration::peace_year(*st);
+    CHECK(global_word(*st, administration::kPeace) == 100);
+
+    // Culture: CAESARUX's city in figures -- 19 temple cells, 54 entertainment
+    // points, 2 schools, 146 units: raw 38 and 54, capped by population to 6.
+    for (int i = 0; i < 19; ++i) st->city.tile[1][static_cast<size_t>(i)] = 0xD8;
+    for (int i = 0; i < 18; ++i) st->city.tile[2][static_cast<size_t>(i)] = 0xF1;  // 3 each
+    set_global_word(*st, 0x6BEC, 2);
+    set_global_word(*st, 0x6C10, 146);
+    administration::culture_year(*st);
+    CHECK(global_word(*st, 0x6C82) == 38 && global_word(*st, 0x6C80) == 54 && global_word(*st, administration::kCulture) == 6);
+    set_global_word(*st, 0x6C10, 5000);  // spread over many more: 19 x 34 / 421 + 27 x 34 / 421 + 2 x 34 / 421
+    administration::culture_year(*st);
+    CHECK(global_word(*st, administration::kCulture) == 1 + 2 + 0);
+
+    // Prosperity: tax per head 0.11 (index 3), 496 units (index 9), a loss.
+    set_global_word(*st, administration::kRank, 1);
+    set_global_word(*st, administration::kProsperity, 8);
+    set_global_word(*st, 0x6BCA, 0);
+    set_global_word(*st, 0x6BC8, 11);
+    set_global_word(*st, 0x6C10, 496);
+    set_global_word(*st, 0x6BB6, -40);
+    administration::prosperity_year(*st);
+    CHECK(global_word(*st, administration::kProsperity) == 7);
+    set_global_word(*st, 0x6BB6, 10);  // a profit at rank 1: +4, but 496 units allow at most 10
+    administration::prosperity_year(*st);
+    CHECK(global_word(*st, administration::kProsperity) == 10);
+
+    // Empire: a large town, a middling one, a small one, a long straight road
+    // and the highway linked.
+    st->empire.cells.fill(0x1D);
+    st->empire.cells[10] = 0x4C;
+    st->empire.cells[11] = 0x7A;
+    st->empire.cells[12] = 0xF9;  // 0x79 with a walker on it
+    set_global_word(*st, 0x6C86, 11);
+    set_global_word(*st, 0x6C8C, 1);
+    administration::empire_year(*st);
+    CHECK(global_word(*st, administration::kEmpire) == 20 + 10 + 5 + 5 + 10 + 20);
+    set_global_word(*st, 0x6C86, -3);
+    set_global_word(*st, 0x6C8C, 0);
+    st->empire.cells.fill(0x1D);
+    administration::empire_year(*st);
+    CHECK(global_word(*st, administration::kEmpire) == 0);
+
+    set_global_word(*st, administration::kPeace, 42);
+    set_global_word(*st, administration::kCulture, 16);
+    set_global_word(*st, administration::kProsperity, 7);
+    set_global_word(*st, administration::kEmpire, 0);
+    administration::set_average(*st);
+    CHECK(global_word(*st, administration::kAverage) == 16);
+}
+
+// Promotion, waiting, the last rank, and the yearly notice.
+void test_administration_promotion() {
+    std::printf("test_administration_promotion (0x29023, 0x29280 accept, 0x292EA wait, 0x2933B notice)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->table_50.assign(50, 0);
+    month::Random rnd;
+    auto ratings = [&](int each, int average) {
+        for (uint16_t r : {administration::kPeace, administration::kCulture, administration::kProsperity,
+                           administration::kEmpire})
+            set_global_word(*st, r, each);
+        set_global_word(*st, administration::kAverage, average);
+    };
+    set_global_word(*st, administration::kRank, 1);  // needs 35 average, 12 each
+    ratings(40, 34);
+    CHECK(administration::check_promotion(*st, rnd) == administration::Offer::None);
+    ratings(11, 40);
+    CHECK(administration::check_promotion(*st, rnd) == administration::Offer::None);
+    ratings(12, 35);
+    CHECK(administration::check_promotion(*st, rnd) == administration::Offer::Promotion);
+    const int picked = global_word(*st, 0x6CA4);
+    CHECK(picked >= 0 && picked < 50 && picked == rnd.walk >> 1);
+
+    set_global_word(*st, 0x6C2E, 5000);
+    set_global_word(*st, 0x6C2A, 1);
+    int difficulty = 0;
+    administration::accept_promotion(*st, difficulty);
+    CHECK(global_word(*st, administration::kRank) == 2 && global_word(*st, 0x6C2E) == 2500);
+    CHECK(global_word(*st, 0x6C2A) == 6 && global_word(*st, 0x6CA6) == picked && st->table_50[static_cast<size_t>(picked)] == 1);
+    CHECK(difficulty == 1 && global_word(*st, 0x6C26) == 1);
+
+    administration::defer_promotion(*st, 9);
+    ratings(90, 90);
+    CHECK(administration::check_promotion(*st, rnd) == administration::Offer::Deferred && global_word(*st, 0x6C24) == 8);
+    CHECK(global_word(*st, 0x6C26) == 0);
+
+    set_global_word(*st, 0x6C24, 0);
+    set_global_word(*st, administration::kRank, 19);
+    ratings(79, 89);
+    CHECK(administration::check_promotion(*st, rnd) == administration::Offer::Caesar);
+    administration::become_caesar(*st);
+    CHECK(global_word(*st, administration::kRank) == 20);
+    CHECK(std::string(administration::kRankNames[20]) == "Caesar");
+
+    // The yearly notice: only in its year, then some years later.
+    set_global_word(*st, 0x6C32, 5);
+    set_global_word(*st, 0x6C98, 6);
+    CHECK(administration::yearly_notice(*st, rnd, 100, 0).kind == administration::Notice::Kind::None);
+    set_global_word(*st, 0x6C98, 5);
+    rnd.walk = 3;
+    rnd.draw = 1;  // advice
+    set_global_word(*st, 0x6C94, 3);
+    set_global_word(*st, 0x6C86, 0);
+    const auto n = administration::yearly_notice(*st, rnd, 100, 0);
+    CHECK(n.kind == administration::Notice::Kind::Advice && n.topic == 1 && global_word(*st, 0x6C98) == 9);
+    rnd.draw = 2;  // news
+    rnd.low7 = 4;
+    set_global_word(*st, 0x6C32, 9);
+    set_global_word(*st, 0x6C96, 12);
+    const auto m = administration::yearly_notice(*st, rnd, 100, 0);
+    CHECK(m.kind == administration::Notice::Kind::News && m.topic == 0);
+}
+
+// The ratings against the saves.
+void test_administration_matches_saves() {
+    std::printf("test_administration_matches_saves (ratings vs each real save)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    std::unique_ptr<CityState> xs, xr;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        const std::string n(name);
+
+        auto avg = std::make_unique<CityState>(*st);
+        administration::set_average(*avg);
+        CHECK(global_word(*avg, administration::kAverage) == global_word(*st, administration::kAverage));
+
+        // Culture's raw scores from the city and the year-end population units.
+        const size_t o = static_cast<size_t>(global_word(*st, 0x6B30)) * 4;
+        const int units = static_cast<int16_t>(st->table_60_d[o + 2] | (st->table_60_d[o + 3] << 8));
+        auto cul = std::make_unique<CityState>(*st);
+        set_global_word(*cul, 0x6C10, units);
+        administration::culture_year(*cul);
+        const bool same = global_word(*cul, 0x6C82) == global_word(*st, 0x6C82) &&
+                          global_word(*cul, 0x6C80) == global_word(*st, 0x6C80);
+        std::printf("  %s: culture raw %d/%d (saved %d/%d)\n", name, global_word(*cul, 0x6C82), global_word(*cul, 0x6C80),
+                    global_word(*st, 0x6C82), global_word(*st, 0x6C80));
+        // Built or demolished since the year turned: CAESARXX a temple, CAESARXS
+        // entertainment, CAESARXR two temple cells.
+        if (n != "CAESARXX.SAV" && n != "CAESARXS.SAV" && n != "CAESARXR.SAV") CHECK(same);
+        month::Random rnd;  // no save's ratings earn a promotion (rank 1 needs 35 average)
+        CHECK(administration::check_promotion(*avg, rnd) == administration::Offer::None);
+        if (n == "CAESARXS.SAV") xs = std::move(st);
+        else if (n == "CAESARXR.SAV") xr = std::move(st);
+    }
+    if (xs && xr) {
+        // Year 7 -> year 8: Peace +2; Prosperity from XR's year-end figures.
+        const size_t o = static_cast<size_t>(global_word(*xr, 0x6B30)) * 4;
+        const int units = static_cast<int16_t>(xr->table_60_d[o + 2] | (xr->table_60_d[o + 3] << 8));
+        for (uint16_t ds : {uint16_t{0x6BCA}, uint16_t{0x6BC8}, uint16_t{0x6BB6}}) set_global_word(*xs, ds, global_word(*xr, ds));
+        set_global_word(*xs, 0x6C10, units);
+        administration::peace_year(*xs);
+        administration::prosperity_year(*xs);
+        CHECK(global_word(*xs, administration::kPeace) == global_word(*xr, administration::kPeace));
+        CHECK(global_word(*xs, administration::kProsperity) == global_word(*xr, administration::kProsperity));
+    }
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -4372,6 +4554,9 @@ int main() {
     test_plebs_duties();
     test_plebs_match_saves();
     test_economy_province_costs();
+    test_administration_ratings();
+    test_administration_promotion();
+    test_administration_matches_saves();
     test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();

@@ -974,7 +974,7 @@ When the calendar turns the year it:
    - profit or loss `DS:0x6BB6` = taxes - construction - operating costs - tribute paid, copied with the other four figures to `0x6BB4`-`0x6BAC`, the Treasurer's report;
    - welfare is cut to the funds, if it exceeds them;
 6. zeroes both sums and copies the pleb count `DS:0x6C56` to last year's `DS:0x6C54`;
-7. writes the histories (section 22.3), then runs the Legion (`0x289C0`, section 26), the ratings (`0x28C43`), promotion (`0x29023`) and `0x2933B`; the last three aren't transcribed.
+7. writes the histories (section 22.3), then runs the Legion (`0x289C0`, section 26), the ratings (`0x28C43`), promotion (`0x29023`) and the yearly notice `0x2933B` (section 30).
 
 ### 25.4 Checked against the saves
 
@@ -993,7 +993,6 @@ When the calendar turns the year it:
 - **`gaius_viewer`** charges each placement, asks Rome for the emergency funds when it can't, shows the cost and current funds in the toolbar label (dropping the funds figure if the combined text wouldn't fit the panel), and prints the funds each month and the Treasurer's report each year. **2026-09-14:** a drag-built command (Road, Wall, Plaza, Clear Area) can be cancelled the manual's way -- right button while the left is still held (`platform::CommandType::CancelDrag`) -- which restores every cell the drag touched (a 7x7 box around each placed cell, wide enough to cover Clear Area's worst case of wrecking a building anchored up to 3 cells away) and refunds what it cost.
 - **Not modeled:**
   - the messages;
-  - the yearly routine's ratings, promotion and `0x2933B` (the Legion is section 26);
   - what pleb welfare does at step 105 (`0x2DF01`, `0x2DF40`).
 
 ## 26. The Legion: recruitment and Cohorts (2026-09-14)
@@ -1209,4 +1208,44 @@ In all 17 saves, recomputing from the saved counts (difficulty 0) gives the save
 ### 29.4 In Gaius
 
 `systems::plebs`: `set_needs`, `pay_welfare`, `assign`, `set_thresholds`; `systems::month` runs them at step 105 in the engine's order and feeds the thresholds to the rolls, which until now kept the saved values (or 99). The Tribune's screen and its messages aren't modeled.
+
+## 30. Ratings, promotion and the yearly notice (2026-09-14)
+
+The yearly routine `0x28238` ends with three calls after the Legion: the ratings `0x28C43`, promotion `0x29023` and a notice `0x2933B`. `systems::administration` implements them.
+
+### 30.1 The ratings (`0x28C43`)
+
+Four sub-routines, then `DS:0x6C34` = the four's sum / 4. Each rating is 0-100; the names are the manual's, matched by what each reads (STRONG INFERENCE).
+
+- **Peace `DS:0x6C3C`, `0x28C70`:** +2. (Rioters take 2, `0x2DB49`; invasions 4 at rank 1 or 10, section 28.)
+- **Culture `DS:0x6C3A`, `0x28C90`:** every city cell with a tile `0xD8`-`0xF2` adds its pair from `3496:0172`: religion 1 for the temple tiles `0xD8`-`0xDF` and 9 for the oracle `0xEB`; entertainment 2, 3, 4 for the theater, coliseum and hippodrome `0xF0`-`0xF2`. With d = units `DS:0x6C10` / 12 + 5 and each division a long one: `DS:0x6C82` = religion x 34 / d, at most 34 counted; `DS:0x6C80` = (entertainment / 2) x 34 / d; the sum at most 68; plus schools `DS:0x6BEC` x 34 / d; then the population cap with step 1.
+- **Prosperity `DS:0x6C38`, `0x28E63`,** which accumulates: + `3496:00DE` (rank 1) or `3496:00F6` (other ranks) [(tax per head in hundredths) / 3, at most 23], + `3496:010E`[min(units, 1999) / 50], + 4 for a profit at rank 1, 2 at higher ranks, - 2 otherwise (`DS:0x6BB6`); then the population cap with step 2.
+- **Empire `DS:0x6C36`, `0x28F3C`,** recomputed: -5 for a negative road score `DS:0x6C86`, +5 for a positive one and +10 more above 10, +20 for the highway linked (`DS:0x6C8C`), and +20, +10, +5 for each town `0x4C`, `0x7A`, `0x79` on the map.
+- **The population cap `0x28FEF`**(value, step): the first b of 0-49 with b x step x 50 above the units limits the value to 2 x b. So a city of 146 units can't have Culture above 6.
+
+### 30.2 Promotion (`0x29023`)
+
+- `DS:0x6C26` = 0. While `DS:0x6C24` is nonzero it counts down and nothing else happens.
+- `3496:01C6`[rank x 2] holds the rank's requirement: the average and the minimum for each rating -- (30, 10) at rank 0, (35, 12) at rank 1, rising to (90, 80) at rank 20. The average must reach the first, and Peace, Culture, Empire and Prosperity each the second.
+- Earned: `0x2898E` draws until the generator's walk / 2 is a province not yet given (`table_50`), into `DS:0x6CA4`. At rank 19 the last screen `0x290DF` makes the rank 20; below it, the promotion screen `0x291C3` with three buttons (`DS:0x14E2`):
+  - **accept `0x29280`:** `DS:0x6C24` = 0, `DS:0x6C26` = 1 (the main loop at `0x0F81B` starts the new province); savings `DS:0x6C2E` cut to 4000 from rank 9, else to rank x 200 + 2300; rank + 1; `DS:0x6C2A` + 5; `0x289B0` makes the picked province current (`DS:0x6CA6`) and marks it given; the difficulty `DS:0x6CB8` goes from 0 to 1;
+  - **wait `0x292EA` / `0x292FD`:** `DS:0x6C24` = 9 or 24 years.
+- The rank titles follow the province toolbar's names in the string table: Plebian, Citizen, Equitus, Taberllarius, Decurian, Iuridicus, Procurator, Magistrate, Logistas, Praefectus, Magister, Cubicularius, Legate, Quaestor, Senator, Praetor, Consul, Proconsul, Princeps, Imperator, Caesar. The saves' cities are rank 1.
+
+### 30.3 The yearly notice (`0x2933B`)
+
+When the year equals `DS:0x6C98`, that word grows by (walk & 7) + 1 and `0x09AFD` shows a screen by the last draw's low bit: news (`DS:0x6C96` += low7 & 4, back to 0 past 15) or advice (`DS:0x6C94` cycles 0-4, each topic with a second text when its condition holds: the highway linked, more than 2 linked towns, more than 5 Cohorts, construction staffed or no province roads, a positive road score; topic 4 with a road score of 0 becomes 1). Nothing else changes.
+
+### 30.4 Checked against the saves
+
+- The average, in all 17.
+- Culture's raw scores `DS:0x6C82`/`0x6C80`, from the city and the year-end units (`table_60_d`), in 14 of 17; the other three changed since the year turned (`CAESARXX` gained a temple cell, `CAESARXS` lost entertainment, `CAESARXR` gained two temple cells).
+- Peace and Prosperity across `CAESARXS` (year 7) -> `CAESARXR` (year 8), the one pair of consecutive years: 36 + 2 = 38, and 8 + 1 (0.11 Dn a head) + 0 (496 units) - 2 (a loss) = 7.
+- No save earns a promotion (averages up to 16 at rank 1).
+- Empire is 0 in every save, consistent (no linked towns or roads) but not a strong test.
+- `test_administration_ratings`, `test_administration_promotion`, `test_administration_matches_saves`.
+
+### 30.5 In Gaius, and what's open
+
+`systems::month::run_step` runs the ratings, promotion (answered through `SimState::on_promotion`) and the notice when the year turns. Not modeled: the screens and their texts, and what starting the new province does (the map, the city, the funds -- `0x57BE`, section 25.1).
 

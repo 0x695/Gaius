@@ -98,6 +98,8 @@ struct SimState {
     // in six) and DS:0x6DFC (the worn-road message, one month in four).
     int town_counter = 0;
     int province_wear_counter = 0;
+    // DS:0x6C92, the towns linked to the city at the last step 80 (not saved).
+    int linked_towns = 0;
     // DS:0x6BDE: the walk must exceed it for a province road to wear. Set at
     // step 105 from the plebs on construction (systems::plebs::set_thresholds);
     // the save doesn't keep it, so 100, never, until then.
@@ -105,6 +107,11 @@ struct SimState {
     // Called when a Cohort reaches the army it attacks (systems::province::
     // Hooks::battle); without it the battle doesn't start.
     std::function<void(model::CityState& state, int cohort, int army)> on_battle;
+    // Called when the year's ratings earn a promotion (systems::administration::
+    // check_promotion); `to_caesar` at rank 19. Return 1 to accept, 2 to wait 9
+    // years, 3 to wait 24; anything else leaves it unanswered, offered again
+    // next year. Without it nothing is answered.
+    std::function<int(model::CityState& state, bool to_caesar)> on_promotion;
     Random random;
     service::ServiceState service;
 };

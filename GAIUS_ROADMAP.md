@@ -21,14 +21,14 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
 | 6 | Economy & military | **Systems done** | Province view and battle screen in the viewer |
-| 7 | Forum, advisors, ratings | Started (plebs done) | Ratings, promotion, Forum UI, maps panel |
+| 7 | Forum, advisors, ratings | **In progress** — plebs, ratings, promotion done | New-province start, Forum UI, maps panel |
 | 8 | Format completeness & save write-back | Started | Save loader, formats, music, terrain generation |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3267 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3344 checks.
 
-**Critical path now:** Phase 7's ratings and promotion, then the Forum UI and a province view, which together make the single-player loop playable. Phase 9 is unblocked alongside.
+**Critical path now:** Phase 7's new-province start, then the Forum UI and a province view, which together make the single-player loop playable. Phase 9 is unblocked alongside.
 
 ---
 
@@ -226,7 +226,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
   - A walker's path, and the random draws' timing. Saves don't carry the generator's state; checking needs it, or an event (a fire, a collapse) caught between two saves.
 - **Simulation**
   - The random draws on frames between steps at slower game speeds (Gaius draws once per step).
-  - The yearly routine's ratings (`0x28C43`), promotion (`0x29023`) and `0x2933B` — Phase 7. (The Legion, the 18-month spawner, the step-105 routines and the province pass are done — Phase 6.)
+  - Every routine the calendar calls is transcribed (Phases 6-7). What starting a new province does is Phase 7.
 - **Save model**
   - What the loader does after reading, beyond rebuilding `DS:0x6BFE`.
 - **Build mode**
@@ -268,13 +268,14 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 ## Phase 7 — Forum, advisors, ratings & win/loss
 
-**Status: Started.** The plebs came with Phase 6; the rest is mostly engineering.
+**Status: In progress.** The simulation side is done -- the plebs (with Phase 6), the ratings and promotion (2026-09-14); the rest is the new-province start and the screens.
 
 **Goal:** the administrative layer — seven advisors, four ratings (Peace, Culture, Prosperity, Empire), promotion, the annual tribute, plebs.
 
 **Open**
 - [x] **`systems::plebs`** (2026-09-14, done in Phase 6, findings section 29) — each duty's need, welfare growing or shrinking the pleb count, the assignment, and the fire, collapse and road-wear thresholds their coverage sets. Every save reproduced.
-- [ ] **`systems::administration`** — the four ratings; the yearly routine's ratings (`0x28C43`) and promotion (`0x29023`) calls are located.
+- [x] **`systems::administration`** (2026-09-14, findings section 30) — Peace, Culture, Prosperity and Empire, their population caps and average; promotion's requirements, the new province's pick, accepting or waiting 9 or 24 years, Caesar; the yearly notice. The average in all 17 saves, Culture in 14, Peace and Prosperity across the one pair of consecutive years.
+- [ ] **Starting a new province** — after a promotion (`DS:0x6C26`, `0x0F81B`): the new map and empty city, the starting funds (`0x57BE`, findings section 25.1), the Legion and counters reset (`0x056BE`-`0x05740`).
 - [ ] **Forum UI** — seven advisors, promotion flow, tribute, game over after three missed tributes (the settlement already counts them: `economy::settle_accounts`).
 - [ ] **Maps panel** — Urbanization, Water, Administration, Road, Land Value, Trouble overlays, drawn from the modeled layers.
 
