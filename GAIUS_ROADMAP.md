@@ -1,274 +1,360 @@
 # Gaius — Roadmap
 
-This roadmap sequences engine work against the current reverse-engineering state (see `GAIUS_MASTERPLAN.md` section 4 and `CAESAR_REVERSE_ENGINEERING_COMPLETE.md`). Each phase lists: goal, concrete deliverables, dependencies, and **RE blockers** — items from the RE TODO that must close before that phase can finish (not necessarily before it can start).
+The plan for building Gaius, phase by phase, against the state of the reverse engineering (RE). The scope and architecture are in `GAIUS_MASTERPLAN.md`; the RE sources are `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` (outside this repo) and the findings in `docs/`.
 
-Phases are designed so that RE work and engine work can proceed in parallel: whenever a phase is blocked on an open RE question, the next phase's *non-blocked* parts should already be underway.
+RE and engine work run in parallel: when a phase waits on an open RE question, the next phase's unblocked parts should already be underway.
 
----
-
-## Phase 0 — Repo scaffolding & format library (no blockers)
-
-> **Status: substantially complete.** Implementation lives in the `gaius/` repo (delivered alongside this roadmap). See `docs/FORMATS.md` for exactly what's implemented, what's tested against real files, and two small new findings that came out of building it (PL8 container header, PL8 trailing-placeholder-frame pattern). `bindiff_exe` is also done — see `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md` for what it found. Phase 0 is fully complete.
-
-**Goal:** stand up the repo skeleton and port the already-validated Python prototypes into a real C++ library, exactly like IGDK's Phase 0 did for `sgformat`.
-
-- [x] `gaius/` repo, CMake build, VS Code config (mirror IGDK's Phase 0 setup).
-- [x] `formats/vpx` — port `caesar_vpx.py` decode logic to C++. Validated against `EMAP2.VPX` → **0/64000 pixel mismatches** against `EMAP2_decoded.png` in an automated golden-image test.
-- [x] `formats/p32`, `formats/pal256` — palette decoders. (`.p32` validated end-to-end via the VPX golden-image test; `.256` validated 2026-09-13 against all eight real files, against the matching `.P32` files, and in `CSR.EXE`, which hands the file's bytes straight to the VGA DAC — see `docs/FORMATS.md`.)
-- [x] `formats/pl8` — sprite sheet reader. Verified against the documented `HOUSES.PL8` worked example. Along the way, resolved which container header word is the frame count (previously undocumented) and discovered/handled a trailing-placeholder-frame pattern — see `docs/FORMATS.md`.
-- [x] `formats/empire2` — ported. All 50 supplied `EMPIRE2.0xx` round-trip load→save byte-identical.
-- [x] `formats/save` — block table ported and verified contiguous/size-correct against the Python reference. **Validated against four real saves, 2026-09-12** (`test_save_corpus_real`); the corpus test skips cleanly without them.
-- [x] CLI tools: `dump_vpx`, `dump_pl8`, `empire_view` (ASCII/PNG render of an EMPIRE2 file), `save_inspect`. All smoke-tested against real files.
-- [x] `bindiff_exe` — built and run against both real `CSR.EXE` builds. Along the way, fully reverse engineered the EXEPACK decompression algorithm from the actual embedded stub disassembly (previously only vaguely described), validated byte-exact against both builds independently, and surfaced a large set of previously-unextracted game text (full 21-rank promotion ladder, ~60 province names, cohort status words, cross-language-confirmed workshop goods list). See `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md`.
-
-**Deliverable:** `gaius-phase0.zip`-equivalent — library + CLI tools + docs (`FORMATS.md` covering everything in section 4 of the masterplan, `ROADMAP.md` = this file).
-
-**RE blockers:** none. Everything here is already "proven"/"definitive" per the confidence table.
+**How each phase reads:** a status line, the goal, what's done, what's open, the deliverable, and the **RE blockers** — RE questions that must close before the phase can *finish* (not before it can start). History, corrections and dead ends sit in a collapsed **History** block at the end of each phase.
 
 ---
 
-## Phase 1 — Static content viewer + platform skeleton (no blockers)
+## At a glance
 
-> **Status: fully complete.** Implementation lives in `platform/` (window, input, paths), `apps/viewer/` (now also handles `.SAV` files, see below), and `android/` (Android target) in the `gaius` repo. Both items previously deferred at handoff (Android toolchain, save-file viewer) are now done — see verification notes under each item.
+*As of 2026-09-14.*
 
-**Goal:** prove the asset pipeline end-to-end with a real (if non-interactive) visual: render an EMPIRE2 scenario and the raw decoded city-terrain values for a save file, using SDL2 — and prove it on more than one platform immediately, so cross-platform assumptions get validated before any game logic is built on top of them.
+| Phase | Area | Status | What's left |
+|---|---|---|---|
+| 0 | Repo & format library | **Done** | — |
+| 1 | Viewer & platform skeleton | **Done** | Android: real-device ABI, viewer port |
+| 2 | Data model & save round trip | **Done** | Meaning of some global words |
+| 3 | Service propagation | **Done**, validated | — |
+| 4 | Housing & population | **Done**, validated | — |
+| 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
+| 6 | Economy & military | **In progress** — city economy done | Battles, military, province level |
+| 7 | Forum, advisors, ratings | Not started | Everything |
+| 8 | Format completeness & save write-back | Started | Save loader, formats, music, terrain generation |
+| 9 | Packaging & polish | Not started | Everything |
+| 10 | Editor & IGDK integration | Not started | Everything |
 
-- [x] SDL2 window + basic sprite atlas assembly from PL8 + palette, drawn through the **logical-resolution framebuffer** from day one (masterplan section 5a) — never a direct fixed-pixel blit, even though this is "just" a viewer. *(PL8 atlas assembly had been deferred until an in-city sprite palette was found. Unblocked 2026-09-13: real screenshots identified it as `SHADE.256` and showed PL8 pixels are four interleaved streams — see `docs/FORMATS.md` — and `gaius_viewer` now draws saves with the game's own city sprites (`render::render_city`). The logical-framebuffer + letterbox architecture itself is implemented and verified in `platform/window.cpp`.)*
-- [x] `platform/window.cpp`: windowed/borderless/fullscreen switching, arbitrary resize, remembered window state on desktop. Verified: mode cycling (windowed→borderless→fullscreen→windowed), resize, and letterbox coordinate mapping (window center maps to logical center exactly) all confirmed working under `SDL_VIDEODRIVER=dummy`.
-- [x] `platform/paths.cpp`: per-OS config/output directories wired up even though there's nothing to save yet. Verified: resolves correctly via `SDL_GetPrefPath` (e.g. `~/.local/share/Gaius/Gaius/...` on Linux).
-- [x] CMake toolchain files for Android (NDK) and confirm a clean build + "hello sprite" run on at least one non-desktop target. **Done, 2026-09-08** — see `android/README.md` for full detail. Uses the SDL2 `android-project` template (SDL2 built from source, not vendored — fetched by `android/fetch_sdl2.ps1`); `android/app/jni/src/CMakeLists.txt` builds a new minimal entry point (`apps/android_hello/android_main.cpp`) against the real, unmodified `platform/window.cpp`/`input.cpp`/`paths.cpp`. Verified end-to-end on the `Medium_Phone` AVD (x86_64): builds, installs, launches, SDL runs `main()`, `platform::paths` resolves Android's app-private storage correctly (confirmed via logcat), and a real `adb screencap` shows the letterboxed gradient + bouncing sprite rendering correctly. Scope note: this is a platform-layer smoke test, not a port of `gaius_viewer` — EMPIRE2/SAV asset loading on Android needs `AAssetManager`-based extraction first (Android can't `fopen()` into an APK), left as follow-up. Only `x86_64` is built (matches the verified emulator); widen `abiFilters` before targeting a real device. Android SDK/NDK were available in this environment after all (Android Studio + SDK already installed; NDK installed via `sdkmanager`) — the original "no SDK available" blocker was specific to the prior handoff's environment, not universal.
-- [x] Empire-map viewer: renders any of the 50 EMPIRE2 scenarios with terrain family colors, using the same classification as Phase 0's `empire_view` tool. Verified visually at three zoom levels (see `apps/viewer/main.cpp`'s `--test-zoom`/`--test-pan` headless hooks) — zoomed out reproduces the exact same rendering as Phase 0's static `empire_view --png` output.
-- [x] Save file viewer (100×100 tile grid + four service-layer heatmaps). **Done, 2026-09-08** — `apps/viewer/save_view.hpp`, wired into `gaius_viewer` (dispatches on file size: 1602 bytes → EMPIRE2, 57126 bytes → `.SAV`; right-click/two-finger-tap/gamepad B cycles the five layers). Originally verified, before any real save existed, against a synthetic in-memory `SaveFile` (`tests/test_formats.cpp`'s `test_save_view_render_synthetic`, no real save needed — `SaveFile::block()` only ever indexes into a byte buffer) plus an end-to-end headless smoke test against a synthetic (non-asset) 57126-byte file. Rendering is a raw-byte heat gradient, not a semantic decode — the tile→sprite lookup table and most `C9D4` bit consumers are still unresolved per `GAIUS_MASTERPLAN.md` section 4, so there was nothing more meaningful to draw yet. Revisit the visualization once a real save (or Phase 5's dispatcher work) resolves more of that. **Update 2026-09-13:** real saves open in it, and its first view draws the city with the game's own sprites and walkers (`render::render_city`).
-- [x] Basic input abstraction (masterplan section 5a point 4): implemented in `platform/input.hpp/cpp` — mouse-drag (middle button), touch-drag (single finger), and gamepad (left stick + triggers) all translate into the same `Command` stream (`PanMove`/`Zoom`/etc.). Verified via headless `--test-pan`/`--test-zoom` flags (real device input obviously can't be exercised in this environment) plus a standalone harness confirming `Window::window_to_logical` and mode-switching behave correctly. Gesture design (tap-vs-drag, pinch-to-zoom, two-finger-secondary) is explicitly deferred — single-finger-drag-only is a documented simplification, not a finished touch UX.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 2929 checks.
 
-**Deliverable:** a "look at your data" tool — valuable on its own for continued RE work, it's the foundation of the eventual editor (Layer 4), and it's also the project's first proof that the resolution/input abstractions actually hold up cross-platform (modulo the Android gap above, which is a real open item, not a formality).
-
-**RE blockers:** none functionally, but tile→sprite mapping is guesswork until the renderer lookup tables (RE TODO item) are found. Track this as tech debt, not a blocker. **Resolved 2026-09-13:** the city view's tile→sprite rules are transcribed and pixel-exact against DOSBox captures (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`).
-
----
-
-## Phase 2 — Normalized data model (Layer 2) (partial blocker)
-
-> **Status: fully complete, 2026-09-08; validated against four real saves, 2026-09-12.** Implementation in `model/city_state.hpp`/`.cpp`, exercised by `tools/save_inspect.cpp`'s actor-table dump. See verification notes under each item.
-
-**Goal:** build the real in-memory model described in masterplan section 5 (`CityMap`, `EmpireMap`, `Actor[70]`, service layers) and get a save file fully loaded into it.
-
-- [x] `model::CityState` struct matching `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` section 76's proposed structs, with one deliberate deviation: that sketch's `coverage_limit[100][100]` field is dropped — it's mentioned nowhere else in the RE corpus (appears exactly once, in the sketch) and isn't backed by any of the 20 confirmed save blocks, so carrying it over would mean shipping an always-empty field with no data source. `model::CityMap` has the five save-block-backed grids instead (tile + the four confirmed layers). `EmpireMap` is reused directly from `formats::empire2` rather than redefined, since it's already a normalized Layer 1 type with nothing left to reshape.
-- [x] Load a `.SAV` into `CityState` using the confirmed block table (`model::load`). All 20 blocks handled: 7 reshaped into typed fields (the 5 city grids, the actor array, the embedded EMPIRE2 map), the other 13 (`global_words_128`, `table_480/120/720/50/8/10/60_a-d/72`, `final_state`) carried through as opaque byte vectors since none has a proposed structure anywhere in the RE corpus yet.
-- [x] Round-trip: `CityState` -> re-serialize (`model::serialize`) -> byte-diff against the original save. **Verified byte-for-byte against four real saves from a play session (2026-09-12, `test_save_corpus_real`)**, and against synthetic data before that: `test_model_city_state_round_trip` round-trips a deterministic non-repeating 57126-byte buffer and spot-checks grid/actor positions against the *original* bytes, so a bug shared by `load()` and `serialize()` can't hide behind a trivially-passing round trip. The real saves close the gap that test couldn't: they prove the block table against what the original engine actually writes.
-- [x] Object/actor table normalized per the type-0..13 split (city-coordinate vs. province-coordinate) from `CAESAR_CITY_STATE_v9.md`. `model::Actor` wraps the full 50-byte record (every field laid out since 2026-09-13 — `systems/actors.hpp`, dispatch findings section 20) and exposes `coord_space()` (`ActorCoordSpace::City` for type < 11, `::Province` for type ≥ 11), matching the allocator's confirmed `packed_xy = row*100+col` vs. `row*40+col` split. **Real saves refine this:** for city actors `packed_xy` is the reliable position (`screen_x / 16` agrees with it), while `raw_x/raw_y` hold values like (99,99) or (50,0) — the walker's destination, a map-edge point (resolved 2026-09-13); for province actors all three agree.
-
-**Deliverable:** a save file editor's actual backend -- load, inspect every field, re-save, confirmed byte-identical for untouched files, including four real saves. `save_inspect` prints the active-actor table alongside the block table and the global words, the latter now labelled with their true DS addresses (`formats::save::kGlobalWordDsAddress`).
-
-**RE blockers (soft — affect fidelity, not the round-trip):**
-- Save **loader** still not reverse engineered. Real saves now confirm the block boundaries and the round trip, but fields the model carries as opaque bytes are still uninterpreted. Separately, the save *writer* has been read: `global_words_128`'s exact address order is `formats::save::kGlobalWordDsAddress` (see `docs/FORMATS.md`).
-- 480/120/720-byte save tables (and `table_50/8/10/60_a-d/72`, `final_state`) are still unidentified — they round-trip as opaque blobs, unmodeled, in `model::CityState`. **Mostly resolved 2026-09-13:** the save writer maps every block to its runtime address (`docs/FORMATS.md`). `table_480` holds the forum records, `table_120` the barracks, `table_720` the workshops and `table_8` the workshop count per goods type, and `final_state`'s words are named by address; `systems::construction` and `systems::actors` read and write them. Resolved the same day: `table_10` holds population milestone flags, `table_50` the provinces already given (with `DS:0x6CA6` the current one), and `table_60_a-d`/`table_72` yearly history buffers, which `systems::month` now appends to (findings section 22). Still open: what many global words mean to the player.
+**Critical path now:** Phase 6's battle resolution and province level. Phases 7 and 9 are unblocked and can run alongside it.
 
 ---
 
-## Phase 3 — Simulation core: service propagation (blocked on partial RE)
+## Phase 0 — Repo scaffolding & format library
 
-> **Status: complete and VALIDATED AGAINST THE ORIGINAL ENGINE, 2026-09-13.** Implementation in `systems/service.hpp`/`.cpp`. The first version of this phase was built from RE-corpus parameter tables and was wrong in several places; it has since been re-transcribed directly from the disassembly, every routine and every handler (`docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 15). The proof is `test_save_corpus_simulation`: one `reset_tick` plus one dispatch pass over each of four real saves reproduces the A2C4 coverage layer and every C9D4 service bit the engine saved, **10000/10000 cells in every save**. The checklist below is kept as written, with corrections noted inline.
+**Status: Done.** See `docs/FORMATS.md` for what each decoder covers and how it's tested.
 
-**Goal:** implement the systems that are already fully specified at the algorithm level: `A2C4` coverage, `54A4` land value, `C9D4` flag propagation, `7BB4` derived state — the primitives, not yet the building-specific callers.
+**Goal:** stand up the repo and port the validated Python prototypes into a C++ library, as IGDK's Phase 0 did for `sgformat`.
 
-- [x] `systems::service` — `apply_coverage(x,y,delta,radius,ceiling)`, `apply_land_value(x,y,delta,radius,ceiling)`, `apply_flags(x,y,radius,mask)`, exactly matching `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` section 71's signatures. All three use a **square** (Chebyshev-distance) radius per section 73 ("service propagation uses square-radius routines"), verified explicitly by tests checking a square corner is touched while a circle's would not be. `apply_land_value` enforces the DEFINITIVE -8..+50 range (`CAESAR_CITY_STATE_v6.md` routine `0x2DA7E`) regardless of the `ceiling` argument. **CORRECTED 2026-09-13:** the land-value propagator (`0x2C6AF`) has no floor and clamps only to the caller's ceiling; -8..+50 belongs to a separate per-cell routine (`0x2DA7E`, now `evolve_land_value`). And `apply_coverage`'s ceiling is a per-cell running minimum held in `ServiceState`, not a direct clamp.
-- [x] `systems::service::reset_tick` — `C9D4 &= 0x12` (bits `0x02`/`0x10` survive, everything else clears), `A2C4 = 0`, plus a third piece this item's original text didn't call out: the per-cell coverage ceiling ("`2D94`" in the disassembly) resets to `0x3F` (63) every tick too. This is genuinely **runtime-only** state, not part of the save format — none of the 20 confirmed save blocks correspond to it — so it lives in a new `systems::service::ServiceState` struct, not `model::CityState`.
-- [x] Unit tests directly encoding the confirmed bit table as fixtures (`kC9D4BitTable` in `systems/service.hpp`, tested by `test_service_bit_table_fixtures`) — transcribed from `CAESAR_CITY_STATE_v6.md`'s "Current C9D4 table", with `0x20`=religious/`0x80`=entertainment carrying `CAESAR_REVERSE_ENGINEERING_COMPLETE.md`'s own HIGH CONFIDENCE label (that doc lists exactly these two as its canonical HIGH CONFIDENCE examples). `0x08` is fixtured as `Confidence::Unresolved` specifically so a future change can't silently upgrade it without new evidence — see next item.
-- [x] Confirmed building handlers — **narrowed from the original 9-building list to the 6 that actually have a documented radius/mask/delta**: `apply_temple` (4 variants, radii 6/8/10/12, `+1` coverage@radius 1), `apply_bath_houses` (radius 3 flag + `+1` coverage@radius 2), `apply_theater`/`apply_coliseum`/`apply_hippodrome` (radius 4/6/7), `apply_hospital` (radius 4, flag-only). **Barracks, School, Oracle, Plaza, and Prefecture are explicitly NOT implemented** — despite being in section 72's provisional table, none of them has a radius, mask, or delta documented anywhere in the RE corpus (checked `CAESAR_CITY_STATE_v6.md` specifically; `0x08`, the bit section 72 assigns to Barracks, is only ever described as *tested*, never *produced*, so there's no producer call site to transcribe). Implementing these would mean inventing numbers, which the project's own "don't guess" discipline (the reason `formats/` throws instead of guessing) rules out just as much here as in a format decoder. Revisit each once real parameters turn up. **SUPERSEDED 2026-09-13:** every handler is now transcribed from the disassembly -- including Barracks, School, Oracle and Prefecture, whose v2 parameters were wrong -- plus the road family, housing tiers, temple stages and four unidentified buildings. "Plaza" was never a DS:153A handler: its tile, `0xF3`, is Heavy Industry. See `systems/service.hpp`.
+**Done**
+- [x] **Repo** — `gaius/`, CMake build, VS Code config (mirroring IGDK's setup).
+- [x] **`formats/vpx`** — ported from `caesar_vpx.py`. `EMAP2.VPX` matches `EMAP2_decoded.png`: 0/64000 pixels differ (golden-image test).
+- [x] **`formats/p32`, `formats/pal256`** — palettes. `.P32` checked through the VPX golden test; `.256` against all eight real files, their `.P32` pairs, and `CSR.EXE`, which sends the bytes straight to the VGA DAC (2026-09-13).
+- [x] **`formats/pl8`** — sprite sheets. Checked against the documented `HOUSES.PL8` example; found which header word is the frame count and the trailing placeholder frames.
+- [x] **`formats/empire2`** — all 50 `EMPIRE2.0xx` files round-trip byte-identical.
+- [x] **`formats/save`** — block table, contiguous and size-correct. Validated against real saves since 2026-09-12 (`test_save_corpus_real`); skips cleanly without them.
+- [x] **CLI tools** — `dump_vpx`, `dump_pl8`, `empire_view`, `save_inspect`, smoke-tested against real files.
+- [x] **`bindiff_exe`** — run against both `CSR.EXE` builds. Along the way: the EXEPACK decompressor reverse engineered from its stub and checked byte-exact on both builds, plus new game text (the 21-rank promotion ladder, ~60 province names, cohort status words, the workshop goods list). See `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md`.
 
-**Deliverable:** a system that, given a city tile grid with civic buildings placed, correctly computes coverage/land-value/flag propagation matching the executable's behavior -- **met and proven**: it reproduces the original engine's saved coverage and service bits cell-for-cell in four real saves.
+**Deliverable:** the library, CLI tools and docs (`FORMATS.md`, this roadmap). **Met.**
 
-**RE blockers:**
-- `C9D4.01`, `C9D4.04`, `C9D4.08`, `C9D4.40` exact *building identity* is still STRONG INFERENCE/UNRESOLVED even where the bit-propagation *mechanism* is implemented (0x04 → bath houses, 0x40 → hospital) — `CAESAR_CITY_STATE_v6.md` is explicit that it hasn't proven these attributions itself (calls `0x40`'s identity "anonymous"). The mechanism is real and tested regardless of whose building it turns out to be; only the function name is provisional. Flag back to RE work if a future trace contradicts these names. **Updated 2026-09-13:** producers are now confirmed by disassembly -- `0x04` Bath Houses, `0x08` Market (not barracks), `0x40` School and Hospital, `0x20` temples *and* Prefecture (so "religious" is downgraded to STRONG INFERENCE); `0x02` is derived from `C9D4.10` by `0x2DA0D`. See `kC9D4BitTable`.
-- ~~Do not implement Heavy Industry/Market/Workshop/Fort here~~ **CORRECTED 2026-09-13:** Heavy Industry (`0xF3`) and Market (`0xF4`) do run through this dispatcher and are implemented. Their *economic* behaviour (goods, labour, sales) isn't in these handlers and remains Phase 6's. Workshop may be the unidentified 3x3 building on `0xF5`/`0xF6`; Fort hasn't been located.
-
----
-
-## Phase 4 — Housing & population (blocked on RE construction dispatcher, partially)
-
-> **Status: COMPLETE -- housing transcribed from the disassembly, 2026-09-13.** Implementation in `systems/housing.hpp`/`.cpp`. The first version of this phase rested on a misread table: tile ids `0x00`-`0x15` are not housing (`docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 16). The real system is now implemented: the row development pass (`0x294CF`), every `DS:1212` development handler for grades `0xC8`-`0xD7`, the temple stages `0xD8`-`0xDF` and bath houses, the fountain transitions, and the real per-cell population table. It is validated against four real saves where snapshots allow -- population units (three exact, one explained by timing), water 10000/10000, building part indices -- and pinned by exact-write unit tests where they don't. Not modeled: the engine's RNG (per-row land-value growth, and the `0xA8`-`0xB1` decay-and-spread routine) and the actor spawn in `land_value_allows` (update 2026-09-13: the RNG, the rioter spawn and the burning tiles are now transcribed -- `systems::month`, `systems::actors`).
-
-**Goal:** the residential development state machine, land-value gating, and population derivation from housing.
-
-- [x] `systems::housing::land_value_allows` -- routine `0x2DB49`, now disassembled: land value above the threshold turns the tile into `0xA7` and zeroes coverage, `7BB4` and land value at the cell. When it fires the engine also spawns an actor and adjusts two globals; those side effects are modeled since 2026-09-13 (`systems::actors::spawn_rioter`: a rioter, `DS:0x6C3C` - 2, `DS:0x6C84` = 2). The handlers that call it (grades `0xC8`-`0xCB`, thresholds 20/30/40/48) are transcribed in full.
-- [x] Population -- `systems::housing::population_units`/`population`, from the real per-cell table at `3496:007E` (`1 1 2 3 3 5 6 5 6 4 4 3 3 2 2 1` for tiles `0xC8`-`0xD7`). The engine stores the sum at `DS:0x6C10` and four times it at `DS:0x6C0E`. Replaces the earlier placeholder, and matches three real saves exactly; the fourth is off by exactly one upgrade made after that month's count.
-- [x] Sixteen housing grades -- tiles `0xC8`-`0xD7`, with the full promotion and demotion rules, multi-cell growth (pairs, 2x2, 3x3) and service requirements in `systems::housing::develop_building`. That these ids are the manual's sixteen grades is STRONG INFERENCE; the rules themselves are transcribed exactly.
-- [x] Month driver -- `systems::month` (2026-09-13): the engine's 106-step month from the dispatcher at `0x2936A` (housing rows, the service rebuild with the 18-month derive gate, population), the calendar (`0x29476`), and the random number generator (`2EF9:1425`) with its draw before every step (found 2026-09-13 in the main loop, findings section 20.1) and five more a month, so land-value growth is the engine's own. `gaius_viewer` runs it step by step. The per-row walker spawners are in too (next item); not yet: the step-105, 18-month and yearly routines, which are ratings, messages and province events (Phases 6-7).
-- [x] Exact water pass and step-101 economy (2026-09-13) -- `service::apply_water` with the fountain pipe tracer (`0x2CAE6`/`0x2CBF1`), and `month::run_economy` (`0x28621`/`0x28694`/`0x28800`/`0x28826`), which sets the housing coverage and land-value growth bases; its outputs reproduce all four real saves. Findings section 19.
-- [x] Walkers (2026-09-13) -- `systems::actors`: the actor allocator, the per-tick update with obstacle-following movement, the city behaviour states, and the forum, workshop and barracks spawners plus the rioter a collapsed house releases. Walkers feed back into the city: forum citizens set C9D4 `0x12`, traders raise workshop sales, patrols lower land value, rioters and invaders demolish. Findings section 20. The province-map actors (types 11-13) belong to Phases 6-7.
-- [x] Fire, collapse and road wear (2026-09-13) -- the service scan's counters (road pieces, building cells, markets, heavy industry, schools), which reproduce the published words of all four real saves; the step-105 roll (`0x2DF7D`) that picks next month's worn road piece, collapsing building and burning building; `construction::demolish`/`burn`; and burning tiles `0xA8`-`0xB1` that burn out or spread (`0x29624`). Also fixed: demolition rubble is `0xA7 + 3 x (random & 3)`, not `0xA7 + (random & 3)`. Findings section 21.
-
-**Deliverable:** houses that grow, merge, shrink and split exactly as the engine's development handlers dictate, driven by the service layers `systems::service` reproduces from real saves, with real population numbers. What remains outside it is a check of a whole month against two consecutive real saves. (The last untranscribed piece, the `0xA8`-`0xB1` routine `0x29624`, turned out to be fire, and was transcribed on 2026-09-13 with the month's collapse and fire events -- findings section 21.)
-
-**RE blockers (hard):**
-- The exact `43A5` tile-ID-to-housing-grade mapping is still provisional — unchanged from this phase's original framing, still waiting on Phase 5's construction-dispatcher work. **Resolved 2026-09-13:** tiles `0xC8`-`0xD7`, with every transition between them transcribed.
-- **New, more specific blocker found while implementing:** tiles `0x01`-`0x15`'s individual handlers are dispatch-table stubs only (addresses known, behavior untraced) — closing this phase's original ambition (the *general* housing state machine, not just tile 00) needs each of those 21 handlers traced the way tile 00's was. This is a bigger remaining lift than the original checklist implied when it said "tile-state transitions... as recovered in `CAESAR_CITY_STATE_v5.md`" — that document only actually recovered one. **OBSOLETE (2026-09-13):** these tiles are never dispatched by the engine -- see the status note.
-- No numeric population-density table exists anywhere in this project's sources (RE corpus or manual) — `provisional_density_per_grade`'s actual numbers are placeholders, not RE findings, and should not be treated as such by later phases. **Resolved 2026-09-13:** the table is at `3496:007E`, and implemented.
+**RE blockers:** none — everything here was already proven.
 
 ---
 
-## Phase 5 — Construction system & the dispatcher (the critical-path RE target)
+## Phase 1 — Static content viewer & platform skeleton
 
-> **Status: COMPLETE — all 7 checklist items, 2026-09-12. The core RE question — construction command → tile write → footprint — is SOLVED.** Six reverse-engineering passes closed the dispatcher (history below is kept in full, because the dead ends and *why* they failed are as useful to a future session as the result), and the toolbar UI that was the last open item is now built. The limits carried forward at the time — roads/walls/plaza/clear-area couldn't be built, nor the forum and workshop, and the toolbar used a placeholder font — **are all closed as of 2026-09-13**: drag auto-tiling (findings section 18), `place_forum`/`place_workshop` (section 19.1), and the game's own font and icons in the toolbar. What is still open is listed under "Still open in Phases 0-5" at the end of this phase.
->
-> **What happened:** this session found `CAESAR_CONSTRUCTION_RE_v1.md` and `CAESAR_CONSTRUCTION_RE_v2.md` in the RE corpus — two passes specifically on this phase's question that neither `GAIUS_MASTERPLAN.md` section 4 nor `CAESAR_REVERSE_ENGINEERING_COMPLETE.md`'s Appendix C (still shows every item below as an open `[ ]` TODO) had incorporated yet. `v2` decodes the **city-tile simulation dispatcher** (`DS:153A`, a 256-entry far-pointer table keyed by `43A5` tile value) in real detail, and in doing so **corrects a load-bearing assumption Phase 3 was built on**: the specialized service-building handlers (temple, bath houses, hospital, theater, coliseum, hippodrome, and — newly — plaza, barracks, prefecture, school, oracle) live at tile IDs `0xDF`-`0xF5`, not `0x43`-`0x50` as `CAESAR_CITY_STATE_v6.md`/`COMPLETE.md` section 72 assumed. That's a different, more foundational table than "the construction/action far-pointer table" this phase's first checklist item asks for — `v2` itself lists connecting UI construction commands to these tile writes as its own "next reverse-engineering target" (section 10), i.e. still unsolved even in the newest available source.
->
-> **Net effect:** all of Phase 3's building-handler parameters have been corrected against this better evidence (see `systems/service.hpp`'s new header comment for exactly what changed and why), the tile-dispatch mechanism itself is now implemented (`systems::service::dispatch_tile`), and five buildings Phase 3 had to skip for lack of data (Plaza, Barracks, Prefecture, School, Oracle) now have real parameters. None of that is the *construction* system this phase is actually named for — placement, footprints, and the UI-command-to-tile link are still untouched.
->
-> **Second pass, same day — direct disassembly, not just applying prior docs:** decompressed the real US-build `CSR.EXE` (via `formats::exepack::decode` and a scratch tool) and disassembled it directly with `capstone` (16-bit real mode) to push past where `v1`/`v2` stopped. Results, written up in full in `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md`:
-> - The 34-entry construction command string table is now **located and decoded byte-exact** (flat offset `0x7659D` onward), giving high-confidence numeric IDs 0-33 for every command — a real, verified new finding (`systems::construction::CommandId`/`kCommandNames`, checked against the real executable by a golden test). One genuine mistake happened and was caught in the process: an early hypothesis that entries were a uniform 16-byte stride turned out wrong (8 of 34 are 17 bytes) — caught by writing the golden test against real bytes rather than trusting the hypothesis, exactly the discipline this project is built on.
-> - The `0x36`-`0x40` placement/auto-tiling mechanism was traced in real detail beyond `v1`/`v2` (which had only had the write addresses): a mode selector, per-neighbor-tile-value branching, and a previously-undocumented property lookup table feeding it.
-> - **The actual construction-command → tile-write link was NOT found.** The one call site reaching the traced placement code goes through a variable (`[0x6DDB]`) that turned out to be a heavily-reused general-purpose scratch global (696 references across the binary) rather than a dedicated "selected tile" register — a real dead end at the level this pass worked at, not a gap that was skipped. `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 5 suggests a more promising angle (tracing forward from UI input handling, or bindiffing the still-unanalyzed international-build `CSR.EXE`) for whoever picks this up next.
->
-> **Third pass, same day — four more angles tried, all ruled out with reasonable confidence:** (1) a near-pointer table indexing the string table — searched exhaustively, not found for any plausible segment base; (2)/(3) a far-pointer table, both a targeted 2-entry search and a fully generic structural scan across the *entire* 497,568-byte image for any matching-segment pointer pair with the right offset delta — zero matches anywhere in the file, fairly strong evidence no such table exists at all (the 34 commands more likely each have their own hardcoded code path than one shared lookup); (4) forward-tracing from mouse input (`int 0x33`) — the only relevant call site turned out to be self-contained library code with no external caller, and the one other mouse mechanism worth checking (`int 0x33` function `0x0C`, install event handler) doesn't exist anywhere in the binary either, since an earlier exhaustive sweep had already found every `int 0x33` site in the file. Also ran `bindiff_exe` against the previously-unanalyzed international-build `CSR.EXE`: 45.9% of the binary differs byte-for-byte, confirming it's a real recompilation rather than a localization patch — too noisy to isolate one subsystem this way, though the string-set diff surfaced a pile of other previously-undocumented text (developer credits, the complete promotion ladder, the full province list) worth folding into the main RE corpus separately. Full detail and the reasoning behind each ruled-out angle: `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` sections 5-6.
->
-> **Fourth and fifth passes, same day — a real breakthrough, though not the one this phase specifically needs:** identified the actual root cause behind every dead end so far (`docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 9): pointer tables in this binary store **far** pointers (16-bit offset + 16-bit segment), and no segment value was known, so every search in passes 2-3 was looking for the wrong shape of value. Fixed it: calibrated the code segment (`0x2700`) from `v2`'s own evenly-spaced handler addresses, then used it to **locate and extract the complete, real 256-entry `DS:153A` table** (flat file offset `0x75D8A`) — verified byte-exact against 22 independently-published tile addresses from `CAESAR_CITY_STATE_v5.md` (22-for-22 exact match). This closes `v2`'s own stated "next reverse-engineering target" and, as a byproduct, **found and fixed an off-by-one error in `v2`'s own published tile-ID table**: every civic-building handler `v2` documents is attached to the tile ID *one below* the correct one (temple variant 1 is really tiles `0xE0`/`0xE1`, not `0xDF`/`0xE0`, and so on for all 17 entries — `systems/service.hpp`/`.cpp` are corrected). Also found, via direct disassembly of specific tile handlers, **confirmed multi-cell footprints with A2C4-gated growth stages** for two tile families (one via tiles `0xDD`→`0xDE`→`0xDF`, 2×2→5-cell→3×2; another via `0xE9`→`0xEB`, 1×2→2×2) — real, checklist-relevant footprint data, matching the manual's "temples evolve from small huts to grand marble shrines... grow outwards" description exactly. **Still does not close this phase's core question**: the newly-fully-mapped table is the *simulation* dispatcher (tile ID → per-tick behavior), confirmed once again distinct from the *construction* dispatcher (UI command → tile write) that's still not found — but the segment-calibration technique that just cracked `DS:153A` is a genuinely promising, cheap-to-retry approach for the construction side too, once a second independently-locatable construction-placement address is found to calibrate from (see findings doc section 12).
->
-> **Sixth pass — SOLVED. The construction dispatcher is found and the whole chain is closed.** The technique section 11 had just proved out was generalised: instead of calibrating one known table, **scan the entire image for every far-pointer table** (runs of ≥8 consecutive 4-byte entries sharing a segment word). That surfaced 19 tables, one of which — **44 entries at flat `0x75ACC`, segment `0x11C6`** — addresses exactly the construction/placement code region. Its DS offset is `0x127C`, and the very first `lcall` sweep this investigation ever ran had already logged four call sites through `[bx + 0x127c]`; the table had been in the earliest scan output all along, unrecognised because the segment convention wasn't understood yet. Full derivation: `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` sections 12-13. What this yields:
-> - **The dispatcher**: `[0x6D0C]` holds the selected command id; `lcall DS:127C[id]` invokes its placement handler; `[0x6D0A]` is the handler's success/failure flag; `[0x6CA2]` is available funds; `3496:15A0[grade]` is the forum grade cost table (8 grades, matching the manual's 60-500 Dn pricing).
-> - **Command ids are now DEFINITIVE**, not inferred from string order: ~30 toolbar handlers assign literal ids to `[0x6D0C]` and every one matches the string table's ordinal exactly.
-> - **Per-command seed tiles and footprints**, transcribed from the handlers themselves: Housing `0xC8` 1×1, Temple `0xD8` 1×1, Bath Houses `0xE8` 1×1, Well `0xB8`, Fountain `0xBA`, Reservoir `0xA4`, Prefecture `0xEE`, Oracle `0xEB` 2×1, School `0xEC` 2×2, Hospital `0xED` 2×2, Barracks `0xEF` 3×3, Theater `0xF0` 2×1, Coliseum `0xF1` 3×2, Hippodrome `0xF2` 4×2, Heavy Industry `0xF3` 4×4, Market `0xF4` 2×2, plus Forum 4×4 and Workshop 3×3 (footprint known, per-variant seed not decoded).
-> - **The terrain gate**: every handler requires the target cell's existing tile to satisfy `0x1D <= tile <= 0x35` — exactly the range `DS:153A` fills with no-op handlers, i.e. "you may only build on ground with no simulation behaviour," enforced by the same numbers from both directions.
-> - **Several building identifications corrected again**, because the construction side is independent evidence: `0xEB` (which `v2` couldn't identify, calling it "Career / specialized service") is **Oracle**; `0xEC` (`v2`: "Hospital alias") is **School**; `0xEE` (`v2`: "School-like") is **Prefecture**.
->
-> **Bottom line: Phase 5's core RE question is answered**, and `systems::construction` is implemented against it (real seed tiles, real footprints, real terrain gate — and it deliberately *refuses* to place the four drag-auto-tiled commands and the two variant-selected ones rather than faking values it doesn't have). A minimal interactive build mode is wired into `gaius_viewer`. What's left is narrower and clearly bounded — see the checklist below and findings-doc section 14.
+**Status: Done.** Code in `platform/`, `apps/viewer/` and `android/`.
 
-**Goal:** close the single highest-value open RE question — construction command → object type → city tile ID → footprint — and wire it into an actual build-mode UI.
+**Goal:** prove the asset pipeline end to end with SDL2 — an EMPIRE2 scenario and a save's city on screen — on more than one platform from the start, so cross-platform assumptions are tested before game logic depends on them.
 
-This phase is explicitly **RE-heavy, not just engineering**. Treat it as a joint RE+implementation sprint:
+**Done**
+- [x] **Rendering through a logical framebuffer** (masterplan 5a), never a fixed-pixel blit; letterboxing in `platform/window.cpp`. The game's own city sprites draw since 2026-09-13 (`render::render_city`), once screenshots showed the city palette is `SHADE.256` and PL8 pixels are four interleaved streams.
+- [x] **Window modes** — windowed, borderless and fullscreen switching; resize; letterbox coordinate mapping. Verified under `SDL_VIDEODRIVER=dummy`.
+- [x] **Per-OS paths** — `platform/paths.cpp` via `SDL_GetPrefPath`.
+- [x] **Android build** (2026-09-08) — see `android/README.md`. The SDL2 `android-project` template builds `apps/android_hello/` against the unmodified platform layer; runs on the `Medium_Phone` emulator (x86_64), confirmed by logcat and `adb screencap`.
+- [x] **Empire-map viewer** — all 50 scenarios, with the same terrain classification as `empire_view`; checked at three zoom levels (`--test-zoom`/`--test-pan`).
+- [x] **Save viewer** (2026-09-08) — `apps/viewer/save_view.hpp`: the 100×100 tile grid and four service layers as heatmaps; the file size picks the mode (1602 bytes EMPIRE2, 57126 `.SAV`). Real saves open since 2026-09-12, and the first view is the city in the game's own sprites, with walkers.
+- [x] **Input abstraction** (masterplan 5a point 4) — `platform/input`: mouse, touch and gamepad all become one `Command` stream.
 
-- [x] Recover the relocated construction/action far-pointer table directly from the executable. **DONE** — it's `DS:127C`, flat `0x75ACC`, 44 far-pointer entries in segment `0x11C6`, dispatched by `lcall [bx + 0x127c]` with `bx = command_id * 4` at `0x11DDA` (and three sibling call sites). See `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 12.
-- [x] Map every construction command string to its numeric ID — **DONE, now DEFINITIVE**. The string table was decoded byte-exact (findings section 1), and the ID assignment is confirmed against the executable's own code: ~30 toolbar handlers in `0x172CD`-`0x17BDA` each `mov word ptr [0x6d0c], <literal>`, every literal matching the string table's ordinal (findings section 12). The earlier "HIGH CONFIDENCE, not DEFINITIVE" caveat is lifted. Encoded as `systems::construction::CommandId`/`kCommandNames`, with a golden test against real executable bytes.
-- [x] Trace each command through placement/validation to its final `43A5` tile write(s) and footprint size. **DONE for the 17 directly-placing commands** — seed tile, footprint W×H and the shared terrain gate (`0x1D <= existing tile <= 0x35`) all transcribed from the handlers and encoded in `systems::construction::placement_spec` (findings section 13). **Not done for six commands, deliberately**: Road/Wall/Plaza/Clear Area are drag-based auto-tiling whose neighbour rules aren't recovered to implementable precision (findings section 3), and Forum/Workshop pick their seed tile from a per-variant runtime table that wasn't decoded (footprints 4×4 / 3×3 *are* known). `systems::construction` refuses to place those rather than inventing tile ids. **Update 2026-09-13:** all six are now transcribed — `place_road`/`place_wall`/`place_plaza`/`clear_area` (findings section 18) and `place_forum`/`place_workshop` (section 19.1). `place()` itself still refuses them, since each needs inputs a single click doesn't carry (the drag's neighbour state, a grade, a goods type).
-- [x] Confirm/correct the provisional building table from Phase 3/4 against this ground truth. **Done, then corrected again** — see `systems/service.hpp`/`.cpp`. First correction: against `CAESAR_CONSTRUCTION_RE_v2.md`'s dispatch-table decode (temple variants, bath houses, hospital, theater, coliseum, hippodrome all had a wrong/missing parameter; Plaza/Barracks/Prefecture/School/Oracle went from "no data" to implemented). Second correction, this session: `v2`'s own tile IDs for this whole range turned out to be off by one (see `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 11) — every tile ID in `systems::service` for these buildings has been shifted to match the independently-verified real table. One tile (`0xEB`, was `0xEA`) has a confirmed mechanism but an identity even `v2` itself won't commit to ("Career / specialized service") — implemented under its tile ID, not a building name.
-- [x] Implement `systems::construction`. **Done for everything the RE supports**: `placement_spec` (per-command kind/seed tile/footprint), `can_place` and `place` (footprint + terrain-gate validation, seed-tile write, `7BB4` clear — matching the handlers' own `mov 3496:[bx+0x7bb4], 0`). Covers water (reservoir/well/fountain), tower, housing, temple, bath houses, hospital, school, oracle, theater, coliseum, hippodrome, plaza-adjacent civic buildings, barracks, prefecture, market and heavy industry. **Costs are still not wired** — the manual's Appendix A pricing and the located forum grade cost table (`3496:15A0`) were both left alone because there's no treasury in the engine yet to spend from; that belongs with Phase 7's economy work. **Corrected 2026-09-13:** `place()` now writes each footprint cell's part index (`4*dy + dx`) into `7BB4`, as the engine's shared footprint writer does; it had written 0 everywhere.
-- [x] Minimal interactive build mode — **done, within the same honest limits**. `gaius_viewer` in save-file mode now has a build tool ring (Tab / gamepad X to cycle, left-click / tap / gamepad A to place), driving `systems::construction` against a live `model::CityState` and re-rendering the mutated grid. It goes through the Phase 1 input abstraction, so mouse, touch tap and gamepad all reach the same code path — as the original item required. Originally, **drag-to-build for roads/walls/pipes was NOT implemented** and those commands were left out of the tool ring. **Done 2026-09-13:** Road, Wall, Plaza, Clear Area, Forum and Workshop are in the ring, and a mouse left-drag lays roads and walls cell by cell. Headless hook: `--test-build T X Y`.
-- [x] Toolbar UI at the scalable-UI-factor from masterplan section 5a point 3, sized for the smallest target touch surface. **DONE** — `ui/metrics.hpp`, `ui/font.hpp`, `ui/toolbar.hpp`/`.cpp`, wired into `gaius_viewer`. Four breakpoints (desktop/handheld/phone/tv) each derive icon size, padding, gap, text scale and panel height from **one** `scale`, so point 3's "resizes toolbar icons, text, and hit targets together" is structural rather than a convention. Desktop is 1× = the original's measured 16px icons, which is the masterplan's stated floor; touch breakpoints go above it and never below. The **drawn button and its hit target cannot drift apart** — `render()` and `hit_test()` both read the same `button(i)`, and a test asserts `hit_test(centre and all four corners of button(i)) == i` for every button at every breakpoint. Sizing is grounded in measurement, not invention: `PANEL1.VPX` decodes to a panel occupying rows 176..199 (24px, full width) and `P_BLOCKS.PL8`'s frames are 16×16 (see `docs/FORMATS.md`). Icons are **generated from the RE data** — each button draws that building's real `placement_spec` footprint in the colour the map gives its seed tile, so a Hippodrome reads as 4×2 and a Well as 1×1, with no invented pictogram art. **Update 2026-09-13:** the toolbar now draws the game's own icons (`POINTERS.PL8`, from the control panel's decoded button tables -- `ui::command_icon_frame`) and its label in the game's font, and mouse left-drag lays roads and walls. The original caveats, for the record: the **font is a labelled placeholder** (`ui/font.hpp`) because the original's four font sheets parsed their descriptors but decoded to noise — a PL8 *pixel-encoding* problem, not a palette one, since solved (2026-09-13: pixels are four interleaved streams, and `FONT1.PL8` now renders a legible font); and the panel **cannot scale past 2×** inside a 320-wide logical framebuffer without leaving no usable map, so `metrics_for` caps there and the real fix (a logical buffer that grows with the display, or a paged toolbar) is flagged for Phase 9.
+**Open**
+- [ ] **Android on a real device** — only the `x86_64` emulator ABI is built; widen `abiFilters`.
+- [ ] **`gaius_viewer` on Android** — asset loading needs `AAssetManager` (an APK can't be `fopen`ed).
+- [ ] **Touch gestures** beyond single-finger drag and tap (pinch zoom, two-finger secondary) — undesigned.
 
-**Deliverable:** a genuinely playable slice — build roads, water, a forum, housing, and civic buildings, and watch the Phase 3/4 systems respond correctly, **on desktop, touch, and gamepad input alike**. **Met for 17 of the 23 placing commands at the time, and for all 23 since 2026-09-13, through one honest input path.** Both halves of the loop now exist and connect: a build command writes the correct seed tile over the correct footprint (`systems::construction::place`), and the Phase 3 dispatcher then makes that tile behave like the building it is (`systems::service::dispatch_tile`) — verified end-to-end by a pipeline test, not just by the two halves passing separately. Mouse click, touch tap and gamepad A all arrive through `platform::input`'s single `Select` command, so "on desktop, touch, and gamepad alike" is structurally true rather than three code paths that happen to agree.
->
-> A toolbar now exists too (checklist item 7), so tool selection is on-screen rather than a stdout line: 16 buttons, each drawing its building's real footprint, at a scale that tracks the device. Two things still stop this from being the *whole* deliverable, each for a stated reason rather than a shortcut: **roads and walls couldn't be built** (drag auto-tiling wasn't reverse engineered — findings section 3; **done 2026-09-13**, findings section 18: `place_road`/`place_wall`/`place_plaza`/`clear_area`, road networks of four real saves rebuilt cell by cell) and **the forum couldn't be built** (footprint known, per-variant seed tile not decoded; **done 2026-09-13**: `place_forum`/`place_workshop`, findings section 19.1). So it's a playable slice of the civic-building game, not of the full game. Nothing here is faked to close the gap.
+**Deliverable:** a "look at your data" tool, the base of the later editor, and the first proof that the resolution and input abstractions hold cross-platform. **Met**, with Android limited to the emulator.
 
-**RE blockers (this phase *is* the blocker-closer):** this is Appendix C items "Recover construction far-pointer table," "Identify construction command numeric IDs," "Map all construction commands to placement handlers," "Recover exact footprints." **All four are now closed**, in the sixth pass, by the far-pointer-table scan described above: the table is `DS:127C` at flat `0x75ACC`; the numeric IDs are confirmed against ~30 toolbar handlers that assign them as literals; 17 of 23 placing commands are mapped to their handlers with exact seed tile, footprint and terrain gate. The residue was precise and small — the drag auto-tiling neighbour rules (Road/Wall/Plaza/Clear Area) and the two variant-selection tables (Forum/Workshop), both closed on 2026-09-13 — and is tracked as its own item in `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 14 rather than left implicit here. Sections 3-6 of that doc keep the five ruled-out search strategies from passes 2-3 on the record, because the *reason* they failed (far pointers store segment+offset; every search was looking for flat offsets) is the transferable lesson for the next table anyone hunts in this binary.
+**RE blockers:** none. The tile→sprite rules, once tracked as tech debt, were transcribed on 2026-09-13 and match DOSBox captures pixel for pixel (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`).
 
-### Still open in Phases 0-5 (as of 2026-09-14)
+<details>
+<summary>History</summary>
 
-Every checklist item above is done. What remains is validation, a few untranscribed pieces and polish:
+- The Android SDK was thought unavailable at handoff; that was the previous environment. This machine had Android Studio; the NDK came from `sdkmanager`.
+- Before real saves existed, the save viewer was verified against a synthetic in-memory `SaveFile` (`test_save_view_render_synthetic`) and showed raw-byte heat gradients only.
+- PL8 atlas assembly waited on the in-city palette until the 2026-09-13 screenshots.
 
-- **Validation that needs new saves.**
-  - A walker's path, and the random draws' timing. Six consecutive saves (2026-09-14, dispatch findings section 24) validate `run_step` across months -- tiles, record tables, population and every land-value cell, reproduced exactly -- but neither depends on the generator, whose state saves don't carry. Checking those needs either the generator's state or an event (a fire, a collapse) caught between two saves.
-  - Covered by the second save session (2026-09-14, dispatch findings section 23): reservoirs and working fountains (water bits, fountain tiles and levels exact in all seven saves) and housing grades up to `0xD2`.
-- **Simulation.**
-  - The random draws of frames between steps at slower game speeds; Gaius draws once per step.
-  - The yearly routine's calls after the history writes (`0x289C0` the army, `0x28C43` the ratings, `0x29023` promotion, `0x2933B`), and the step-105, 18-month and province routines. They belong to Phases 6-7. The accounts before the history writes are in since 2026-09-14 (`systems::economy`, dispatch findings section 25).
-- **Save model.** Since 2026-09-14 the loader is read as far as the order it reads the save in (the writer's), and the yearly accounts name the histories' values (population tax, industrial tax, profit) and the rates (dispatch findings section 25). What the loader does after reading, beyond rebuilding `DS:0x6BFE`, isn't.
-- **Build mode.**
-  - Construction costs: **done 2026-09-14.** `systems::economy` has every command's cost (`3496:1548`) and the viewer charges them; the province commands' terrain multiplier isn't modeled.
+</details>
+
+---
+
+## Phase 2 — Normalized data model
+
+**Status: Done** (2026-09-08); validated against real saves from 2026-09-12. Code in `model/city_state.hpp`/`.cpp`.
+
+**Goal:** the in-memory model from masterplan section 5 (`CityMap`, `EmpireMap`, `Actor[70]`, service layers), with a save fully loaded into it.
+
+**Done**
+- [x] **`model::CityState`** — `CityMap` holds the five save-backed grids (tiles and four layers); `EmpireMap` is reused from `formats::empire2`. The corpus sketch's `coverage_limit` grid is left out: no save block backs it.
+- [x] **Loading** (`model::load`) — all 20 blocks: 7 into typed fields (5 grids, actors, the embedded EMPIRE2 map), 13 kept as byte vectors whose contents are identified (dispatch findings section 22) and read through `model::global_word` and record offsets.
+- [x] **Round trip** (`model::serialize`) — byte-identical on all 17 real saves (`test_save_corpus_real`), and on a synthetic non-repeating buffer that also spot-checks positions against the original bytes (`test_model_city_state_round_trip`).
+- [x] **Actor table** — `model::Actor` wraps the 50-byte record (every field laid out in `systems/actors.hpp`, dispatch findings section 20); `coord_space()` splits city types (< 11, `row*100+col`) from province types. For city actors use `packed_xy`: `raw_x/raw_y` hold the walker's destination.
+
+**Open**
+- [ ] **What some global words mean to the player** — a few words are read and written correctly but not yet named.
+
+**Deliverable:** a save editor's backend — load, inspect every field, re-save byte-identical. **Met**; `save_inspect` prints blocks, global words with their DS addresses (`formats::save::kGlobalWordDsAddress`) and actors.
+
+**RE blockers (soft — fidelity, not the round trip):**
+- **The save loader** isn't fully read. Its read order matches the writer's, and it rebuilds `DS:0x6BFE` (2026-09-14, dispatch findings section 25.2); what else it does after reading isn't traced. Tracked in Phase 8.
+
+<details>
+<summary>History</summary>
+
+- 2026-09-12: the save *writer* was read. `global_words_128` isn't a descending DS range — the old formula was wrong for 107 of 128 words (`docs/FORMATS.md`).
+- 2026-09-13: every block's runtime address mapped. `table_480` forums, `table_120` barracks, `table_720` workshops, `table_8` workshops per goods, `table_10` population milestones, `table_50` provinces given, `table_60_a-d`/`table_72` yearly histories, `final_state` named words.
+- 2026-09-14: the loader's read order, and the economy words named (findings section 25).
+
+</details>
+
+---
+
+## Phase 3 — Simulation core: service propagation
+
+**Status: Done and validated against the original engine** (2026-09-13). Code in `systems/service.hpp`/`.cpp`; derivation in dispatch findings section 15.
+
+**Goal:** the service layers at algorithm level — `A2C4` coverage, `54A4` land value, `C9D4` flags, `7BB4` derived state — and every building handler that feeds them.
+
+**Done**
+- [x] **Propagators** — `apply_coverage` (square radius; the ceiling is a per-cell running minimum in `ServiceState`), `apply_land_value` (no floor; clamps only to the caller's ceiling), `apply_flags`. The −8..+50 clamp is a separate per-cell routine, `evolve_land_value` (`0x2DA7E`).
+- [x] **`reset_tick`** — `C9D4 &= 0x12`, `A2C4 = 0`, and the per-cell coverage ceiling back to 63. Runtime-only state, not saved.
+- [x] **The C9D4 bit table** — `kC9D4BitTable`, each bit with its producers and a confidence label (`test_service_bit_table_fixtures`).
+- [x] **Every `DS:153A` handler** — transcribed from the disassembly, with `dispatch_tile()` and the engine's ≤ `0x35` gate.
+- [x] **Proof** — `test_save_corpus_simulation`: one reset and one dispatch pass over each real save reproduce its A2C4 layer and every C9D4 service bit, **10000/10000 cells**.
+
+**Deliverable:** given a city grid with buildings, compute coverage, land value and flags exactly as the executable does. **Met and proven.**
+
+**RE blockers:** none left.
+- C9D4 producers are confirmed by disassembly: `0x04` Bath Houses, `0x08` Market, `0x40` School and Hospital, `0x20` Forum and Prefecture (renamed "administration" on 2026-09-14, when the population tax turned out to read it); `0x02` is derived from `0x10` by `0x2DA0D`.
+- Heavy Industry (`0xF3`) and Market (`0xF4`) run through this dispatcher; their economic side is Phase 6's.
+
+<details>
+<summary>History</summary>
+
+- The first version was built from RE-corpus parameter tables and was wrong in several places, though every unit test passed — the tests encoded the same wrong values. `tools/sim_check` against real saves found all of it in one run.
+- It skipped Barracks, School, Oracle, Plaza and Prefecture for lack of documented parameters rather than invent numbers. All four real ones are now transcribed; "Plaza" was never a `DS:153A` handler (its supposed tile, `0xF3`, is Heavy Industry).
+- Five handlers had wrong parameters *and* names (`0xEE` Prefecture, `0xEF` Barracks, `0xF3` Heavy Industry, `0xF4` Market, `0xEB` Oracle); nine handlers were missing entirely.
+- `0x20` was first "religious" (HIGH CONFIDENCE in the corpus), downgraded when Prefecture was found setting it, renamed when its consumer was found.
+
+</details>
+
+---
+
+## Phase 4 — Housing & population
+
+**Status: Done and validated** (2026-09-13). Code in `systems/housing.hpp`/`.cpp`, `systems/month.hpp`/`.cpp`, `systems/actors.hpp`/`.cpp`; derivation in dispatch findings sections 16-21.
+
+**Goal:** the residential state machine, land-value gating, and population from housing.
+
+**Done**
+- [x] **Sixteen housing grades** — tiles `0xC8`-`0xD7`, every promotion, demotion and merge (pairs, 2×2, 3×3) in `develop_building`. That these are the manual's sixteen grades is strong inference; the rules are exact.
+- [x] **`land_value_allows`** (`0x2DB49`) — the collapse into `0xA7`, and its rioter and globals (`actors::spawn_rioter`).
+- [x] **Population** — the per-cell table at `3496:007E`; `DS:0x6C10` holds the sum, `DS:0x6C0E` four times it.
+- [x] **The month** — `systems::month`: the 106-step dispatcher (`0x2936A`), the calendar (`0x29476`), and the engine's random number generator (`2EF9:1425`) with its draws. `gaius_viewer` runs it.
+- [x] **Water and step 101's economy** — `service::apply_water` with the fountain pipe tracer; `month::run_economy` sets the housing coverage and land-value growth bases (findings section 19).
+- [x] **Walkers** — `systems::actors`: allocator, movement around obstacles, city behaviour states, and the forum, workshop and barracks spawners (findings section 20).
+- [x] **Fire, collapse and road wear** — the scan counters, the step-105 roll (`0x2DF7D`), `construction::demolish`/`burn`, burning tiles `0xA8`-`0xB1` (findings section 21).
+- [x] **A month against the original** (2026-09-14) — six saves a month or less apart; `run_step` reproduces each next save's tiles, record tables, population and every land-value cell (`test_month_consecutive_saves`, findings section 24).
+
+**Deliverable:** houses that grow, merge, shrink and split exactly as the engine's handlers dictate, with real population numbers. **Met and proven.**
+
+**RE blockers:** none left.
+
+<details>
+<summary>History</summary>
+
+- The first version rested on a misread table: tiles `0x00`-`0x15` looked like housing but the engine never dispatches them. `DS:1212`'s entries for `0xCA`-`0xFF` had been read as `DS:153A` tiles `0x00`-`0x35` (findings section 16).
+- Blockers that closed on 2026-09-13: the tile-to-grade mapping (`0xC8`-`0xD7`), the population table (a placeholder until `3496:007E` was found), and the "21 untraced handlers" (obsolete — those tiles are never dispatched).
+- The last untranscribed piece, routine `0x29624`, turned out to be fire.
+
+</details>
+
+---
+
+## Phase 5 — Construction system & the dispatcher
+
+**Status: Done** (2026-09-12; its last limits closed 2026-09-13/14). Code in `systems/construction.hpp`/`.cpp`, `ui/`, `apps/viewer/`; derivation in dispatch findings sections 1-14 and 18-19.
+
+**Goal:** close the highest-value RE question — construction command → tile write → footprint — and wire it into a build mode.
+
+**Done**
+- [x] **The construction dispatcher** — `DS:127C` (flat `0x75ACC`), 44 far pointers in segment `0x11C6`, called as `lcall [bx + 0x127c]` with `bx = command_id * 4` (findings section 12). `[0x6D0C]` holds the selected command, `[0x6D0A]` the handler's success flag.
+- [x] **Command IDs** — definitive: the 34-entry string table decoded byte-exact, and ~30 toolbar handlers assign the same IDs as literals (`CommandId`/`kCommandNames`, golden test against the executable).
+- [x] **Placement** — seed tile, footprint and terrain gate (`0x1D` ≤ existing tile ≤ `0x35`) for every placing command (`placement_spec`, `can_place`, `place`, which writes each cell's part index to `7BB4`).
+- [x] **Drag-built commands** — Road, Wall, Plaza, Clear Area with their neighbour rules; every real save's road network rebuilt cell by cell (findings section 18).
+- [x] **Variant commands** — Forum grades and Workshop goods (`place_forum`/`place_workshop`, findings section 19.1).
+- [x] **Building table corrections** — the civic tile IDs fixed against the real table, and `0xEB` Oracle, `0xEC` School, `0xEE` Prefecture identified.
+- [x] **Build mode in `gaius_viewer`** — a tool ring (Tab / gamepad X), placing by left-click / tap / gamepad A through one `Select` command, mouse drag for drag-built commands, and the original's drag cancel with a refund (right button while the left is held). Headless hook: `--test-build T X Y`.
+- [x] **Toolbar** (masterplan 5a point 3) — four breakpoints derived from one `scale`; `render()` and `hit_test()` share `button(i)`, so a drawn button and its hit target can't drift apart (a test hits every button's centre and corners at every breakpoint). Game icons (`POINTERS.PL8`) and font (`FONT1.PL8`); the label shows the cost and current funds.
+- [x] **Construction costs** (2026-09-14) — `systems::economy`, charged by the viewer (Phase 6).
+
+**Deliverable:** a playable slice — build roads, water, a forum, housing and civic buildings, and watch Phases 3-4 respond, on desktop, touch and gamepad alike. **Met for all 23 placing commands**, through one input path, verified end to end by a pipeline test.
+
+**RE blockers:** none left. The four Appendix C items this phase existed to close (construction far-pointer table, command IDs, command → handler, footprints) are all closed.
+
+<details>
+<summary>History: six RE passes to find the dispatcher</summary>
+
+Kept because *why* the dead ends failed is the lesson for the next table anyone hunts in this binary. Full detail: dispatch findings sections 1-14.
+
+1. **Pass 1 — the corpus's own construction notes.** `CAESAR_CONSTRUCTION_RE_v1.md`/`v2.md` decoded the *simulation* dispatcher `DS:153A` and moved the civic handlers from `0x43`-`0x50` to `0xDF`-`0xF5`, correcting Phase 3 — but not the construction side.
+2. **Pass 2 — direct disassembly** with `capstone`. Decoded the command string table byte-exact (an early "16-byte stride" guess was wrong: 8 of 34 entries are 17 bytes, caught by the golden test). Traced the `0x36`-`0x40` auto-tiling mechanism. Dead end: the placement call site went through `[0x6DDB]`, a scratch global with 696 references.
+3. **Pass 3 — four more angles, all ruled out:** a near-pointer table, two far-pointer searches, and tracing forward from `int 0x33` mouse input. `bindiff_exe` against the international build: 45.9% differs, too noisy.
+4. **Passes 4-5 — the root cause.** Pointer tables here store *far* pointers (offset + segment); every search had looked for flat offsets. Calibrating the code segment (`0x2700`) extracted the full `DS:153A` table at flat `0x75D8A` (22-for-22 against published addresses) and exposed an off-by-one in `v2`'s whole civic tile table. Also found growth-stage footprints (`0xDD`→`0xDF`, `0xE9`→`0xEB`).
+5. **Pass 6 — solved.** Scanning the whole image for runs of ≥8 four-byte entries sharing a segment word found 19 tables; one was `DS:127C`. Its call sites had been in the very first `lcall` sweep, unrecognised.
+
+Limits carried at the time, all since closed: the six drag and variant commands (2026-09-13), placeholder font and generated footprint icons (2026-09-13), costs not charged (2026-09-14), drag cancel (2026-09-14).
+
+</details>
+
+### Still open in Phases 0-5
+
+Every checklist item in Phases 0-5 is done. What remains is validation, a few untranscribed pieces and polish.
+
+- **Needs new saves**
+  - A walker's path, and the random draws' timing. Saves don't carry the generator's state; checking needs it, or an event (a fire, a collapse) caught between two saves.
+- **Simulation**
+  - The random draws on frames between steps at slower game speeds (Gaius draws once per step).
+  - The yearly routine's calls after the histories (`0x289C0` army, `0x28C43` ratings, `0x29023` promotion, `0x2933B`), and the step-105, 18-month and province routines — Phases 6-7.
+- **Save model**
+  - What the loader does after reading, beyond rebuilding `DS:0x6BFE`.
+- **Build mode**
   - A touch drag gesture for roads and walls.
-- **Viewer.** Nothing left for Phases 0-5. Water, fire and the animated buildings draw as in the engine (2026-09-13), and `MINIFONT.PL1` is decoded (2026-09-14: 1 bit per pixel, as its extension says). The overlay map modes belong to Phase 7.
-- **Platform.**
-  - Android builds only for the `x86_64` emulator, and `gaius_viewer` isn't ported to it (asset loading needs `AAssetManager`).
-  - Touch gestures beyond single-finger drag and tap are undesigned.
-  - The toolbar can't scale past 2× in the 320-wide logical framebuffer (flagged for Phase 9).
+  - The province commands' terrain cost multiplier.
+- **Platform**
+  - Android: real-device ABI and a `gaius_viewer` port (Phase 1).
+  - Touch gestures beyond single-finger drag and tap.
+  - The toolbar can't scale past 2× in the 320-wide logical framebuffer (Phase 9).
 
 ---
 
-## Phase 6 — Economy & military (blocked on RE, now with a concrete lead)
+## Phase 6 — Economy & military
 
-**Goal:** Heavy Industry / Workshops / Markets (suspected to run through the object/actor system, not the tile dispatcher) and the Cohort/battle system.
+**Status: In progress.** The city economy is done (2026-09-14); battles, the military and the province level are not started.
 
-- [x] RE: trace object allocator calls for economic actors (per `CAESAR_CITY_STATE_v9.md`'s actor-type work — types 4, 5, 8, 10 are already promising leads for walkers/economic/disruptive actors). **Done 2026-09-13** (dispatch findings section 20): type 8 is the workshop trader, which raises its workshop's sales on reaching a market cell and feeds its 0-7 production level; 4 is the barracks patrol, 5-7 invaders, 10 rioters from collapsed houses and 0-2 forum citizens. `systems::actors` runs them. What markets and heavy industry do beyond that isn't traced yet.
-- [x] `systems::economy` — workshops (8 goods types per manual), heavy industry feeding workshops, markets enabling sales, once the above is resolved. **Done 2026-09-14** (dispatch findings section 25). The loop runs as the engine has it: heavy industry within reach raises a workshop's level by 2 and markets let its traders sell (`systems::actors`, section 20.6), the levels become the industrial tax, the housing grades become the population tax, and the year's settlement pays operating costs and the tribute from them. `systems::economy` also charges construction. Checked: every save's funds history balances year by year, and each save's last year is reproduced exactly.
-- [ ] **Battle resolution — no longer a from-scratch RE target.** `CAESAR_GOG_BUILD_FINDINGS.md` section 4 identified a concrete entry point: `CSR.EXE` accepts a `cohort` command-line argument (discovered via `CAESAR.BAT`'s launch loop) that triggers its own internal battle resolution — this is the code path implementing the manual's Tortoise/Assault/Flank/Charge screen for players without the external Cohort 2 product. Next step is locating the argument-parsing branch in the disassembly and tracing forward from there, rather than searching blind.
-- [ ] `systems::military` — Legion/Cohort/Century structure, the four battle tactics and their resolution rules, implemented once the above trace confirms the actual math (the manual only describes it qualitatively; the executable is the source of truth once found).
-- [ ] Provincial level: forts, cohort patrol/attack/go-home, barbarian armies, small towns, Imperial Highway.
-- [ ] Confirm Gaius does **not** need to reproduce the original's process-juggling architecture (batch file alternating `csr.exe`/`cohort.exe` via DOS errorlevels) — that's a DOS-era limitation; the equivalent in Gaius is just an internal screen/state transition. `COHORT.CSR`'s role (a save-handoff filename written before the transition) only needs its *behavior* reproduced, not its file format treated as a spec to satisfy.
+**Goal:** Heavy Industry, Workshops and Markets, and the Cohort battle system.
 
-**Deliverable:** full economic loop (industry → workshop → market → tax revenue) and a functioning provincial level with combat.
+**Done**
+- [x] **Economic actors** (2026-09-13, findings section 20) — type 8 workshop traders sell on market cells and feed their workshop's 0-7 level; 4 barracks patrols; 5-7 invaders; 10 rioters; 0-2 forum citizens.
+- [x] **`systems::economy`** (2026-09-14, findings section 25) — the loop as the engine has it: heavy industry in reach adds 2 to a workshop's level, markets let its traders sell, levels become the industrial tax, housing grades the population tax, and the year's settlement pays operating costs and the tribute. Also construction costs, emergency funds and donations. Every save's funds history balances year by year; each save's last year is reproduced exactly.
 
-**RE blockers:** the city economy is done (dispatch findings sections 20 and 25). Heavy industry's and markets' effects are all accounted for: their coverage and C9D4 bits (section 15), their scan counts in the employment share (section 19.3), heavy industry's +2 to workshops and markets' sales. Of Appendix C "Finish Heavy Industry/Market/Workshop/Fort" only forts remain, with the rest of the military. Battle resolution is now a **located-but-not-yet-traced** target rather than a **net-new, no-leads** one — meaningfully lower risk than previously assessed.
+**Open**
+- [ ] **Battle resolution** — a located, not yet traced, target. `CSR.EXE` takes a `cohort` argument (found via `CAESAR.BAT`'s launch loop) that runs its internal battle screen (Tortoise/Assault/Flank/Charge). Next: find the argument branch and trace forward (`docs/CAESAR_GOG_BUILD_FINDINGS.md` section 4).
+- [ ] **`systems::military`** — Legion/Cohort/Century structure and the four tactics' resolution, once the trace gives the real math (the manual is only qualitative).
+- [ ] **Province level** — forts, cohort patrol/attack/go-home, barbarian armies, small towns, the Imperial Highway; the province actors (types 11-13, states 9-14) and what sends an invasion (`0x2D891`, `0x2D6F4`).
+- [ ] **Confirm the DOS process juggling isn't needed** — the batch file alternating `csr.exe`/`cohort.exe` becomes a screen transition; `COHORT.CSR` only needs its behaviour, not its format.
 
----
+**Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **City half met.**
 
-## Phase 7 — Forum, advisors, ratings & win/loss conditions (mostly engineering)
-
-**Goal:** the administrative layer — seven advisors, four ratings (Peace/Culture/Prosperity/Empire), promotion, annual tribute, plebs.
-
-- [ ] `systems::population` (pleb groups, welfare expenditure, task assignment) — fully specified qualitatively in the manual; needs no new RE, just implementation against the already-modeled population/housing state.
-- [ ] `systems::administration` — ratings computation per manual's four-category formulas (population tax, industrial tax, growth rate, etc.).
-- [ ] Forum UI: seven advisors, promotion flow, tribute deduction, game-over conditions (three missed tributes).
-- [ ] Maps panel: Urbanization/Water/Administration/Road/Land Value/Trouble overlays — these map directly onto already-modeled layers (`54A4`→Land Value, `A2C4`/`C9D4`→ derived overlays once semantics are locked from Phase 3–6).
-
-**Deliverable:** the full single-player loop: build → grow → get promoted or fail the tribute.
-
-**RE blockers:** none expected to be hard-blocking — this phase is mostly translating manual-documented formulas into code once the underlying state (Phases 2–6) exists. Flag any formula that doesn't match observed executable behavior back into RE.
+**RE blockers:** the city economy's are closed — heavy industry and markets are fully accounted for (their handlers, scan counts, and effects on workshops). Open: forts and the military, and the battle trace.
 
 ---
 
-## Phase 8 — Format completeness & save write-back (Layer 3)
+## Phase 7 — Forum, advisors, ratings & win/loss
 
-**Goal:** finish Layer 3 — write valid EMPIRE2 and `.SAV` files the original engine (or Julius-style compatibility layers) could theoretically still read, and close remaining format gaps.
+**Status: Not started.** Mostly engineering.
 
-- [ ] Save **loader** reverse engineering (2026-09-14: its read order is the writer's, and it rebuilds the one sum the save doesn't keep, `DS:0x6BFE` -- dispatch findings section 25.2; currently the biggest asymmetry — we can write the block table but haven't proven we can *read* it the way the original does for the fields we don't yet understand).
-- [ ] `EDATA.CSR` confirmed stable across builds (no further work needed there). `CONTFRM.GD8`, `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, VAS win/lose animation — closeout pass on the remaining unresolved formats. Note `CONTFRM.GD8` is now known to vary by build/region (differs between the two `CSR.EXE` builds — see `CAESAR_GOG_BUILD_FINDINGS.md` section 5), which narrows the hypothesis toward localizable string/layout data.
-- [ ] Music: `.MDI` files (where present) are standard MIDI and need no decoder — treat as the preferred playback path; `.XMI`/`.XM2` only needed if bit-for-bit 1993 audio fidelity is a goal.
-- [x] Renderer tile-lookup tables — needed for pixel-accurate rendering rather than Phase 1's approximations. **Done for the city view, 2026-09-13:** `render::render_city` (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`) — `FIXTS.PL8` frame = tile id below `0xC8`, `HOUSES.PL8` frame = tile − `0xC8` above it, the `3496:14B2` building metrics table, per-cell sprite slices, and the `HOUSES2.PL8` special cases, checked pixel-exact against real captures. Animation timing, overlay map modes and the province view remain (walkers are drawn, and since 2026-09-13 simulated by `systems::actors`).
-- [ ] City scenario/terrain generation — needed for "New Game" to procedurally generate terrain matching the original's distribution, per the manual's "terrain generated randomly each time" behavior.
-- [ ] Bindiff pass between the two now-available `CSR.EXE` builds (Phase 0's `bindiff_exe` tool) — run this whenever a remaining unresolved item in this phase stalls; differences between builds are often faster to interpret than a single disassembly in isolation.
+**Goal:** the administrative layer — seven advisors, four ratings (Peace, Culture, Prosperity, Empire), promotion, the annual tribute, plebs.
 
-**Deliverable:** full format parity, "New Game" support (not just loading existing saves), and pixel-accurate rendering.
+**Open**
+- [ ] **`systems::population`** — pleb groups, welfare expenditure, task assignment. Specified qualitatively in the manual; what welfare does at step 105 (`0x2DF01`, `0x2DF40`) is in the executable.
+- [ ] **`systems::administration`** — the four ratings; the yearly routine's ratings (`0x28C43`) and promotion (`0x29023`) calls are located.
+- [ ] **Forum UI** — seven advisors, promotion flow, tribute, game over after three missed tributes (the settlement already counts them: `economy::settle_accounts`).
+- [ ] **Maps panel** — Urbanization, Water, Administration, Road, Land Value, Trouble overlays, drawn from the modeled layers.
 
----
+**Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute.
 
-## Phase 9 — Platform packaging & QoL polish (mostly engineering)
-
-**Goal:** turn "runs on the platform" (validated incrementally since Phase 1) into "ships properly on the platform" — this is packaging, input polish, and the QoL settings surface, not new engine architecture.
-
-- [ ] Settings screen: resolution/window mode, UI scale, input remapping, frame-rate cap (battery/thermal-friendly on mobile/Deck), audio — surfacing the `platform/` layer's existing capabilities rather than building new ones.
-- [ ] Steam Deck: verify gamepad-only navigation end-to-end (no screen requires a keyboard/mouse fallback), Steam Input glyph mapping if feasible, and a Deck-specific control layout entry in Steam's UI (once distributed via Steam).
-- [ ] Android/iOS: touch-first onboarding for the command-mode/scroll-mode equivalent (masterplan section 5a point 7), on-screen build/cancel affordances, safe-area handling for notches/rounded corners, app store packaging (APK/AAB, IPA) and appropriate storage permissions for user-supplied original game assets.
-- [ ] Raspberry Pi: profile actual frame time on target hardware (Pi 4/5 class), confirm the GLES/KMSDRM path, and document a minimum supported Pi model rather than assuming "it'll be fine."
-- [ ] Cross-platform save/config path QA: confirm the Phase 1 `platform/paths.cpp` choices actually match each OS's conventions and don't collide with the original game's own save format expectations.
-- [ ] Localization-readiness pass (not full localization) — if UI strings aren't already externalized by this point, do it now, since it's far cheaper before packaging multiplies the surface area.
-
-**Deliverable:** installable/packaged builds for every platform in the target matrix (masterplan section 5a), each with a working settings screen and no input dead-ends.
-
-**RE blockers:** none — this phase is pure engineering/UX and can run in parallel with any still-open RE work from Phase 6/8.
+**RE blockers:** none expected to be hard. Flag any manual formula the executable contradicts back into RE.
 
 ---
 
-## Phase 10 — Editor tooling & IGDK integration (Layer 4)
+## Phase 8 — Format completeness & save write-back
+
+**Status: Started** (city renderer tables done).
+
+**Goal:** write valid EMPIRE2 and `.SAV` files the original engine could read, close the remaining format gaps, and support "New Game".
+
+**Done**
+- [x] **Renderer tile tables** (2026-09-13) — `render::render_city`: `FIXTS.PL8` below `0xC8`, `HOUSES.PL8` above, the `3496:14B2` building metrics, per-cell slices, `HOUSES2.PL8` special cases, water and fire animation, walkers. Pixel-exact against captures (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`).
+
+**Open**
+- [ ] **Save loader RE** — read order and `DS:0x6BFE` done (2026-09-14, findings section 25.2); still the biggest asymmetry: the block table is written correctly, but reading unknown fields the way the original does isn't proven.
+- [ ] **Remaining formats** — `CONTFRM.GD8` (varies by build, so probably localizable layout data), `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, the VAS win/lose animation. `EDATA.CSR` is stable across builds.
+- [ ] **Music** — `.MDI` is standard MIDI and needs no decoder; `.XMI`/`.XM2` only for bit-exact 1993 audio.
+- [ ] **Overlay map modes and the province view** in the renderer.
+- [ ] **City terrain generation** — for "New Game", matching the original's random terrain.
+- [ ] **Bindiff the two `CSR.EXE` builds** whenever an item here stalls; differences are often faster to read than one disassembly.
+
+**Deliverable:** format parity, "New Game", pixel-accurate rendering.
+
+---
+
+## Phase 9 — Platform packaging & polish
+
+**Status: Not started.** Pure engineering; can run alongside Phases 6-8.
+
+**Goal:** turn "runs on the platform" into "ships on the platform" — packaging, input polish and settings, not new architecture.
+
+**Open**
+- [ ] **Settings screen** — resolution and window mode, UI scale, input remapping, frame-rate cap, audio.
+- [ ] **Steam Deck** — gamepad-only navigation end to end, Steam Input glyphs if feasible, a Deck control layout.
+- [ ] **Android / iOS** — touch-first onboarding (masterplan 5a point 7), on-screen build and cancel controls, safe areas, store packaging (APK/AAB, IPA), storage permissions for the user's game files.
+- [ ] **Raspberry Pi** — measure frame time on Pi 4/5, confirm the GLES/KMSDRM path, document a minimum model.
+- [ ] **Save and config paths** — confirm each OS's conventions, and no collision with the original's saves.
+- [ ] **Localization readiness** — externalize UI strings before packaging multiplies the surface.
+- [ ] **Toolbar past 2×** — a logical framebuffer that grows with the display, or a paged toolbar.
+
+**Deliverable:** installable builds for every target platform (masterplan 5a), each with settings and no input dead ends.
+
+**RE blockers:** none.
+
+---
+
+## Phase 10 — Editor tooling & IGDK integration
+
+**Status: Not started.**
 
 **Goal:** expose Gaius as an embeddable engine and build the editor tooling IGDK needs.
 
-- [ ] Stable embedding API (mirroring how IGDK plans to embed Augustus as a submodule, zero-FFI where possible).
-- [ ] City/empire map editor, scenario editor, save editor, resource viewer — thin UI over the Layer 2 model, reusing Phase 1's viewer as a base.
-- [ ] Live-preview hook for IGDK's native webview UI.
-- [ ] Document Gaius in IGA as the Caesar-I engine-reimplementation entry (community "wanted board" gap this project closes).
+**Open**
+- [ ] **Embedding API** — stable, zero-FFI where possible (as IGDK plans for Augustus).
+- [ ] **Editors** — city/empire map, scenario, save, resource viewer: thin UI over the Layer 2 model, starting from Phase 1's viewer.
+- [ ] **Live preview hook** for IGDK's webview UI.
+- [ ] **IGA entry** — document Gaius as the Caesar I engine reimplementation.
 
-**Deliverable:** Gaius is usable both standalone and as an IGDK-embedded engine.
+**Deliverable:** Gaius usable standalone and embedded in IGDK.
 
 ---
 
 ## Cross-cutting: the RE backlog
 
-Every phase above references specific items from `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` Appendix C. That list should be treated as a **live, shared backlog** between RE work and engine work — as engine implementation surfaces a discrepancy (a byte-diff failure, a behavior that doesn't match the manual, a tile ID that doesn't fit the provisional table), it should generate a new RE TODO item rather than being guessed around silently. The confidence-labeling discipline already established (DEFINITIVE / HIGH CONFIDENCE / STRONG INFERENCE / UNRESOLVED) should carry over into code comments for any system built on less-than-DEFINITIVE findings.
+`CAESAR_REVERSE_ENGINEERING_COMPLETE.md` Appendix C is a **live backlog shared by RE and engine work**. When implementation finds a discrepancy — a byte diff, behaviour that doesn't match the manual, a tile ID that doesn't fit — it becomes a new RE item, never a silent guess. The confidence labels (DEFINITIVE / HIGH CONFIDENCE / STRONG INFERENCE / UNRESOLVED) carry into code comments for anything built on less than definitive findings.
 
-## Suggested sequencing summary
+## Sequencing
 
 ```text
-Phase 0  Repo + format library                    (unblocked)
-Phase 1  Static viewer + platform skeleton        (unblocked)
-Phase 2  Normalized model + save round-trip       (soft-blocked: save loader)
-Phase 3  Service propagation primitives           (mostly unblocked)
-Phase 4  Housing/population                       (partially blocked: tile IDs)
-Phase 5  Construction dispatcher + build-mode UI  (DONE - was the critical RE sprint)
-Phase 6  Economy + military                       (hard-blocked: needs new RE)
-Phase 7  Forum/ratings/win-loss                   (mostly unblocked once 2-6 exist)
-Phase 8  Format completeness + save loader        (closes remaining format debt)
-Phase 9  Platform packaging + QoL polish          (unblocked; can run parallel to 6/8)
-Phase 10 Editor + IGDK integration                (final)
+Phase 0  Repo + format library                    done
+Phase 1  Static viewer + platform skeleton        done (Android: emulator only)
+Phase 2  Normalized model + save round trip       done
+Phase 3  Service propagation                      done, validated on 17 saves
+Phase 4  Housing / population / the month         done, validated on 17 saves
+Phase 5  Construction dispatcher + build mode     done
+Phase 6  Economy + military                       city economy done; battles next
+Phase 7  Forum / ratings / win-loss               unblocked
+Phase 8  Format completeness + save loader        started
+Phase 9  Platform packaging + polish              unblocked; parallel to 6-8
+Phase 10 Editor + IGDK integration                last
 ```
 
-Phases 0–5 are complete. The dispatcher that was the highest-leverage RE target is recovered (`DS:127C`), so the critical path now runs through Phase 6's economic-actor tracing (the walkers were traced on 2026-09-13; markets, heavy industry and the province level remain) — with Phase 7 and Phase 9 both largely unblocked and available to run in parallel while that RE proceeds. Cross-platform/QoL work (masterplan section 5a) is deliberately spread across Phase 1 (foundations), Phase 5 (build-mode input parity), and Phase 9 (packaging/polish) rather than concentrated at the end — the goal is that by the time Phase 9 starts, every platform has already been run against real, if incomplete, gameplay many times over.
+Cross-platform work (masterplan 5a) is spread across Phase 1 (foundations), Phase 5 (input parity in build mode) and Phase 9 (packaging), not saved for the end — by Phase 9, every platform should already have run real, if incomplete, gameplay many times.
