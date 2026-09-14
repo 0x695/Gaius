@@ -52,6 +52,12 @@ enum class CommandType {
                   // enrichment (a label preview) and never as the only way to learn
                   // something -- otherwise it would become a mouse-only code path,
                   // which masterplan 5a point 4 exists to prevent.
+    CancelDrag,   // the original's cancel gesture for a drag-built command (Road, Wall,
+                  // Plaza, Clear Area): "press the right button while still holding down
+                  // the left" (manual, Building Roads). Right-click while the left button
+                  // is also down, so it never collides with a plain right-click's own
+                  // meaning (Secondary, the viewer's map-layer cycle) -- those two states
+                  // are mutually exclusive by construction.
 };
 
 struct Command {

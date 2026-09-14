@@ -989,10 +989,9 @@ When the calendar turns the year it:
 ### 25.5 In Gaius, and what's open
 
 - **`systems::economy`**: `construction_cost`, `can_afford`, `charge`/`refund`, `grant_emergency_funds`, `donate_savings`, `average_workshop_level`, `population_tax`, `industrial_tax`, `industrial_tax_pressure`, `settle_accounts` and `run_year`. `systems::month::run_step` runs `run_year` when the year turns, before the histories, and keeps `DS:0x6BFE` in `SimState`.
-- **`gaius_viewer`** charges each placement, asks Rome for the emergency funds when it can't, shows the cost in the tool label, and prints the funds each month and the Treasurer's report each year.
+- **`gaius_viewer`** charges each placement, asks Rome for the emergency funds when it can't, shows the cost and current funds in the toolbar label (dropping the funds figure if the combined text wouldn't fit the panel), and prints the funds each month and the Treasurer's report each year. **2026-09-14:** a drag-built command (Road, Wall, Plaza, Clear Area) can be cancelled the manual's way -- right button while the left is still held (`platform::CommandType::CancelDrag`) -- which restores every cell the drag touched (a 7x7 box around each placed cell, wide enough to cover Clear Area's worst case of wrecking a building anchored up to 3 cells away) and refunds what it cost.
 - **Not modeled:**
   - the messages;
   - the province commands' terrain multiplier;
-  - a cancel gesture for drags in the viewer, so no refund;
   - the rest of the yearly routine;
   - what pleb welfare does at step 105 (`0x2DF01`, `0x2DF40`).

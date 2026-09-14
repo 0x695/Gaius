@@ -374,6 +374,17 @@ int main(int argc, char** argv) {
     // rubble from the simulation's random number generator.
     systems::construction::DragState drag;
     int drag_last_x = -1, drag_last_y = -1;  // the last cell a click or drag placed on
+    // The active drag's undo trail, for the original's cancel gesture (right
+    // button while the left is still down -- manual, Building Roads): the
+    // pre-placement tile and 7BB4 byte of every cell that might have changed
+    // this drag, and the funds it cost. Cleared at the start of each new
+    // gesture (handle_select_logical) and consumed by CancelDrag below.
+    struct DragUndoCell {
+        int x, y;
+        uint8_t tile, op_state;
+    };
+    std::vector<DragUndoCell> drag_undo;
+    int drag_refund = 0;
     // The variant choices the original makes in sub-menus: DS:0x6D89 (Forum
     // grade) and DS:0x6D87 (Workshop goods).
     int forum_grade = 0, workshop_goods = 0;
@@ -414,6 +425,32 @@ int main(int argc, char** argv) {
                 std::printf("not enough funds: %s costs %d Dn\n", construction::command_name(tool), cost);
             return false;
         }
+        const bool draggable = construction::placement_spec(tool).kind == construction::PlacementKind::DragAutoTiled;
+        if (draggable) {
+            // Snapshot a 7x7 box around the target before placing: Road, Wall
+            // and Plaza only ever retile a direct neighbour (1-cell radius),
+            // but Clear Area can wreck a whole building anchored up to 3 cells
+            // away (construction::wreck_cells walks to the anchor first), so
+            // that's the box that covers every drag command's worst case.
+            // Only the first snapshot of a given cell in this drag is kept, so
+            // a later overlapping placement can't clobber the pre-drag state
+            // CancelDrag needs to restore.
+            for (int dy = -3; dy <= 3; ++dy) {
+                for (int dx = -3; dx <= 3; ++dx) {
+                    const int sx = x + dx, sy = y + dy;
+                    if (sx < 0 || sy < 0 || sx >= model::kCityW || sy >= model::kCityH) continue;
+                    bool seen = false;
+                    for (const auto& u : drag_undo) {
+                        if (u.x == sx && u.y == sy) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (!seen)
+                        drag_undo.push_back({sx, sy, state.city.tile[sy][sx], state.city.operational_state[sy][sx]});
+                }
+            }
+        }
         bool placed = false;
         switch (tool) {
             case construction::CommandId::Road: placed = construction::place_road(state.city, drag, x, y); break;
@@ -426,7 +463,10 @@ int main(int argc, char** argv) {
                 break;
             default: placed = construction::place(state.city, tool, x, y); break;
         }
-        if (placed) economy::charge(state, cost);
+        if (placed) {
+            economy::charge(state, cost);
+            if (draggable) drag_refund += cost;
+        }
         return placed;
     };
 
@@ -506,6 +546,8 @@ int main(int argc, char** argv) {
         auto handle_select_logical = [&](int lx, int ly) {
             if (!save_mode) return;
             drag_last_x = drag_last_y = -1;
+            drag_undo.clear();
+            drag_refund = 0;
             int hit = toolbar.hit_test(lx, ly);
             if (hit >= 0) {
                 if (hit == tool_index && cycle_variant()) return;  // tapping the selected button again
@@ -619,6 +661,24 @@ int main(int argc, char** argv) {
                         }
                         break;
                     }
+                    case platform::CommandType::CancelDrag: {
+                        // The original's drag-cancel gesture (see DragUndoCell's
+                        // comment): put back every cell this drag touched and
+                        // refund what it cost. Does nothing outside an active
+                        // drag-built placement.
+                        if (!save_mode || drag_undo.empty()) break;
+                        for (const auto& u : drag_undo) {
+                            state.city.tile[u.y][u.x] = u.tile;
+                            state.city.operational_state[u.y][u.x] = u.op_state;
+                        }
+                        systems::economy::refund(state, drag_refund);
+                        std::printf("drag cancelled: refunded %d Dn\n", drag_refund);
+                        drag_undo.clear();
+                        drag_refund = 0;
+                        drag_last_x = drag_last_y = -1;
+                        city_image_dirty = true;
+                        break;
+                    }
                     case platform::CommandType::Hover: {
                         if (!save_mode) break;
                         int lx = 0, ly = 0;
@@ -653,6 +713,9 @@ int main(int argc, char** argv) {
             }
 
             const std::string tool_text = save_mode ? tool_label() : std::string();
+            const std::string funds_text =
+                save_mode ? "Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn"
+                          : std::string();
             if (save_mode && show_sprites) {
                 // The draw loop's animation (renderer findings section 6): the
                 // water phase advances on each drawn frame while the 32-step
@@ -683,7 +746,7 @@ int main(int argc, char** argv) {
                 render_sprite_view(city_image, sprites.palette, cam, frame);
                 ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
                            have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
-                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str());
+                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
             } else if (save_mode) {
                 viewer::render_city_map_layer(state.city, layer, city_cell_px, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
@@ -694,7 +757,7 @@ int main(int argc, char** argv) {
                 // keeps clicks there from reaching the occluded cells.
                 ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
                            have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
-                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str());
+                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
             } else {
                 render_empire_frame(map, cam, frame);
             }

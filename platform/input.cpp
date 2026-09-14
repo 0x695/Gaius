@@ -35,7 +35,11 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
                 return c;
             }
             if (event.button.button == SDL_BUTTON_RIGHT) {
-                c.type = CommandType::Secondary;
+                // The original's drag-cancel gesture: right button while the
+                // left is still held down (SDL_GetMouseState reflects the
+                // left button's current state, not just this event's own).
+                c.type = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_LMASK) ? CommandType::CancelDrag
+                                                                                   : CommandType::Secondary;
                 return c;
             }
             if (event.button.button == SDL_BUTTON_MIDDLE) {

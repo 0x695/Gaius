@@ -4,6 +4,7 @@
 #include "ui/game_font.hpp"
 
 #include <algorithm>
+#include <string>
 
 #include "ui/font.hpp"
 
@@ -157,7 +158,7 @@ int Toolbar::hit_test(int lx, int ly) const {
 
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
             int h, const GameFont* font, const formats::PL8Sheet* icons, const formats::Palette* icon_palette,
-            const char* selected_label) {
+            const char* selected_label, const char* funds_text) {
     if (w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * h * 3) return;
 
     const Rect p = bar.panel();
@@ -177,12 +178,29 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
                             ? systems::construction::command_name(bar.tool(label_for))
                             : "SELECT A BUILDING";
     const char* shown = (selected_label && label_for == selected) ? selected_label : label;
+
+    // Try the label with the funds figure appended; fall back to the label
+    // alone if that would overflow the panel (see funds_text's doc comment).
+    std::string with_funds;
+    if (funds_text && *funds_text) {
+        with_funds = std::string(shown) + " - " + funds_text;
+    }
+    const char* candidate = with_funds.empty() ? shown : with_funds.c_str();
+    const int available = std::max(0, p.w - 2 * m.pad_px);
     if (font) {
-        int tw = game_text_width(shown, m.glyph_scale);
-        draw_game_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), shown, m.glyph_scale, *font);
+        int tw = game_text_width(candidate, m.glyph_scale);
+        if (!with_funds.empty() && tw > available) {
+            candidate = shown;
+            tw = game_text_width(shown, m.glyph_scale);
+        }
+        draw_game_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), candidate, m.glyph_scale, *font);
     } else {
-        int tw = text_width(shown, m.glyph_scale);
-        draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), shown, m.glyph_scale, kLabelText);
+        int tw = text_width(candidate, m.glyph_scale);
+        if (!with_funds.empty() && tw > available) {
+            candidate = shown;
+            tw = text_width(shown, m.glyph_scale);
+        }
+        draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), candidate, m.glyph_scale, kLabelText);
     }
 
     for (int i = 0; i < bar.count(); ++i) {

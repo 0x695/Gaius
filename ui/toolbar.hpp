@@ -113,9 +113,15 @@ private:
 // button; otherwise it shows the building's footprint.
 void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_color, std::vector<uint8_t>& rgb, int w,
             int h, const GameFont* font = nullptr, const formats::PL8Sheet* icons = nullptr,
-            const formats::Palette* icon_palette = nullptr, const char* selected_label = nullptr);
+            const formats::Palette* icon_palette = nullptr, const char* selected_label = nullptr,
+            const char* funds_text = nullptr);
 // `selected_label`, when given, replaces the selected tool's name in the label
 // row (e.g. "Forum grade 3, 140 Dn"); a hovered tool still shows its own name.
+// `funds_text` (e.g. "Funds 1234 Dn"), when given, is appended to the label
+// row -- but only when the combined text still fits the panel's width, since
+// the original never lets a label overflow a fixed-width bar. Dropped
+// silently otherwise, so a very long tool name never doubles up with a
+// clipped, unreadable funds figure.
 
 // The POINTERS.PL8 frame the original's control panel shows for a command, or
 // -1 if it has no button. Read from the panel's button tables (DS:0x1178,
