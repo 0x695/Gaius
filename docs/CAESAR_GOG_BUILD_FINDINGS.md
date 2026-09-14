@@ -89,6 +89,8 @@ None of these block Gaius: `COHORT.EXE` is now understood to be optional/replace
 
 ## 7. Audio format bonus: `.MDI` files are standard MIDI — DEFINITIVE, unblocks work with zero RE needed
 
+> **Correction (2026-09-15, `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 34.5):** the `.MDI` files are standard MIDI, but not the US `.XMI` cues in another container. They are re-orchestrated for General MIDI (drums moved off channel 9, channels and velocities changed) and some are renumbered — the US `CZARJIN1` is the international `CZARJIN2`. Only the note counts and the timing survive (onsets within 0.02 quarter notes). For the original 1993 score, convert the `.XMI` files (`formats::xmi`, `tools/xmi2mid`).
+
 `Caesar/CZARJIN1.MDI` … `Caesar/CZARTIT.MDI` (international build only) begin with the standard `MThd`/`MTrk` Standard MIDI File (SMF) signature — **these are ordinary General MIDI files**, not a proprietary Impressions format. They correspond one-to-one with the US build's `.XMI`/`.XM2` cues of the same base name (same music, different container):
 
 | Cue | `.MDI` (intl) | `.XMI` (US) | `.XM2` (US) |

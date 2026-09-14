@@ -83,6 +83,25 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 
 ---
 
+## `.VAS` — battle animations (`formats/vas/`)
+
+- **Status: DEFINITIVE (2026-09-15).** The battle screen's animations: frames of XOR deltas over the four interleaved 16000-byte planes of a `.VPX` picture. Word +2 is one more than the frame count; 32-bit frame offsets from +0x14; each frame is four plane blocks (u16 length, u16 16000, 4 skipped bytes, then u16 runs — bit 15 XORs the next n + 1 bytes, otherwise skips n + 1). Transcribed from `2EF9:111F`; every block of `LOSE0001.VAS` (21 frames) and `WINS0001.VAS` (20) ends where the next begins, and played over `WAR2.VPX` they draw the battle. `tools/dump_vas`. Dispatch findings section 34.1.
+
+## `CONTFRM.GD8`, `EDATA.CSR` — screen data (`formats/screen_data/`)
+
+- **`CONTFRM.GD8`, DEFINITIVE:** the Forum picture's click map — 40 × 25 cells of 8 × 8 pixels over `NEWFORUM.VPX`, each 0 or one of the eight figures (advisors). It differs between builds because the picture does. Section 34.2.
+- **`EDATA.CSR`, DEFINITIVE for its first 200 bytes:** the 50 provinces' marker positions on the empire map, big-endian word pairs (drawn at x − 8, y − 32). The last 120 bytes aren't loaded. Section 34.3.
+
+## `.VOC` — sound effects (`formats/voc/`)
+
+- **Status: DEFINITIVE.** Creative Labs' published Creative Voice File; all 23 effects are 8-bit unsigned mono PCM and decode.
+
+## `.XMI` / `.XM2` — music (`formats/xmi/`)
+
+- **Status: DEFINITIVE.** Miles Extended MIDI (IFF `FORM XDIR` / `CAT XMID`; summed delay bytes, no running status, note-ons with durations), converted to Standard MIDI at 120 ticks a second. All 28 cues convert (`tools/xmi2mid`); the timing is confirmed against the international build's `.MDI` files, which are re-orchestrations rather than conversions. Section 34.5.
+
+---
+
 ## `EXEPACK` — DOS executable decompression (`formats/exepack/`)
 
 - Generic Microsoft EXEPACK decompressor (not Caesar-specific, but required for any static analysis of `CSR.EXE`, which is EXEPACK-packed).
@@ -97,6 +116,8 @@ All in `tools/`, all built and smoke-tested against real files:
 
 - `dump_vpx <in.vpx> <out.png> [palette]` — decode + render to PNG.
 - `dump_pl8 <in.pl8> <out.png> [palette]` — decode all frames to a contact-sheet PNG.
+- `dump_vas <in.vas> <base.vpx> <palette> <prefix>` — play an animation over a picture, one PNG a frame.
+- `xmi2mid <in.xmi> <out.mid> [sequence]` — convert a music cue to Standard MIDI.
 - `empire_view <in> --ascii|--png|--summary` — render or inspect an EMPIRE2 scenario.
 - `save_inspect <in.sav>` — print the block table and decode the global-words section.
 - `bindiff_exe <a.exe> <b.exe> [--strings]` — decompress and diff two EXEPACK'd executables (byte-level runs + embedded-string set differences). Already run against both known `CSR.EXE` builds — see `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md` for what it found.

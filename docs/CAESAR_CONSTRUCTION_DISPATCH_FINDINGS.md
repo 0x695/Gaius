@@ -1393,3 +1393,49 @@ A promotion (`0x0FB34`) runs step 5 in the same order. That settles section 31.4
 
 - Typing the governor's name (the start screen shows the default).
 - Whether a Gaius-written save of a Gaius-played city runs in the original: the format is proven, but a city Gaius built isn't checked in DOSBox.
+
+
+## 34. The remaining files: animations, the Forum's click map, the empire markers, sound and music (2026-09-15)
+
+`formats::vas`, `formats::screen_data`, `formats::voc` and `formats::xmi` implement them; `tools/dump_vas` and `tools/xmi2mid` exercise them.
+
+### 34.1 `.VAS`: the battle screen's animations
+
+- **Where they play.** Three players (`0x23A06`, `0x23ACA`, `0x23B8A`) run while the counters `DS:0x5802`, `0x5806` and `0x5804` are 2 or more. The battle routines start them: a round (`0x23087`, `0x231D4`), the victory (`0x22D56`) and the defeat (`0x22ED4`). Each loads its file into `494C:0000` when its counter is 2: `LOSE0001.VAS` for `0x5802` and `0x5806`, `WINS0001.VAS` for `0x5804`.
+- **Frames.** The counter runs from 2 up to the file's word at +2 (`0x5806` stops at 14), so a file has one frame fewer than that word: `LOSE0001.VAS` 21, `WINS0001.VAS` 20. Frame n - 1's 32-bit offset is at +0x10 + 4(n - 1), so the table starts at +0x14.
+- **Drawing.** `100F:0851` selects each VGA plane in turn (sequencer map mask 1, 2, 4, 8 with read map 0-3) and calls `2EF9:111F` on that plane's block, stepping on by the block's length. It is called twice with a page flip between, so both display pages carry the frame.
+- **The block, from `2EF9:111F`.** A u16 length, a u16 plane size (16000), 4 bytes skipped, then u16 runs until their counts reach the plane size. A run with bit 15 set XORs the next (w & 0x7FFF) + 1 bytes onto the plane; one without skips that many.
+- **The planes** are the four interleaved 16000-byte streams of a `.VPX` picture (pixel 4i + p is plane p's byte i), so the runs step through 80-byte plane rows.
+- **Checked.** Every block of both files ends exactly at its length, and every frame where the next begins (or the file ends). Played over `WAR2.VPX` with `WAR2.256`, the frames draw a legionary and a barbarian fighting above the battle screen's tactic buttons. DEFINITIVE.
+
+### 34.2 `CONTFRM.GD8`: the Forum screen's click map
+
+`0x0FD77` loads all 1000 bytes into `3496:0330`. The Forum screen (`0x0DF25`) draws `NEWFORUM.VPX`; on a click `0x0DF57` reads the cell (x / 8) + 40 (y / 8) and, when its value v isn't 0, calls the far pointer at `DS:0x0764` + 4v. The 40 × 25 grid's regions trace the picture's eight figures exactly:
+
+| v | Figure | Handler | Music | What it opens (names STRONG INFERENCE) |
+|---|---|---|---|---|
+| 1 | the statue | `0x0DF9B` | -- | checks a key code first; unread |
+| 2 | man in blue, far left | `0x0E0F4` -> `0x0BDD3` | `czarjina.xmi` | the governor's own affairs: salary (`0x0C164`) and donation (`0x0C26E`) |
+| 3 | the legionary | `0x0E116` | `czarjin6.xmi` | loads `SPRITE2.PL8`: the Military Advisor |
+| 4 | man in a blue robe | `0x0E668` -> `0x0ACA7` | `czarjin4.xmi` | panels over the city map; unread |
+| 5 | bald man in orange | `0x0E6BC` | `czarjin9.xmi` | the Treasurer: the tax rates |
+| 6 | man in the white toga | `0x0E105` -> `0x0CC21` | `czarjinb.xmi` | loads `TEMPLE.VPX` and draws three `TEMPLBIT.PL8` columns (`0x0D069`): the ratings |
+| 7 | woman with fruit | `0x0E7F6` | `czarjin7.xmi` | the Tribune of the Plebs: the duties |
+| 8 | man in green | `0x0E0A6` -> `0x09D22` | `czarjin5.xmi` | reads the workshops' level (`0x09FF1`): industry |
+
+The international build's file differs because its picture does. The click map is DEFINITIVE; which advisor is which is from what each handler draws.
+
+### 34.3 `EDATA.CSR`: the empire map's province markers
+
+`0x0FD5B` loads the first 200 of the 320 bytes into `3496:1650`. The province list routine (`0x0D21E`) walks the 50 provinces in the order `3496:172C` lists them, and for each one given (`table_50`) draws a marker: sprite `0x30` for the current province, `0x31` for the others. It draws it at the two words `3496:1650` + 4 × province, byte-swapped, so big-endian in the file, less 8 in x and 32 in y; province 39 gets 10 more in x. Sicilia's marker is at (125, 115). The last 120 bytes aren't loaded by this build. DEFINITIVE for the 200 read.
+
+### 34.4 `TEMPLBIT.PL8`
+
+Three 32 × 10 frames: a column's capital, shaft and base. The ratings advisor draws them over `TEMPLE.VPX` (`0x0D069`, three calls), presumably as the ratings' columns; how tall each column is drawn isn't read.
+
+### 34.5 Sound effects and music
+
+- **`.VOC`** is Creative Labs' published Creative Voice File. All 23 effects are 8-bit unsigned mono PCM in sound blocks, and `formats::voc` decodes them all. Four are named for the battle tactics (`TORTOISE`, `ATTACK`, `FLANK`, `CHARGE`). Which events play which sound isn't traced.
+- **`.XMI`/`.XM2`** is Miles Extended MIDI, also published. `formats::xmi` converts all 28 files to Standard MIDI at 120 ticks a second.
+- **The international build's `.MDI` files** are not those files converted (correcting `docs/CAESAR_GOG_BUILD_FINDINGS.md` section 7's "same music, different container"). They are re-orchestrated for General MIDI: drums moved from channel 9 to other channels and pitches, channels renumbered, velocities changed. Some are also renamed: the US `CZARJIN1` is the international `CZARJIN2`. What survives is the note count and the timing. Every note onset of the US `CZARJIN1`, `6`, `A` and `B` lands within 0.017 quarter notes of the matching `.MDI`'s, which confirms the 120-ticks-a-second conversion (`test_xmi_matches_mdi`).
+- **Playing either** needs an audio path Gaius doesn't have yet (Phase 9).

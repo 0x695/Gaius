@@ -44,6 +44,10 @@ add_library(gaius_formats STATIC
   formats/empire2/empire2.cpp
   formats/save/save.cpp
   formats/exepack/exepack.cpp
+  formats/vas/vas.cpp
+  formats/voc/voc.cpp
+  formats/xmi/xmi.cpp
+  formats/screen_data/screen_data.cpp
 )
 target_include_directories(gaius_formats PUBLIC ${CMAKE_SOURCE_DIR})
 
@@ -51,6 +55,12 @@ target_include_directories(gaius_formats PUBLIC ${CMAKE_SOURCE_DIR})
 add_executable(dump_vpx tools/dump_vpx.cpp)
 target_link_libraries(dump_vpx PRIVATE gaius_formats)
 target_link_libraries(dump_vpx PRIVATE stb_image_write)
+
+add_executable(dump_vas tools/dump_vas.cpp)
+target_link_libraries(dump_vas PRIVATE gaius_formats stb_image_write)
+
+add_executable(xmi2mid tools/xmi2mid.cpp)
+target_link_libraries(xmi2mid PRIVATE gaius_formats)
 
 add_executable(dump_pl8 tools/dump_pl8.cpp)
 target_link_libraries(dump_pl8 PRIVATE gaius_formats)

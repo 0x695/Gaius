@@ -27,6 +27,10 @@
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 #include "formats/save/save.hpp"
+#include "formats/screen_data/screen_data.hpp"
+#include "formats/vas/vas.hpp"
+#include "formats/voc/voc.hpp"
+#include "formats/xmi/xmi.hpp"
 #include "formats/vpx/vpx.hpp"
 #include "model/city_state.hpp"
 #include "apps/viewer/screens.hpp"
@@ -3563,6 +3567,214 @@ void test_campaign_new_game() {
     CHECK(month::sim_state_from_save(*st).difficulty == 2);
 }
 
+void test_vas_animations() {
+    std::printf("test_vas_animations (2EF9:111F XOR plane blocks; every frame of both files)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    // A synthetic frame: skip 2 bytes, XOR 3, skip the rest, in each plane.
+    {
+        std::vector<uint8_t> d(0x14 + 4, 0);
+        d[2] = 2;  // one frame fewer than this word
+        const uint32_t first = 0x18;
+        d[0x14] = static_cast<uint8_t>(first);
+        for (int p = 0; p < 4; ++p) {
+            const std::vector<uint8_t> runs = {0x01, 0x00, 0x02, 0x80, 0xAA, 0xBB, 0xCC, 0x7A, 0x3E};
+            const size_t length = 8 + runs.size();
+            d.push_back(static_cast<uint8_t>(length));
+            d.push_back(0);
+            d.push_back(0x80);
+            d.push_back(0x3E);
+            d.insert(d.end(), 4, 0);
+            d.insert(d.end(), runs.begin(), runs.end());
+        }
+        const gaius::formats::vas::Animation a = gaius::formats::vas::parse(d);
+        gaius::formats::vas::Planes planes;
+        for (auto& p : planes) p.assign(gaius::formats::vas::kPlaneSize, 0x0F);
+        gaius::formats::vas::apply_frame(a, 0, planes);
+        CHECK(planes[3][1] == 0x0F && planes[3][2] == (0xAA ^ 0x0F) && planes[3][4] == (0xCC ^ 0x0F) &&
+              planes[3][5] == 0x0F);
+    }
+    int files = 0;
+    for (const char* name : {"LOSE0001.VAS", "WINS0001.VAS"}) {
+        const std::string path = std::string(assets) + "/" + name;
+        if (!std::filesystem::exists(path)) continue;
+        ++files;
+        bool applied = true;
+        size_t frames = 0;
+        try {
+            const gaius::formats::vas::Animation a = gaius::formats::vas::load(path);
+            frames = a.frame_offsets.size();
+            gaius::formats::vas::Planes planes;
+            for (auto& p : planes) p.assign(gaius::formats::vas::kPlaneSize, 0);
+            for (size_t f = 0; f < frames; ++f) gaius::formats::vas::apply_frame(a, f, planes);
+        } catch (const gaius::formats::FormatError& e) {
+            std::printf("    %s: %s\n", name, e.what());
+            applied = false;
+        }
+        CHECK(applied && frames == (std::string(name) == "LOSE0001.VAS" ? 21u : 20u));
+    }
+    if (files == 0) skip("no .VAS files");
+}
+
+void test_voc_sounds() {
+    std::printf("test_voc_sounds (every Creative Voice effect decodes to 8-bit PCM)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    int files = 0;
+    bool ok = true;
+    for (const auto& entry : std::filesystem::directory_iterator(assets)) {
+        std::string ext = entry.path().extension().string();
+        for (char& c : ext) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (ext != ".VOC") continue;
+        ++files;
+        try {
+            const gaius::formats::voc::Sound s = gaius::formats::voc::load(entry.path().string());
+            ok = ok && s.sample_rate >= 4000 && s.sample_rate <= 44100 && !s.samples.empty();
+        } catch (const gaius::formats::FormatError& e) {
+            std::printf("    %s: %s\n", entry.path().filename().string().c_str(), e.what());
+            ok = false;
+        }
+    }
+    CHECK(files == 23 && ok);
+}
+
+namespace {
+
+// The note-on times of a Standard MIDI File, in quarter notes, sorted.
+std::vector<double> smf_onsets(const std::vector<uint8_t>& d) {
+    std::vector<double> out;
+    auto be = [&](size_t i, int n) {
+        size_t v = 0;
+        for (int k = 0; k < n; ++k) v = (v << 8) | d.at(i + static_cast<size_t>(k));
+        return v;
+    };
+    const double division = static_cast<double>(be(12, 2));
+    const size_t tracks = be(10, 2);
+    size_t pos = 14;
+    for (size_t t = 0; t < tracks; ++t) {
+        const size_t length = be(pos + 4, 4);
+        size_t i = pos + 8, end = i + length, now = 0;
+        uint8_t status = 0;
+        auto vlq = [&]() {
+            size_t v = 0;
+            uint8_t b = 0;
+            do {
+                b = d.at(i++);
+                v = (v << 7) | (b & 0x7F);
+            } while (b & 0x80);
+            return v;
+        };
+        while (i < end) {
+            now += vlq();
+            uint8_t b = d.at(i);
+            if (b & 0x80) {
+                ++i;
+                if (b < 0xF0) status = b;
+            } else {
+                b = status;
+            }
+            if (b == 0xFF) {
+                ++i;
+                i += vlq();
+            } else if (b == 0xF0 || b == 0xF7) {
+                i += vlq();
+            } else {
+                const uint8_t kind = b & 0xF0;
+                if (kind == 0x90 && d.at(i + 1) != 0) out.push_back(static_cast<double>(now) / division);
+                i += (kind == 0xC0 || kind == 0xD0) ? 1u : 2u;
+            }
+        }
+        pos = end;
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+}  // namespace
+
+void test_xmi_matches_mdi() {
+    std::printf("test_xmi_matches_mdi (XMIDI -> SMF: every file converts; its timing matches the international .MDI)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    const std::filesystem::path us = assets;
+    const std::filesystem::path intl = us.parent_path();
+    const auto upper_ext = [](const std::filesystem::path& p) {
+        std::string ext = p.extension().string();
+        for (char& c : ext) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        return ext;
+    };
+    std::vector<std::pair<std::string, std::vector<double>>> mdis;
+    for (const auto& entry : std::filesystem::directory_iterator(intl))
+        if (upper_ext(entry.path()) == ".MDI")
+            mdis.push_back({entry.path().filename().string(),
+                            smf_onsets(gaius::formats::xmi::read_file(entry.path().string()))});
+    int converted = 0;
+    bool all_convert = true;
+    std::vector<std::string> pairs;
+    for (const auto& entry : std::filesystem::directory_iterator(us)) {
+        const std::string ext = upper_ext(entry.path());
+        if (ext != ".XMI" && ext != ".XM2") continue;
+        std::vector<double> ours;
+        try {
+            const std::vector<uint8_t> xmi = gaius::formats::xmi::read_file(entry.path().string());
+            all_convert = all_convert && gaius::formats::xmi::sequence_count(xmi) >= 1;
+            ours = smf_onsets(gaius::formats::xmi::to_midi(xmi));
+            ++converted;
+        } catch (const std::exception& e) {
+            std::printf("    %s: %s\n", entry.path().filename().string().c_str(), e.what());
+            all_convert = false;
+            continue;
+        }
+        if (ext != ".XMI") continue;
+        // The .MDI files are re-orchestrated for General MIDI (drums moved to
+        // other channels and pitches, velocities changed) and some renumbered,
+        // but a cue keeps its note count and, at 120 ticks a second, its timing.
+        for (const auto& [name, theirs] : mdis) {
+            if (theirs.size() != ours.size() || ours.empty()) continue;
+            double deviation = 0;
+            for (size_t i = 0; i < ours.size(); ++i) deviation = std::max(deviation, std::abs(ours[i] - theirs[i]));
+            if (deviation <= 0.05) pairs.push_back(entry.path().stem().string() + "=" + name);
+        }
+    }
+    CHECK(converted == 28 && all_convert);
+    if (mdis.empty()) {
+        skip("no international .MDI files beside the US folder");
+        return;
+    }
+    std::sort(pairs.begin(), pairs.end());
+    for (const auto& p : pairs) std::printf("    %s\n", p.c_str());
+    CHECK(pairs == std::vector<std::string>({"CZARJIN1=CZARJIN2.MDI", "CZARJIN6=CZARJIN6.MDI", "CZARJINA=CZARJINA.MDI",
+                                             "CZARJINB=CZARJINB.MDI"}));
+}
+
+void test_screen_data() {
+    std::printf("test_screen_data (CONTFRM.GD8 Forum click map, EDATA.CSR province markers)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    const gaius::formats::screen_data::ClickMap map =
+        gaius::formats::screen_data::load_click_map(std::string(assets) + "/CONTFRM.GD8");
+    // The statue (1) at the top, the legionary (3), the Treasurer (5), and nothing in the corner.
+    CHECK(map.region_at(84, 4) == 1 && map.region_at(32, 44) == 3 && map.region_at(150, 80) == 5);
+    CHECK(map.region_at(316, 4) == 0 && map.region_at(-1, 0) == 0);
+    const auto markers = gaius::formats::screen_data::load_province_markers(std::string(assets) + "/EDATA.CSR");
+    CHECK(markers[0].x == 0x85 - 8 && markers[0].y == 0x93 - 32);
+    bool on_screen = true;
+    for (const auto& m : markers) on_screen = on_screen && m.x >= -8 && m.x < 320 && m.y >= -32 && m.y < 200;
+    CHECK(on_screen);
+}
+
 void test_campaign_start_province() {
     std::printf("test_campaign_start_province (0x5730 reset, 0x621F Prima Cohors, 0x6307 highway, 0x56B8 new game)\n");
     using namespace gaius::systems;
@@ -4905,6 +5117,10 @@ int main() {
     test_campaign_start_province();
     test_forum_controls();
     test_save_write_round_trip();
+    test_vas_animations();
+    test_voc_sounds();
+    test_xmi_matches_mdi();
+    test_screen_data();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();

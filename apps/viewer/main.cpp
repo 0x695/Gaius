@@ -61,7 +61,10 @@
 
 #include "apps/viewer/save_view.hpp"
 #include "apps/viewer/screens.hpp"
+#include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
+#include "formats/screen_data/screen_data.hpp"
+#include "formats/vpx/vpx.hpp"
 #include "render/city_render.hpp"
 #include "render/province_render.hpp"
 #include "systems/campaign.hpp"
@@ -331,6 +334,12 @@ int main(int argc, char** argv) {
     bool have_icons = false;
     render::ProvinceSprites province_sprites;  // FIXT3.PL8, SPRITE2.PL8
     bool have_province_sprites = false;
+    // The Forum's hall: NEWFORUM.VPX in NEWFORUM.256, and CONTFRM.GD8, the map
+    // of which figure is under a click (formats/screen_data).
+    formats::IndexedImage forum_picture;
+    formats::Palette forum_palette;
+    formats::screen_data::ClickMap forum_clicks;
+    bool have_forum_picture = false;
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -347,6 +356,19 @@ int main(int argc, char** argv) {
                 try {
                     province_sprites = render::load_province_sprites(dir);
                     have_province_sprites = true;
+                } catch (const formats::FormatError&) {
+                }
+                const auto asset = [&](std::string name) {
+                    fs::path p = fs::path(dir) / name;
+                    if (fs::exists(p)) return p.string();
+                    for (char& ch : name) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                    return (fs::path(dir) / name).string();
+                };
+                try {
+                    forum_picture = formats::vpx::decode(asset("NEWFORUM.VPX")).image;
+                    forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
+                    forum_clicks = formats::screen_data::load_click_map(asset("CONTFRM.GD8"));
+                    have_forum_picture = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -514,7 +536,8 @@ int main(int argc, char** argv) {
     // ---- The screens: the city, the province, the Forum, a promotion offer and
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
-    enum class Screen { City, Province, Maps, Forum, Promotion, Battle, Ending, Start, Files };
+    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files };
+    int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
     Screen files_return = Screen::Forum;  // where the save / load page goes back to
     bool files_saving = false;
@@ -529,7 +552,8 @@ int main(int argc, char** argv) {
     bool quit_requested = false;
     if (start_screen == "maps") screen = Screen::Maps;
     if (start_screen == "province") screen = Screen::Province;
-    if (start_screen == "forum") screen = Screen::Forum;
+    if (start_screen == "forum") screen = have_forum_picture ? Screen::ForumHall : Screen::Forum;
+    if (start_screen == "forum-page") screen = Screen::Forum;
     Screen battle_return = Screen::Province;
     viewer::ForumTab forum_tab =
         static_cast<viewer::ForumTab>(std::clamp(start_forum_tab, 0, static_cast<int>(viewer::kForumTabCount) - 1));
@@ -711,7 +735,8 @@ int main(int argc, char** argv) {
             return;
         }
         if (screen == Screen::Forum) {
-            if (!viewer::apply_forum_action(state, action, forum_tab)) screen = Screen::City;
+            if (!viewer::apply_forum_action(state, action, forum_tab))
+                screen = have_forum_picture ? Screen::ForumHall : Screen::City;
         } else if (screen == Screen::Promotion) {
             if (action == viewer::kActionAccept) {
                 if (promotion_to_caesar) {
@@ -957,6 +982,7 @@ int main(int argc, char** argv) {
         std::vector<ui::PanelButton> overlay_buttons;
         for (int i = 0; i < viewer::kOverlayCount; ++i) overlay_buttons.push_back({viewer::kOverlayNames[i], 1100 + i});
         const ui::PanelLayout overlay_bar = ui::bar_layout(overlay_buttons, page_metrics, kLogicalW, kLogicalH);
+        const ui::PanelLayout hall_bar = ui::bar_layout({}, page_metrics, kLogicalW, kLogicalH);
         const ui::PanelLayout strip = ui::strip_layout(screen_tabs, page_metrics, kLogicalW);
         std::vector<ui::PanelButton> province_buttons;
         for (int i = 0; i < kProvinceCommandCount; ++i) province_buttons.push_back({kProvinceCommands[i].label, 1000 + i});
@@ -971,7 +997,10 @@ int main(int argc, char** argv) {
             return -1;
         };
         const auto switch_to = [&](int i) {
-            screen = i == 0 ? Screen::City : i == 1 ? Screen::Province : i == 2 ? Screen::Maps : Screen::Forum;
+            screen = i == 0   ? Screen::City
+                     : i == 1 ? Screen::Province
+                     : i == 2 ? Screen::Maps
+                              : (have_forum_picture ? Screen::ForumHall : Screen::Forum);
             order_cohort = patrol_x = patrol_y = -1;
             province_image_dirty = true;
         };
@@ -994,6 +1023,24 @@ int main(int argc, char** argv) {
             }
             if (const int tab = strip_hit(lx, ly); tab >= 0) {
                 switch_to(tab);
+                return;
+            }
+            if (screen == Screen::ForumHall) {
+                // 0x0DF57: the figure under the click opens its advisor
+                // (findings section 34.2). Those Gaius has no page for say so.
+                const int region = forum_clicks.region_at(lx, ly);
+                const int tab = region == 2   ? viewer::kGovernor
+                                : region == 3 ? viewer::kLegion
+                                : region == 5 ? viewer::kTreasurer
+                                : region == 6 ? viewer::kRatings
+                                : region == 7 ? viewer::kTribune
+                                              : -1;
+                if (tab >= 0) {
+                    forum_tab = static_cast<viewer::ForumTab>(tab);
+                    screen = Screen::Forum;
+                } else if (region != 0) {
+                    std::printf("that advisor isn't modeled yet\n");
+                }
                 return;
             }
             if (screen == Screen::Maps) {
@@ -1098,6 +1145,10 @@ int main(int argc, char** argv) {
                                                                                           : 0);
                         break;
                     case platform::CommandType::Secondary:
+                        if (save_mode && screen == Screen::ForumHall) {
+                            screen = Screen::City;  // right-click leaves the Forum
+                            break;
+                        }
                         if (save_mode && screen == Screen::Province) {
                             // Right-click forgets an order being given.
                             order_cohort = patrol_x = patrol_y = -1;
@@ -1216,6 +1267,7 @@ int main(int argc, char** argv) {
                         const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
                         hovered = inside && screen == Screen::City ? toolbar.hit_test(lx, ly) : -1;
                         page_hovered = -1;
+                        hall_hover = inside && screen == Screen::ForumHall ? forum_clicks.region_at(lx, ly) : 0;
                         if (inside && page_screen()) {
                             const ui::Page page = current_page();
                             page_hovered =
@@ -1272,6 +1324,23 @@ int main(int argc, char** argv) {
                 frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
+            } else if (save_mode && screen == Screen::ForumHall) {
+                // The original's Forum picture, clicked through its own click map.
+                frame.resize(static_cast<size_t>(kLogicalW) * kLogicalH * 3);
+                for (size_t i = 0; i < forum_picture.pixels.size() && i * 3 + 2 < frame.size(); ++i) {
+                    const formats::RGB c = forum_palette.colors[forum_picture.pixels[i]];
+                    frame[i * 3] = c.r;
+                    frame[i * 3 + 1] = c.g;
+                    frame[i * 3 + 2] = c.b;
+                }
+                static constexpr const char* kFigures[] = {"Choose an advisor",       "The statue",
+                                                            "The governor's affairs",  "The Military Advisor",
+                                                            "An advisor",              "The Treasurer",
+                                                            "The ratings",             "The Tribune of the Plebs",
+                                                            "Industry"};
+                ui::render_bar({}, -1, hall_bar, frame, kLogicalW, kLogicalH, page_metrics, font,
+                               kFigures[std::clamp(hall_hover, 0, 8)]);
+                ui::render_strip(screen_tabs, 3, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
             } else if (save_mode && screen == Screen::Province) {
                 if (have_province_sprites) {
                     if (province_image_dirty) {
