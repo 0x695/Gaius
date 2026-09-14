@@ -572,7 +572,7 @@ void remove_forum(model::CityState& state, int x, int y) {
     auto& t = sized(state.table_480, 480);
     for (size_t r = 0; r < 480; r += 16) {
         if (word_at(t, r + 8) == 0 || word_at(t, r) != x || word_at(t, r + 2) != y) continue;
-        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 16), 0);
+        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 16), uint8_t{0});
         service::apply_flags_clear_mode(state.city, x, y, 10, 0x02);
         service::apply_flags_clear_mode(state.city, x, y, 10, 0x10);
         return;
@@ -588,7 +588,7 @@ void remove_workshop(model::CityState& state, int x, int y) {
         const int goods = word_at(t, r + 4);
         auto& per_goods = sized(state.table_8, 8);
         if (goods >= 0 && goods < 8) --per_goods[static_cast<size_t>(goods)];
-        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 24), 0);
+        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 24), uint8_t{0});
         return;
     }
 }
@@ -599,7 +599,7 @@ void remove_barracks(model::CityState& state, int x, int y) {
     auto& t = sized(state.table_120, 120);
     for (size_t r = 0; r < 120; r += 12) {
         if (word_at(t, r + 6) == 0 || word_at(t, r) != x || word_at(t, r + 2) != y) continue;
-        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 12), 0);
+        std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 12), uint8_t{0});
         return;
     }
 }

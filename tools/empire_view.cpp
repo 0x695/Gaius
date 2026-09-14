@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
             std::map<uint8_t, int> counts;
             for (uint8_t v : map.cells) counts[v]++;
             for (auto& [v, c] : counts) std::printf("  %02X %5d\n", v, c);
-            for (uint8_t special : {0x41, 0x4A, 0x4B, 0x61}) {
+            for (uint8_t special : {uint8_t{0x41}, uint8_t{0x4A}, uint8_t{0x4B}, uint8_t{0x61}}) {
                 std::printf("  positions of %02X:", special);
                 for (int y = 0; y < kMapH; ++y)
                     for (int x = 0; x < kMapW; ++x)

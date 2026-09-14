@@ -10,6 +10,8 @@ endif()
 
 if(MSVC)
   add_compile_options(/W4)
+  # getenv is fine here: only test and tool configuration reads it.
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
   add_compile_options(-Wall -Wextra)
 endif()

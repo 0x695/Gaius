@@ -58,7 +58,8 @@ int g_skipped = 0;
 #define CHECK(cond)                                                                         \
     do {                                                                                    \
         ++g_ran;                                                                            \
-        if (!(cond)) {                                                                      \
+        const bool check_ok_ = static_cast<bool>(cond); /* a variable: no C4127 */          \
+        if (!check_ok_) {                                                                   \
             ++g_failures;                                                                   \
             std::fprintf(stderr, "  FAIL: %s (%s:%d)\n", #cond, __FILE__, __LINE__);        \
         }                                                                                    \
@@ -1679,11 +1680,11 @@ void test_construction_drag_rules() {
     CHECK(!clear_area(f->city, random, 12, 10));  // open ground: nothing to clear
 }
 
-// Every road network in eleven real saves, rebuilt cell by cell with
+// Every road network in the real saves, rebuilt cell by cell with
 // place_road: road pieces (0x36-0x40) are reset to open ground and placed
 // again in row order.
 void test_construction_road_rebuild_real_saves() {
-    std::printf("test_construction_road_rebuild_real_saves (place_road vs eleven real saves)\n");
+    std::printf("test_construction_road_rebuild_real_saves (place_road vs the real saves)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     using namespace gaius::systems::construction;
@@ -2409,7 +2410,7 @@ void test_month_year_accounts() {
 }
 
 void test_month_economy_matches_saves() {
-    std::printf("test_month_economy_matches_saves (0x28621/0x28694/0x28800/0x28826 vs eleven real saves)\n");
+    std::printf("test_month_economy_matches_saves (0x28621/0x28694/0x28800/0x28826 vs the real saves)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     for (const char* name : kRealSaves) {
@@ -2491,7 +2492,7 @@ void test_month_consecutive_saves() {
 }
 
 void test_month_state_from_saves() {
-    std::printf("test_month_state_from_saves (calendar globals from eleven real saves)\n");
+    std::printf("test_month_state_from_saves (calendar globals from the real saves)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     struct Case {
@@ -2888,7 +2889,7 @@ void test_ui_game_font_matches_screenshot() {
 }
 
 void test_save_corpus_real() {
-    std::printf("test_save_corpus_real (eleven saves from two real play sessions)\n");
+    std::printf("test_save_corpus_real (the real saves from three play sessions)\n");
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
     fs::path saves = fs::path(dir) / "gaius_test_saves";
@@ -3242,7 +3243,7 @@ void test_save_corpus_simulation() {
 }
 
 // population_units against the engine's own count, DS:0x6C10 (stored x4 at
-// DS:0x6C0E), in eleven real saves. The engine counts at step 101 of each month
+// DS:0x6C0E), in the real saves. The engine counts at step 101 of each month
 // and houses change during steps 0-99 of the next, so a save taken mid-month
 // can hold tiles that changed after the count (0x2C93F is the only writer of
 // DS:0x6C10, and it counts every 0xC8-0xD7 cell unconditionally). Eight saves
