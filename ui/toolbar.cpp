@@ -188,10 +188,10 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
     const char* candidate = with_funds.empty() ? shown : with_funds.c_str();
     const int available = std::max(0, p.w - 2 * m.pad_px);
     if (font) {
-        int tw = game_text_width(candidate, m.glyph_scale);
+        int tw = game_text_width(candidate, m.glyph_scale, *font);
         if (!with_funds.empty() && tw > available) {
             candidate = shown;
-            tw = game_text_width(shown, m.glyph_scale);
+            tw = game_text_width(shown, m.glyph_scale, *font);
         }
         draw_game_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), candidate, m.glyph_scale, *font);
     } else {

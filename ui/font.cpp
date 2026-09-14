@@ -60,6 +60,7 @@ constexpr Glyph kFont[] = {
     {{0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b01100}},  // .
     {{0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000}},  // /
     {{0b00000, 0b01100, 0b01100, 0b00000, 0b01100, 0b01100, 0b00000}},  // :
+    {{0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b00100, 0b01000}},  // ,
 };
 
 // Returns -1 for characters with no glyph, which draw_text renders as a
@@ -75,6 +76,7 @@ int glyph_index(char c) {
         case '.': return 38;
         case '/': return 39;
         case ':': return 40;
+        case ',': return 41;  // the cost labels ("Forum grade 3, 140 Dn")
         default: return -1;
     }
 }

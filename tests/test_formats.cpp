@@ -3373,6 +3373,26 @@ void test_ui_metrics_scale_together() {
     CHECK(breakpoint_for(440, 960, true) == breakpoint_for(960, 440, true));
 }
 
+// The funds figure joins the label row only when the two fit the panel
+// together; otherwise the label is drawn exactly as it would be alone.
+void test_ui_toolbar_funds_label() {
+    std::printf("test_ui_toolbar_funds_label\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+    const CommandId tools[] = {CommandId::Housing, CommandId::Road};
+    const Toolbar bar(tools, 2, metrics_for(Breakpoint::Desktop), 320, 200);
+    auto color = [](uint8_t) { return gaius::formats::RGB{0, 0, 0}; };
+    auto draw = [&](const char* funds) {
+        std::vector<uint8_t> rgb(320 * 200 * 3, 0);
+        render(bar, 0, -1, color, rgb, 320, 200, nullptr, nullptr, nullptr, "Housing, 2 Dn", funds);
+        return rgb;
+    };
+    const auto plain = draw(nullptr);
+    CHECK(draw("Funds 3144 Dn") != plain);
+    CHECK(draw("") == plain);
+    CHECK(draw("Funds 3144 Dn and a great deal more text than the panel could ever hold") == plain);
+}
+
 void test_ui_toolbar_layout() {
     std::printf("test_ui_toolbar_layout\n");
     using namespace gaius::ui;
@@ -3581,6 +3601,7 @@ int main() {
     test_construction_place();
     test_construction_to_simulation_pipeline();
     test_ui_metrics_scale_together();
+    test_ui_toolbar_funds_label();
     test_ui_toolbar_layout();
     test_ui_hit_test_matches_drawn_buttons();
     test_ui_font_rendering();
