@@ -84,10 +84,12 @@ inline const std::array<C9D4BitInfo, 8> kC9D4BitTable = {{
     {0x10, "persistent_connection_state", Confidence::High,
      "Survives the &=0x12 reset (0x2C8D3), but routine 0x2DA0D then converts it into 0x02 and clears it -- so it "
      "only persists from when it is set until the next tick start."},
-    {0x20, "religious", Confidence::StrongInference,
+    {0x20, "administration", Confidence::High,
      "Forums (tiles 0xE0-0xE7, which the corpus called temples) set it at radius 6/8/10/12, and the Prefecture "
-     "handler (tile 0xEE, 0x2C267) at radius 4. The corpus's 'religious' label rests on the temple misreading and "
-     "is unverified against any consumer; kept as the name only for continuity."},
+     "handler (tile 0xEE, 0x2C267) at radius 4. Its consumer is the yearly population tax (0x282A1): only housing "
+     "cells with 0x20 pay, and a house without it sets DS:0x6C7E, which the advisor text picker (0xD007) reads -- "
+     "the manual's 'taxes will be automatically collected from nearby houses' of the Forum. The corpus's "
+     "'religious' rested on the temple misreading (renamed 2026-09-14, findings section 25)."},
     {0x40, "localized_service_coverage_b", Confidence::High,
      "Set at radius 4 by the handler shared by tiles 0xEC (School) and 0xED (Hospital), 0x2C20D. Both are "
      "construction seeds, and the engine also counts 0xEC-0xED cells together (/4)."},

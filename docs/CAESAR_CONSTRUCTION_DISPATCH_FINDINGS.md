@@ -553,7 +553,7 @@ After population and water, four routines turn the month's state into the next m
 - **`0x28826`** gives `DS:0x6BF6`, the land-value growth base, from `DS:0x6C04` and `DS:0x6C06` / 10.
 - Then `DS:0x6C00` += `DS:0x6C04`.
 
-Recomputed from each real save's own inputs, all five outputs match in all four saves (`test_month_economy_matches_saves`). `systems::month::run_month` on a whole save now runs this, so the month no longer relies on the bases read from the save. What `DS:0x6C04` and `DS:0x6C06` are to the player isn't established.
+Recomputed from each real save's own inputs, all five outputs match in all four saves (`test_month_economy_matches_saves`). `systems::month::run_month` on a whole save now runs this, so the month no longer relies on the bases read from the save. Section 25 names them: `DS:0x6C04` is the population tax rate and `DS:0x6C06` the conscription rate.
 
 ### 19.4 The rest of the month, classified
 
@@ -913,3 +913,86 @@ The coverage and service layers match too (they're rebuilt each month and unchan
 - **Development under random pressure.** Nothing burned, collapsed or wore out in these months.
 
 Also seen: `7BB4` bit `0x40` moves along the road at column 81 (rows 0-17) between every pair -- the mark a walker leaves on the cell it occupies.
+
+## 25. The treasury: costs, taxes and the yearly accounts (2026-09-14)
+
+The city's money runs through three places: the build routine charges construction, step 101 sums the tax rates, and the yearly routine `0x28238` settles the accounts. `systems::economy` implements all three.
+
+### 25.1 Construction costs
+
+- **The build routine** (`0x11D97`-`0x120BF`) calls a command's handler through `DS:127C` only when its cost is no more than the funds `DS:0x6CA2`. When the handler succeeds (`DS:0x6D0A` = 0) it takes the cost from the funds and adds it to the year's construction `DS:0x6BC0`.
+- **The costs** are the 44 words at `3496:1548`, by command id; the Forum's is `3496:15A0`[grade]. They are the manual's prices: Clear Area 1, Road 3, Reservoir/pipe 3, Wall 5, Tower 10, Well 5, Fountain 10, Housing 2, Temple 20, Bath Houses 40, Hospital 60, School 60, Oracle 200, Theater 100, Coliseum 200, Hippodrome 300, Plaza 10, Barracks 80, Prefecture 25, Heavy Industry 300, Market 20, Workshop 50, Fort 500.
+- **Road, pipe and wall** (commands 4, 5 and 7, `0x11E12`) charge each cell as the drag lays it and keep a running total; a right-click cancel gives it back (funds `+=`, `DS:0x6BC0` `-=`).
+- **Province commands** (ids 36, 37 and 42) have their cost doubled or quadrupled by the province terrain under the cursor (`0x11CD4`-`0x11D86`). Not modeled.
+- **Emergency funds, `0x120C0`.** When a placement can't be afforded, the first time in a game (`DS:0x6C9A`) and only up to rank 6 (`DS:0x6C30`), Rome sends 500 Dn with a message. The placement isn't retried.
+- **Every other write to the funds:**
+  - a new province (`0x57BE`, `0xF7C5`) sets them from `DS:0x6C0C`, then takes 1000 for each rank above 1, up to three times, while they're at least 5000, and above rank 4 another 200 x (rank - 4) while they're at least 4000, not below 4000;
+  - the Forum's donation (`0xC26E`) moves `DS:0x6C28` from the governor's savings `DS:0x6C2E` and adds 90 % of it;
+  - the toolbar's display routine (`0x212A1`) clamps them to 0-25000 whenever it draws.
+
+### 25.2 The rates, and the loader
+
+The Forum screens change these words with arrow buttons, each with its own limits. The names are the manual's (Treasurer, Military Advisor, Tribune of the Plebs, the Forum's own panel), matched by what each word does below; STRONG INFERENCE.
+
+| Word | Limits | Name |
+|---|---|---|
+| `DS:0x6C04` | 0-25 (`0xE7AE`) | population tax rate |
+| `DS:0x6C02` | 0-25 (`0xE7D2`) | industrial tax rate |
+| `DS:0x6C06` | 0-50 (`0xE650`) | conscription rate ("up to fifty percent") |
+| `DS:0x6C08` | 0-999 (`0xE637`) | army wages bill |
+| `DS:0x6C46` | 0-9999 (`0xEB13`) | pleb welfare expenditure |
+| `DS:0x6C2C` | 0-9999 (`0xC164`) | governor's salary, added yearly to the savings `DS:0x6C2E` |
+
+- **Step 101** (`0x28215`) adds `DS:0x6C04` to `DS:0x6C00` and `DS:0x6C02` to `DS:0x6BFE`, so at the year's end each holds twelve months of its rate.
+- **The loader** (`0x4612`-`0x56B7`) reads the save in the writer's order, `final_state` included, then sets `DS:0x6BFE` = `DS:0x6C02` x month. `0x6BFE` is the one sum the save doesn't keep; `0x6C00` and `0x6C02` it does, `0x6C02` in `final_state`.
+
+### 25.3 The year's accounts (`0x28238`)
+
+When the calendar turns the year it:
+
+1. divides `DS:0x6C00` and `DS:0x6BFE` by 12, giving the year's average rates;
+2. **`0334:6CB1` (flat `0x9FF1`)**: `DS:0x6BE8` = the active workshops' average production level (+0x10 & 7), 0 with none;
+3. **`0x282A1`, population tax**:
+   - each housing cell (`0xC8`-`0xD7`) whose C9D4 has bit `0x20` adds its tax units, `3496:008E`[tile - `0xC8`] (1, 2, 4, 6, 7, 10, 14, 9, 13, 15, 16, 17, 18, 20, 22, 25 -- the 16 bytes after the population table);
+   - a house without the bit sets `DS:0x6C7E`, which the advisor text picker (`0xD007`) reads;
+   - `DS:0x6BC6` = units x average rate / 20;
+   - tax per head: x = `DS:0x6BC6` x 100 / (`DS:0x6C0E` + 1), `DS:0x6BCA` = x / 100 and `DS:0x6BC8` = x % 100, in denarii and hundredths.
+
+   Bit `0x20` comes from forums and prefectures, the manual's administrative reach where "taxes will be automatically collected". `kC9D4BitTable` called it "religious" after the temple misreading; it's now "administration".
+4. **`0x283D3`, industrial tax**:
+   - `DS:0x6BC4` = the sum of each active workshop's level x 64, times the average industrial rate, / 25;
+   - then the industrial tax pressure `DS:0x6BFC` (the workshop level's band term, section 20.6): with no forum it resets to -50; a rate of 5 leaves it, rates of 6-10 add rate - 5 (plus half again while it is below 3), and rates below 5 or above 10 add twice rate - 5; clamped to -50..24.
+5. **`0x284AA`, the settlement**:
+   - construction: `DS:0x6BC2` = `DS:0x6BC0`, which restarts at 0;
+   - savings += salary; past 25000 they stay at 25000, the salary drops to 0 and a message is posted;
+   - operating costs `DS:0x6BBE` = welfare + salary + army wages;
+   - funds += both taxes - operating costs, not below 0;
+   - the tribute due `DS:0x6BBA` grows by 1, up to 100 (it starts at 50, `0x5968`: the manual's "begins at fifty Denarii, and increases by one"). It is paid from the funds, or all of them if they're short, into `DS:0x6BAA`, and a payment resets the missed count `DS:0x6BB8`;
+   - if the funds are still above 500 and the year made a profit (taxes - construction - operating costs), Rome also takes 60 % of that profit;
+   - nothing paid: `DS:0x6BB8` + 1, the funds go to 0, and a message (`0x27AF3`) picks its text by the count; at 3 the game ends (`DS:0x6D6A` = `0x3C`);
+   - profit or loss `DS:0x6BB6` = taxes - construction - operating costs - tribute paid, copied with the other four figures to `0x6BB4`-`0x6BAC`, the Treasurer's report;
+   - welfare is cut to the funds, if it exceeds them;
+6. zeroes both sums and copies the pleb count `DS:0x6C56` to last year's `DS:0x6C54`;
+7. writes the histories (section 22.3), then runs the army (`0x289C0`), the ratings (`0x28C43`), promotion (`0x29023`) and `0x2933B`, which aren't transcribed.
+
+### 25.4 Checked against the saves
+
+- **Every year balances.** In every year of funds (`table_60_c`) and profit (`table_72`) the saves' histories hold -- years -13 to -2 of the first city, -13 to 13 of the second -- the year's change in funds is that year's profit, with two exceptions:
+  - year -2 of `CAESARUX`'s city gained 18 Dn outside the accounts. The governor's savings would be 210 by then (`CAESARWX`'s 160 and five more years of salary 10) but are 190 in `CAESARVX`: a donation of 20, 90 % of it to the city;
+  - year 3 of `CAESARXW`'s city gained 500: the emergency funds flag `DS:0x6C9A` is 0 in `CAESARXU` and 1 in `CAESARXT`.
+- **Each save's last year is reproduced.** `test_economy_year_end_matches_saves` starts from the funds a year earlier, less that year's construction (plus the grant or donation above), and runs `settle_accounts` with the saved taxes, operating costs and tribute due. It lands on the saved funds, tribute paid and profit in all 17 saves, and the saved tax per head matches last year's population tax and population.
+- **The taxes are consistent, not proven.** No save holds the city as it stood at a year's end.
+  - `CAESARUX`'s 71 Dn of population tax is 284 tax units at an average rate of 5: `CAESARVX` shows the year's sum at 21 after four months, and 21 + 8 x 6 = 69, which is 5 after dividing by 12.
+  - `CAESARXQ`'s 53 Dn of industrial tax is 3 levels at 7 %: 3 x 64 x 7 / 25 = 53, with its industrial rate 7.
+  - The industrial tax pressure of `CAESARXS`, `CAESARXR` and `CAESARXQ`, all without a forum, is -49, -49 and -47: -50 plus one year at 6 %, 6 % and 7 %.
+
+### 25.5 In Gaius, and what's open
+
+- **`systems::economy`**: `construction_cost`, `can_afford`, `charge`/`refund`, `grant_emergency_funds`, `donate_savings`, `average_workshop_level`, `population_tax`, `industrial_tax`, `industrial_tax_pressure`, `settle_accounts` and `run_year`. `systems::month::run_step` runs `run_year` when the year turns, before the histories, and keeps `DS:0x6BFE` in `SimState`.
+- **`gaius_viewer`** charges each placement, asks Rome for the emergency funds when it can't, shows the cost in the tool label, and prints the funds each month and the Treasurer's report each year.
+- **Not modeled:**
+  - the messages;
+  - the province commands' terrain multiplier;
+  - a cancel gesture for drags in the viewer, so no refund;
+  - the rest of the yearly routine;
+  - what pleb welfare does at step 105 (`0x2DF01`, `0x2DF40`).

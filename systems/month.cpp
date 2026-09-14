@@ -9,6 +9,7 @@
 #include "formats/save/save.hpp"
 #include "systems/actors.hpp"
 #include "systems/construction.hpp"
+#include "systems/economy.hpp"
 #include "systems/housing.hpp"
 
 namespace gaius::systems::month {
@@ -50,6 +51,7 @@ SimState sim_state_from_save(const model::CityState& state) {
     sim.road_wear_threshold = saved_word(state, 0x6BE0);
     sim.collapse_threshold = saved_word(state, 0x6BE2);
     sim.fire_threshold = saved_word(state, 0x6BE4);
+    sim.industrial_rate_sum = model::global_word(state, 0x6C02) * sim.month;
     return sim;
 }
 
@@ -265,16 +267,19 @@ void run_step(model::CityState& state, SimState& sim) {
         model::set_global_word(state, 0x6C10, sim.population_units);
         model::set_global_word(state, 0x6C0E, 4 * sim.population_units);
         run_economy(state);
+        sim.industrial_rate_sum += model::global_word(state, 0x6C02);  // 0x28230
         sim.land_value_growth_base = model::global_word(state, 0x6BF6);
         sim.service.housing_coverage_base = model::global_word(state, 0x6BF8);
     }
     model::set_global_word(state, 0x6C1C, sim.month);
     model::set_global_word(state, 0x6C32, sim.year);
     // The calendar (0x29472) calls the yearly routine 0x28238 when the year
-    // turns. Only its history writes are modeled; 0x282A1, 0x283D3 and
-    // 0x284AA, which run before them and may change the recorded values, and
-    // the routines after them aren't read yet.
-    if (sim.year != year_before) record_history(state, sim.year);
+    // turns: the accounts, then the history writes. The routines after them
+    // (the army, ratings, promotion) aren't transcribed.
+    if (sim.year != year_before) {
+        economy::run_year(state, sim.industrial_rate_sum);
+        record_history(state, sim.year);
+    }
 }
 
 void run_month(model::CityState& state, SimState& sim) {

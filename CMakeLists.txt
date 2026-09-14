@@ -83,6 +83,7 @@ add_library(gaius_systems STATIC
   systems/construction.cpp
   systems/month.cpp
   systems/actors.cpp
+  systems/economy.cpp
 )
 target_link_libraries(gaius_systems PUBLIC gaius_model)
 

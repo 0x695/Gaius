@@ -67,6 +67,7 @@
 #include "platform/window.hpp"
 #include "stb_image_write.h"
 #include "systems/construction.hpp"
+#include "systems/economy.hpp"
 #include "ui/metrics.hpp"
 #include "ui/toolbar.hpp"
 
@@ -347,7 +348,15 @@ int main(int argc, char** argv) {
     // move a pixel each step.
     constexpr Uint32 kStepMs = 19;
     auto report_month = [&]() {
-        std::printf("month %d, year %d: population %d\n", sim.month + 1, sim.year, 4 * sim.population_units);
+        std::printf("month %d, year %d: population %d, funds %d Dn\n", sim.month + 1, sim.year,
+                    4 * sim.population_units, model::global_word(state, systems::economy::kFunds));
+        if (sim.month == 0) {
+            // The year just settled (systems::economy::run_year): the Treasurer's report.
+            auto g = [&](uint16_t ds) { return model::global_word(state, ds); };
+            std::printf("  last year: population tax %d, industrial tax %d, construction %d, operating costs %d, "
+                        "tribute %d, profit %d\n",
+                        g(0x6BB2), g(0x6BB0), g(0x6BAE), g(0x6BAC), g(0x6BAA), g(0x6BB4));
+        }
     };
     auto advance_month = [&]() {
         systems::month::run_month(state, sim);
@@ -375,8 +384,10 @@ int main(int argc, char** argv) {
             return "Forum grade " + std::to_string(forum_grade + 1) + ", " +
                    std::to_string(construction::kForumGradeCost[static_cast<size_t>(forum_grade)]) + " Dn";
         if (tool == construction::CommandId::Workshop)
-            return std::string("Workshop: ") + construction::kWorkshopGoodsNames[static_cast<size_t>(workshop_goods)];
-        return construction::command_name(tool);
+            return std::string("Workshop: ") + construction::kWorkshopGoodsNames[static_cast<size_t>(workshop_goods)] +
+                   ", " + std::to_string(systems::economy::construction_cost(tool)) + " Dn";
+        const int cost = systems::economy::construction_cost(tool);
+        return std::string(construction::command_name(tool)) + (cost > 0 ? ", " + std::to_string(cost) + " Dn" : "");
     };
     auto cycle_variant = [&]() {
         const auto tool = kBuildTools[tool_index];
@@ -392,15 +403,31 @@ int main(int argc, char** argv) {
     };
     auto place_tool = [&](systems::construction::CommandId tool, int x, int y) {
         namespace construction = systems::construction;
-        switch (tool) {
-            case construction::CommandId::Road: return construction::place_road(state.city, drag, x, y);
-            case construction::CommandId::Wall: return construction::place_wall(state.city, drag, x, y);
-            case construction::CommandId::Plaza: return construction::place_plaza(state.city, x, y);
-            case construction::CommandId::ClearArea: return construction::clear_area(state, sim.random, x, y);
-            case construction::CommandId::Forum: return construction::place_forum(state, forum_grade, x, y);
-            case construction::CommandId::Workshop: return construction::place_workshop(state, workshop_goods, x, y);
-            default: return construction::place(state.city, tool, x, y);
+        namespace economy = systems::economy;
+        // The engine checks the cost before calling the handler and charges it
+        // only when the handler succeeds; a drag pays per cell (0x11DAC-0x120B0).
+        const int cost = economy::construction_cost(tool, forum_grade);
+        if (!economy::can_afford(state, cost)) {
+            if (economy::grant_emergency_funds(state))
+                std::printf("Rome sends 500 Dn in emergency funds\n");
+            else
+                std::printf("not enough funds: %s costs %d Dn\n", construction::command_name(tool), cost);
+            return false;
         }
+        bool placed = false;
+        switch (tool) {
+            case construction::CommandId::Road: placed = construction::place_road(state.city, drag, x, y); break;
+            case construction::CommandId::Wall: placed = construction::place_wall(state.city, drag, x, y); break;
+            case construction::CommandId::Plaza: placed = construction::place_plaza(state.city, x, y); break;
+            case construction::CommandId::ClearArea: placed = construction::clear_area(state, sim.random, x, y); break;
+            case construction::CommandId::Forum: placed = construction::place_forum(state, forum_grade, x, y); break;
+            case construction::CommandId::Workshop:
+                placed = construction::place_workshop(state, workshop_goods, x, y);
+                break;
+            default: placed = construction::place(state.city, tool, x, y); break;
+        }
+        if (placed) economy::charge(state, cost);
+        return placed;
     };
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {

@@ -33,6 +33,7 @@
 #include "stb_image.h"
 #include "systems/actors.hpp"
 #include "systems/construction.hpp"
+#include "systems/economy.hpp"
 #include "systems/housing.hpp"
 #include "systems/month.hpp"
 #include "systems/service.hpp"
@@ -246,14 +247,13 @@ void test_service_bit_table_fixtures() {
             if (b.mask == mask) return &b;
         return nullptr;
     };
-    const C9D4BitInfo* religious = find(0x20);
-    CHECK(religious != nullptr);
-    CHECK(religious && std::string(religious->name) == "religious");
-    // Downgraded from High (2026-09-13): the Prefecture handler (tile 0xEE)
-    // sets 0x20 too, so it isn't exclusively temple-produced and "religious"
-    // is unverified against any consumer. Pinned here so it can't silently
-    // drift back up without new evidence.
-    CHECK(religious && religious->confidence == Confidence::StrongInference);
+    const C9D4BitInfo* administration = find(0x20);
+    CHECK(administration != nullptr);
+    CHECK(administration && std::string(administration->name) == "administration");
+    // Was "religious" at StrongInference: forums and the Prefecture set it,
+    // and on 2026-09-14 its consumer was found -- the yearly population tax
+    // only counts houses with 0x20 (economy::population_tax, findings 25).
+    CHECK(administration && administration->confidence == Confidence::High);
 
     const C9D4BitInfo* entertainment = find(0x80);
     CHECK(entertainment != nullptr);
@@ -2162,6 +2162,252 @@ void test_actors_real_saves() {
 }
 
 // 0x28215's four routines, recomputed from each real save's own inputs.
+// systems::economy (findings section 25): costs and the two treasury tables
+// against the executable, the manual's prices, and the one-off money moves.
+void test_economy_costs() {
+    std::printf("test_economy_costs (3496:1548, 3496:008E, the manual's prices, grants and donations)\n");
+    using namespace gaius::systems;
+    // The manual's Construction chapter.
+    CHECK(economy::construction_cost(CommandId::ClearArea) == 1);
+    CHECK(economy::construction_cost(CommandId::Housing) == 2);
+    CHECK(economy::construction_cost(CommandId::Temple) == 20);
+    CHECK(economy::construction_cost(CommandId::Hospital) == 60);
+    CHECK(economy::construction_cost(CommandId::School) == 60);
+    CHECK(economy::construction_cost(CommandId::Oracle) == 200);
+    CHECK(economy::construction_cost(CommandId::Prefecture) == 25);
+    CHECK(economy::construction_cost(CommandId::Barracks) == 80);
+    CHECK(economy::construction_cost(CommandId::Workshop) == 50);
+    CHECK(economy::construction_cost(CommandId::Forum, 0) == 60);
+    CHECK(economy::construction_cost(CommandId::Forum, 7) == 500);
+    CHECK(economy::construction_cost(CommandId::NoAction) == 0);
+
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    set_global_word(*st, economy::kFunds, 100);
+    CHECK(economy::can_afford(*st, 100) && !economy::can_afford(*st, 101));
+    economy::charge(*st, 60);
+    CHECK(global_word(*st, economy::kFunds) == 40 && global_word(*st, 0x6BC0) == 60);
+    economy::refund(*st, 20);
+    CHECK(global_word(*st, economy::kFunds) == 60 && global_word(*st, 0x6BC0) == 40);
+    // Emergency funds: once a game, and only up to rank 6.
+    set_global_word(*st, 0x6C30, 7);
+    CHECK(!economy::grant_emergency_funds(*st));
+    set_global_word(*st, 0x6C30, 6);
+    CHECK(economy::grant_emergency_funds(*st) && global_word(*st, economy::kFunds) == 560);
+    CHECK(!economy::grant_emergency_funds(*st));
+    // A donation from the governor's savings: 90 % reaches the city.
+    set_global_word(*st, 0x6C2E, 30);
+    CHECK(!economy::donate_savings(*st, 31));
+    CHECK(economy::donate_savings(*st, 20) && global_word(*st, 0x6C2E) == 10 &&
+          global_word(*st, economy::kFunds) == 578);
+
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    fs::path p = fs::path(dir) / "CSR.EXE";
+    if (!fs::exists(p)) { skip("CSR.EXE not found under " + dir); return; }
+    exepack::DecodeResult r = exepack::decode(p.string());
+    constexpr size_t kSeg3496 = 0x34960;
+    auto byte_at = [&](size_t o) { return o < r.image.size() ? static_cast<uint8_t>(r.image[o]) : uint8_t{0}; };
+    for (size_t i = 0; i < economy::kConstructionCost.size(); ++i) {
+        const size_t o = kSeg3496 + 0x1548 + 2 * i;
+        CHECK(static_cast<int16_t>(byte_at(o) | (byte_at(o + 1) << 8)) == economy::kConstructionCost[i]);
+    }
+    for (size_t i = 0; i < economy::kTaxUnitsPerCell.size(); ++i)
+        CHECK(byte_at(kSeg3496 + 0x8E + i) == economy::kTaxUnitsPerCell[i]);
+}
+
+void test_economy_taxes() {
+    std::printf("test_economy_taxes (0x282A1, 0x283D3, 0x09FF1 on a built city)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->table_720.assign(720, 0);
+    // Three houses inside a forum's reach (C9D4 0x20), one outside it.
+    st->city.tile[10][10] = 0xC8;  // 1 tax unit
+    st->city.tile[10][11] = 0xD7;  // 25
+    st->city.tile[10][12] = 0xCE;  // 14
+    for (int x = 10; x <= 12; ++x) st->city.service_flags[10][x] = 0x20;
+    st->city.tile[20][20] = 0xD0;  // 13, not collected
+    auto t = economy::population_tax(st->city, 6, 9);
+    // 40 units x 6 / 20 = 12; 1200 / (9 + 1) = 1.20 a head
+    CHECK(t.tax == 12 && t.uncollected && t.per_head == 1 && t.per_head_cents == 20);
+    st->city.service_flags[20][20] = 0x20;
+    t = economy::population_tax(st->city, 6, 159);
+    CHECK(t.tax == 15 && !t.uncollected);  // 53 x 6 / 20 = 15.9
+
+    auto workshop = [&](int i, int active, int level) {
+        const size_t r = static_cast<size_t>(i) * 24;
+        st->table_720[r + 8] = static_cast<uint8_t>(active);
+        st->table_720[r + 0x10] = static_cast<uint8_t>(level);
+    };
+    workshop(0, 1, 3);
+    workshop(1, 1, 7);
+    workshop(2, 0, 5);     // inactive
+    workshop(3, 1, 0x0A);  // the engine keeps the low 3 bits: 2
+    CHECK(economy::industrial_tax(*st, 7) == 215);     // 12 x 64 x 7 / 25 = 215.04
+    CHECK(economy::average_workshop_level(*st) == 4);  // 12 / 3
+
+    CHECK(economy::industrial_tax_pressure(-20, 5, 1) == -20);
+    CHECK(economy::industrial_tax_pressure(-20, 3, 1) == -24);
+    CHECK(economy::industrial_tax_pressure(-20, 12, 1) == -6);
+    CHECK(economy::industrial_tax_pressure(-20, 8, 1) == -16);  // below 3: +1, then +3
+    CHECK(economy::industrial_tax_pressure(3, 8, 1) == 6);
+    CHECK(economy::industrial_tax_pressure(10, 9, 0) == -44);  // no forum: from -50, +2 and +4
+    CHECK(economy::industrial_tax_pressure(-50, 0, 1) == -50);
+    CHECK(economy::industrial_tax_pressure(20, 25, 1) == 24);
+}
+
+void test_economy_settle() {
+    std::printf("test_economy_settle (0x284AA: taxes, costs, the tribute, dismissal)\n");
+    using namespace gaius::systems;
+    auto fresh = [](int funds) {
+        auto st = std::make_unique<CityState>();
+        st->global_words_128.assign(256, 0);
+        st->final_state.assign(68, 0);
+        set_global_word(*st, economy::kFunds, funds);
+        set_global_word(*st, 0x6BC6, 200);  // population tax
+        set_global_word(*st, 0x6BC4, 100);  // industrial tax
+        set_global_word(*st, 0x6BC0, 40);   // construction this year
+        set_global_word(*st, 0x6C46, 50);   // welfare
+        set_global_word(*st, 0x6C2C, 10);   // salary
+        set_global_word(*st, 0x6C08, 20);   // army wages
+        set_global_word(*st, 0x6C2E, 100);  // savings
+        set_global_word(*st, 0x6BBA, 60);   // tribute due
+        return st;
+    };
+    // 200 + 300 - 80 = 420, less the tribute (now 61) = 359. Profit 300 - 40 - 80
+    // = 180, but funds are under 500, so Rome takes no share of it.
+    auto st = fresh(200);
+    auto s = economy::settle_accounts(*st);
+    CHECK(!s.tribute_missed && !s.dismissed && !s.savings_capped);
+    CHECK(global_word(*st, economy::kFunds) == 359);
+    CHECK(global_word(*st, 0x6BBA) == 61 && global_word(*st, 0x6BAA) == 61);
+    CHECK(global_word(*st, 0x6BB6) == 119 && global_word(*st, 0x6BB4) == 119);
+    CHECK(global_word(*st, 0x6BC2) == 40 && global_word(*st, 0x6BC0) == 0 && global_word(*st, 0x6BBE) == 80);
+    CHECK(global_word(*st, 0x6BB2) == 200 && global_word(*st, 0x6BAE) == 40 && global_word(*st, 0x6C2E) == 110);
+    // Over 500 after the tribute: Rome also takes 60 % of the profit.
+    st = fresh(1000);
+    economy::settle_accounts(*st);
+    CHECK(global_word(*st, economy::kFunds) == 1051 && global_word(*st, 0x6BAA) == 169);  // 1159 - 108
+    CHECK(global_word(*st, 0x6BB6) == 11);
+    // Not enough for the whole tribute: what's left is paid.
+    st = fresh(0);
+    set_global_word(*st, 0x6BC6, 0);
+    set_global_word(*st, 0x6BC4, 110);
+    economy::settle_accounts(*st);
+    CHECK(global_word(*st, economy::kFunds) == 0 && global_word(*st, 0x6BAA) == 30);
+    // Nothing left: a missed tribute, and the third in a row ends the game.
+    st = fresh(0);
+    set_global_word(*st, 0x6BC6, 0);
+    set_global_word(*st, 0x6BC4, 0);
+    set_global_word(*st, 0x6BB8, 1);
+    s = economy::settle_accounts(*st);
+    CHECK(s.tribute_missed && !s.dismissed && global_word(*st, 0x6BB8) == 2);
+    CHECK(global_word(*st, 0x6C46) == 0);  // welfare cut to the funds left
+    s = economy::settle_accounts(*st);
+    CHECK(s.dismissed && global_word(*st, 0x6BB8) == 3);
+    // Savings stop at 25000, and so does the salary.
+    st = fresh(200);
+    set_global_word(*st, 0x6C2E, 24995);
+    s = economy::settle_accounts(*st);
+    CHECK(s.savings_capped && global_word(*st, 0x6C2E) == 25000 && global_word(*st, 0x6C2C) == 0);
+    CHECK(global_word(*st, 0x6BBE) == 70);
+}
+
+// Every save keeps last year's accounts (final_state) and fifteen years of
+// funds, profit and population (table_60_c, table_72, table_60_d). From the
+// funds a year earlier, less the year's construction, settle_accounts has to
+// land on the saved funds, tribute paid and profit. Money moved outside the
+// accounts in two years, each visible in the saves: in CAESARUX's year -2
+// (and so in the six saves continuing it) the governor's savings fall from 210
+// to 190 with the salary unchanged, a donation of 20 that gave the city 18;
+// and in CAESARXT's year 3 the one-time emergency funds flag DS:0x6C9A, still
+// 0 in CAESARXU, is set: 500 Dn.
+void test_economy_year_end_matches_saves() {
+    std::printf("test_economy_year_end_matches_saves (0x284AA vs each real save's last year)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        auto record = [&](const std::vector<uint8_t>& t, uint16_t index_ds, int records, int back) {
+            int i = (global_word(*st, index_ds) - back) % records;
+            if (i < 0) i += records;
+            const size_t o = static_cast<size_t>(i) * 4;
+            auto word = [&](size_t at) { return static_cast<int>(static_cast<int16_t>(t[at] | (t[at + 1] << 8))); };
+            return std::make_pair(word(o), word(o + 2));
+        };
+        const int year = global_word(*st, 0x6C32);
+        const auto [end_year, funds_end] = record(st->table_60_c, 0x6B32, 15, 0);
+        const auto [start_year, funds_start] = record(st->table_60_c, 0x6B32, 15, 1);
+        const auto [profit_year, profit] = record(st->table_72, 0x6B38, 17, 0);
+        const auto [units_year, units] = record(st->table_60_d, 0x6B30, 15, 0);
+        CHECK(end_year == year - 1 && start_year == year - 2 && profit_year == year - 1 && units_year == year - 1);
+
+        const std::string n(name);
+        int outside = 0;
+        if (n.size() == 12 && n.substr(1) == "AESARUX.SAV") outside = 18;
+        if (n == "CAESARXT.SAV") outside = 500;
+        const int construction = global_word(*st, 0x6BAE);
+        auto y = std::make_unique<CityState>();
+        y->global_words_128.assign(256, 0);
+        y->final_state.assign(68, 0);
+        set_global_word(*y, economy::kFunds, funds_start - construction + outside);
+        set_global_word(*y, 0x6BC0, construction);
+        set_global_word(*y, 0x6BC6, global_word(*st, 0x6BB2));
+        set_global_word(*y, 0x6BC4, global_word(*st, 0x6BB0));
+        set_global_word(*y, 0x6C46, global_word(*st, 0x6BAC));  // operating costs, as one figure
+        set_global_word(*y, 0x6BBA, global_word(*st, 0x6BBA) - 1);
+        economy::settle_accounts(*y);
+        std::printf("  %s: year %d funds %d -> %d (saved %d), tribute %d (saved %d), profit %d (saved %d)\n", name,
+                    year - 1, funds_start, global_word(*y, economy::kFunds), funds_end, global_word(*y, 0x6BAA),
+                    global_word(*st, 0x6BAA), global_word(*y, 0x6BB6), profit);
+        CHECK(global_word(*y, economy::kFunds) == funds_end);
+        CHECK(global_word(*y, 0x6BAA) == global_word(*st, 0x6BAA));
+        CHECK(global_word(*y, 0x6BB6) == profit && profit == global_word(*st, 0x6BB6));
+        // Tax per head, from last year's population tax and population.
+        const int32_t hundredths = static_cast<int32_t>(global_word(*st, 0x6BB2)) * 100 / (4 * units + 1);
+        CHECK(hundredths / 100 == global_word(*st, 0x6BCA) && hundredths % 100 == global_word(*st, 0x6BC8));
+    }
+}
+
+// The year turning inside run_step: the accounts run before the histories are
+// written, so the funds history records the funds after the tribute.
+void test_month_year_accounts() {
+    std::printf("test_month_year_accounts (the yearly routine 0x28238 from run_step)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->table_720.assign(720, 0);
+    set_global_word(*st, 0x6C1C, 11);
+    set_global_word(*st, 0x6C32, -3);
+    set_global_word(*st, 0x6C00, 72);  // a population tax rate of 6 all year
+    set_global_word(*st, 0x6C04, 6);
+    set_global_word(*st, 0x6C02, 5);
+    set_global_word(*st, economy::kFunds, 100);
+    set_global_word(*st, 0x6BBA, 50);
+    st->city.tile[10][10] = 0xD7;  // 25 tax units
+    st->city.service_flags[10][10] = 0x20;
+    auto sim = month::sim_state_from_save(*st);
+    CHECK(sim.industrial_rate_sum == 55);  // the loader's rate x month
+    sim.step = 105;
+    month::run_step(*st, sim);
+    CHECK(sim.month == 0 && sim.year == -2);
+    // 25 x 6 / 20 = 7 in tax; 100 + 7 - the tribute of 51 = 56; profit 7 - 51.
+    CHECK(global_word(*st, 0x6BC6) == 7 && global_word(*st, economy::kFunds) == 56);
+    CHECK(global_word(*st, 0x6BB6) == -44 && global_word(*st, 0x6C00) == 0 && sim.industrial_rate_sum == 0);
+    CHECK(st->table_60_c.size() >= 8 && static_cast<int16_t>(st->table_60_c[4] | (st->table_60_c[5] << 8)) == -3 &&
+          static_cast<int16_t>(st->table_60_c[6] | (st->table_60_c[7] << 8)) == 56);
+}
+
 void test_month_economy_matches_saves() {
     std::printf("test_month_economy_matches_saves (0x28621/0x28694/0x28800/0x28826 vs eleven real saves)\n");
     std::string dir = test_assets_dir();
@@ -2908,9 +3154,12 @@ void test_month_yearly_history() {
         const size_t o = static_cast<size_t>(i) * 4 + static_cast<size_t>(w) * 2;
         return o + 1 < t.size() ? static_cast<int>(static_cast<int16_t>(t[o] | (t[o + 1] << 8))) : 9999;
     };
-    CHECK(global_word(*st, 0x6B36) == 1 && rec(st->table_60_a, 1, 0) == -3 && rec(st->table_60_a, 1, 1) == 7);
-    CHECK(rec(st->table_60_b, 1, 1) == 8 && rec(st->table_60_c, 1, 1) == 900 && rec(st->table_60_d, 1, 1) == 11);
-    CHECK(global_word(*st, 0x6B38) == 0 && rec(st->table_72, 0, 0) == -3 && rec(st->table_72, 0, 1) == -5);
+    // The accounts run first (systems::economy::run_year): an empty city at
+    // 0 % pays no taxes, so the preset 7 and 8 become 0, and the funds pay the
+    // tribute of 1 (the due word starts at 0 here), leaving 899 and a loss of 1.
+    CHECK(global_word(*st, 0x6B36) == 1 && rec(st->table_60_a, 1, 0) == -3 && rec(st->table_60_a, 1, 1) == 0);
+    CHECK(rec(st->table_60_b, 1, 1) == 0 && rec(st->table_60_c, 1, 1) == 899 && rec(st->table_60_d, 1, 1) == 11);
+    CHECK(global_word(*st, 0x6B38) == 0 && rec(st->table_72, 0, 0) == -3 && rec(st->table_72, 0, 1) == -1);
     run_step(*st, sim);  // not a new year: nothing more recorded
     CHECK(global_word(*st, 0x6B36) == 1);
 }
@@ -3371,6 +3620,11 @@ int main() {
     test_actors_rioter_demolishes();
     test_actors_real_saves();
     test_month_economy_matches_saves();
+    test_economy_costs();
+    test_economy_taxes();
+    test_economy_settle();
+    test_economy_year_end_matches_saves();
+    test_month_year_accounts();
     test_render_building_metrics();
     test_render_walkers();
     test_render_building_animation();

@@ -161,10 +161,10 @@ Every checklist item above is done. What remains is validation, a few untranscri
   - Covered by the second save session (2026-09-14, dispatch findings section 23): reservoirs and working fountains (water bits, fountain tiles and levels exact in all seven saves) and housing grades up to `0xD2`.
 - **Simulation.**
   - The random draws of frames between steps at slower game speeds; Gaius draws once per step.
-  - The yearly routine's other calls (`0x282A1`, `0x283D3`, `0x284AA` before the history writes, `0x28C43`, `0x29023`, `0x2933B` after), and the step-105, 18-month and province routines. They're ratings, messages and province events, so they belong to Phases 6-7, but the yearly history values Gaius records may differ until the first three are read.
-- **Save model.** The save loader isn't reverse engineered, and what several global words mean to the player isn't established (the histories' `DS:0x6BC6`, `0x6BC4` and `0x6BB6`; the economy's `0x6C04` and `0x6C06`).
+  - The yearly routine's calls after the history writes (`0x289C0` the army, `0x28C43` the ratings, `0x29023` promotion, `0x2933B`), and the step-105, 18-month and province routines. They belong to Phases 6-7. The accounts before the history writes are in since 2026-09-14 (`systems::economy`, dispatch findings section 25).
+- **Save model.** Since 2026-09-14 the loader is read as far as the order it reads the save in (the writer's), and the yearly accounts name the histories' values (population tax, industrial tax, profit) and the rates (dispatch findings section 25). What the loader does after reading, beyond rebuilding `DS:0x6BFE`, isn't.
 - **Build mode.**
-  - Construction costs. The forum grade costs (`3496:15A0`) are transcribed and shown in the toolbar when choosing a grade, but nothing is charged: there's no treasury until Phase 7.
+  - Construction costs: **done 2026-09-14.** `systems::economy` has every command's cost (`3496:1548`) and the viewer charges them; the province commands' terrain multiplier isn't modeled.
   - A touch drag gesture for roads and walls.
 - **Viewer.** Nothing left for Phases 0-5. Water, fire and the animated buildings draw as in the engine (2026-09-13), and `MINIFONT.PL1` is decoded (2026-09-14: 1 bit per pixel, as its extension says). The overlay map modes belong to Phase 7.
 - **Platform.**
@@ -179,7 +179,7 @@ Every checklist item above is done. What remains is validation, a few untranscri
 **Goal:** Heavy Industry / Workshops / Markets (suspected to run through the object/actor system, not the tile dispatcher) and the Cohort/battle system.
 
 - [x] RE: trace object allocator calls for economic actors (per `CAESAR_CITY_STATE_v9.md`'s actor-type work — types 4, 5, 8, 10 are already promising leads for walkers/economic/disruptive actors). **Done 2026-09-13** (dispatch findings section 20): type 8 is the workshop trader, which raises its workshop's sales on reaching a market cell and feeds its 0-7 production level; 4 is the barracks patrol, 5-7 invaders, 10 rioters from collapsed houses and 0-2 forum citizens. `systems::actors` runs them. What markets and heavy industry do beyond that isn't traced yet.
-- [ ] `systems::economy` — workshops (8 goods types per manual), heavy industry feeding workshops, markets enabling sales, once the above is resolved.
+- [x] `systems::economy` — workshops (8 goods types per manual), heavy industry feeding workshops, markets enabling sales, once the above is resolved. **Done 2026-09-14** (dispatch findings section 25). The loop runs as the engine has it: heavy industry within reach raises a workshop's level by 2 and markets let its traders sell (`systems::actors`, section 20.6), the levels become the industrial tax, the housing grades become the population tax, and the year's settlement pays operating costs and the tribute from them. `systems::economy` also charges construction. Checked: every save's funds history balances year by year, and each save's last year is reproduced exactly.
 - [ ] **Battle resolution — no longer a from-scratch RE target.** `CAESAR_GOG_BUILD_FINDINGS.md` section 4 identified a concrete entry point: `CSR.EXE` accepts a `cohort` command-line argument (discovered via `CAESAR.BAT`'s launch loop) that triggers its own internal battle resolution — this is the code path implementing the manual's Tortoise/Assault/Flank/Charge screen for players without the external Cohort 2 product. Next step is locating the argument-parsing branch in the disassembly and tracing forward from there, rather than searching blind.
 - [ ] `systems::military` — Legion/Cohort/Century structure, the four battle tactics and their resolution rules, implemented once the above trace confirms the actual math (the manual only describes it qualitatively; the executable is the source of truth once found).
 - [ ] Provincial level: forts, cohort patrol/attack/go-home, barbarian armies, small towns, Imperial Highway.
@@ -187,7 +187,7 @@ Every checklist item above is done. What remains is validation, a few untranscri
 
 **Deliverable:** full economic loop (industry → workshop → market → tax revenue) and a functioning provincial level with combat.
 
-**RE blockers:** economic actor tracing is done for the walkers (dispatch findings section 20); the rest of Appendix C "Finish Heavy Industry/Market/Workshop/Fort" -- markets, heavy industry's own effects, forts -- remains open. Battle resolution is now a **located-but-not-yet-traced** target rather than a **net-new, no-leads** one — meaningfully lower risk than previously assessed.
+**RE blockers:** the city economy is done (dispatch findings sections 20 and 25). Heavy industry's and markets' effects are all accounted for: their coverage and C9D4 bits (section 15), their scan counts in the employment share (section 19.3), heavy industry's +2 to workshops and markets' sales. Of Appendix C "Finish Heavy Industry/Market/Workshop/Fort" only forts remain, with the rest of the military. Battle resolution is now a **located-but-not-yet-traced** target rather than a **net-new, no-leads** one — meaningfully lower risk than previously assessed.
 
 ---
 
@@ -210,7 +210,7 @@ Every checklist item above is done. What remains is validation, a few untranscri
 
 **Goal:** finish Layer 3 — write valid EMPIRE2 and `.SAV` files the original engine (or Julius-style compatibility layers) could theoretically still read, and close remaining format gaps.
 
-- [ ] Save **loader** reverse engineering (currently the biggest asymmetry — we can write the block table but haven't proven we can *read* it the way the original does for the fields we don't yet understand).
+- [ ] Save **loader** reverse engineering (2026-09-14: its read order is the writer's, and it rebuilds the one sum the save doesn't keep, `DS:0x6BFE` -- dispatch findings section 25.2; currently the biggest asymmetry — we can write the block table but haven't proven we can *read* it the way the original does for the fields we don't yet understand).
 - [ ] `EDATA.CSR` confirmed stable across builds (no further work needed there). `CONTFRM.GD8`, `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, VAS win/lose animation — closeout pass on the remaining unresolved formats. Note `CONTFRM.GD8` is now known to vary by build/region (differs between the two `CSR.EXE` builds — see `CAESAR_GOG_BUILD_FINDINGS.md` section 5), which narrows the hypothesis toward localizable string/layout data.
 - [ ] Music: `.MDI` files (where present) are standard MIDI and need no decoder — treat as the preferred playback path; `.XMI`/`.XM2` only needed if bit-for-bit 1993 audio fidelity is a goal.
 - [x] Renderer tile-lookup tables — needed for pixel-accurate rendering rather than Phase 1's approximations. **Done for the city view, 2026-09-13:** `render::render_city` (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`) — `FIXTS.PL8` frame = tile id below `0xC8`, `HOUSES.PL8` frame = tile − `0xC8` above it, the `3496:14B2` building metrics table, per-cell sprite slices, and the `HOUSES2.PL8` special cases, checked pixel-exact against real captures. Animation timing, overlay map modes and the province view remain (walkers are drawn, and since 2026-09-13 simulated by `systems::actors`).

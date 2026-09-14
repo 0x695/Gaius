@@ -27,8 +27,9 @@
 // Not modeled, each for a stated reason: the per-row routine 0x2CD10 and
 // the monthly routines (0x2E0BE,
 // 0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F) aren't
-// read yet; nor are the step-101 routine 0x28215, the yearly routine 0x28238
-// (not yet checked for random draws) or the 18-month routine 0x2D6F4. 
+// read yet. Step 101's routine 0x28215 is run_economy below; of the yearly
+// routine 0x28238 the accounts (systems::economy) and the history writes are
+// modeled, and neither draws; the 18-month routine 0x2D6F4 isn't. 
 //
 // The random draws. The land-value growth each housing row applies is
 // DS:0x6BF6 + (2EF9:0286 & 3) - 1, as a signed byte, and 2EF9:0286 only
@@ -73,6 +74,10 @@ struct SimState {
     int month_counter_18 = 0;        // DS:0x6D9B
     int land_value_growth_base = 0;  // DS:0x6BF6
     int population_units = 0;        // DS:0x6C10
+    // DS:0x6BFE: the industrial tax rate DS:0x6C02 summed at each step 101, for
+    // the yearly accounts (systems::economy::run_year). The save doesn't keep
+    // it; like the loader (0x0568F), sim_state_from_save sets rate x month.
+    int industrial_rate_sum = 0;
     int ticks = 0;                   // the frame counters DS:0x6D34-0x6D44, as one count
     // 0x2DF7D rolls an event when the generator's walk exceeds its threshold:
     // DS:0x6BE0 road wear, 0x6BE2 collapse, 0x6BE4 fire (saved global words).
@@ -111,8 +116,8 @@ void run_month(model::CityMap& city, SimState& sim);
 //   0x28826  DS:0x6BF6 (the land-value growth base) = 3496:017E[DS:0x6C04]
 //            + 3496:01B1[DS:0x6C06 / 10]
 // then DS:0x6C00 += DS:0x6C04 (and DS:0x6BFE += DS:0x6C02, which the save
-// doesn't keep). What DS:0x6C04 and DS:0x6C06 mean to the player -- tax rate,
-// wages? -- isn't established; the arithmetic is.
+// doesn't keep: SimState::industrial_rate_sum). DS:0x6C04 is the population
+// tax rate and DS:0x6C06 the conscription rate (systems/economy.hpp).
 void run_economy(model::CityState& state);
 
 // A month on a whole save: as above, plus at step 101 the save's population
@@ -120,8 +125,10 @@ void run_economy(model::CityState& state);
 // growth and coverage bases feed the months after; month and year are written
 // back to DS:0x6C1C / DS:0x6C32.
 //
-// When the year turns it also appends last year's values to the save's five
-// history buffers (table_60_a-d, table_72; findings section 22).
+// When the year turns it runs the year's accounts (systems::economy::run_year:
+// taxes, operating costs, the tribute) and then appends last year's values to
+// the save's five history buffers (table_60_a-d, table_72; findings sections
+// 22 and 25).
 void run_step(model::CityState& state, SimState& sim);
 void run_month(model::CityState& state, SimState& sim);
 
