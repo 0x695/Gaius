@@ -60,6 +60,16 @@ inline constexpr std::array<uint8_t, 16> kTaxUnitsPerCell = {1, 2, 4, 6, 7, 10, 
 // cost 3496:15A0[grade] (0x11DAC).
 int construction_cost(construction::CommandId id, int forum_grade = 0);
 
+// 0x11CD4-0x11D92: on the province map (DS:0x6CAE = 1) a command's cost, and
+// the charge, are shifted left by the terrain under the cursor -- 2 on tiles
+// 0x25-0x2C, 1 on 0x2D-0x35, else 0 -- except the Fort (id 29), never shifted.
+// The manual's "15 Denarii to 60 Denarii to clear" is Clear Area's 15 << 0-2.
+int province_cost_shift(int command_id, uint8_t tile);
+
+// 0x11C72: with fewer than 50 pleb groups (DS:0x6C56) the build routine refuses
+// every command but the Cohort orders (ids 31-34), with a message.
+bool enough_plebs(const model::CityState& state, int command_id);
+
 // The handlers' test before placing (0x11DC3, 0x11E3A, 0x12066): cost <= funds.
 bool can_afford(const model::CityState& state, int cost);
 

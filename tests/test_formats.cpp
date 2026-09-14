@@ -33,6 +33,7 @@
 #include "stb_image.h"
 #include "systems/actors.hpp"
 #include "systems/battle.hpp"
+#include "systems/plebs.hpp"
 #include "systems/province.hpp"
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
@@ -2970,6 +2971,128 @@ void test_province_construction() {
     CHECK(province::clear_province(*cl, 7, 7) == Built::Charged && cell(*cl, 7, 7) == 0x1D);
 }
 
+// The pleb routines on made-up figures.
+void test_plebs_duties() {
+    std::printf("test_plebs_duties (0x2DC72 needs, 0x2DEC8 welfare, 0x2DD21 assignment, 0x2DE0F thresholds)\n");
+    using namespace gaius::systems;
+    auto fresh = [] {
+        auto st = std::make_unique<CityState>();
+        st->global_words_128.assign(256, 0);
+        st->final_state.assign(68, 0);
+        return st;
+    };
+    int construction_need = 0;
+    auto needs = [&](CityState& s) {
+        return std::array<int, 4>{global_word(s, plebs::kFireNeed), global_word(s, plebs::kBuildingNeed),
+                                  global_word(s, plebs::kRoadNeed), construction_need};
+    };
+    auto st = fresh();
+    set_global_word(*st, 0x6C30, 1);
+    set_global_word(*st, 0x6BF2, 251);
+    set_global_word(*st, 0x6BF0, 153);
+    construction_need = plebs::set_needs(*st, 0);
+    CHECK((needs(*st) == std::array<int, 4>{15, 8, 9, 1}));
+    set_global_word(*st, 0x6C30, 3);  // shift 3, 16 more buildings
+    set_global_word(*st, 0x6BF2, 100);
+    set_global_word(*st, 0x6BF0, 40);
+    set_global_word(*st, 0x6C8A, 9);
+    construction_need = plebs::set_needs(*st, 0);
+    CHECK((needs(*st) == std::array<int, 4>{14, 8, 7, 2}));
+    set_global_word(*st, 0x6C30, 1);
+    construction_need = plebs::set_needs(*st, 2);  // hard: shift 1
+    CHECK((needs(*st) == std::array<int, 4>{50, 29, 20, 9}));
+
+    // Assignment: 50 kept back, the duties in order, army duty last.
+    auto duties = [](CityState& s, int plebs_count, std::array<int, 5> d) {
+        set_global_word(s, plebs::kPlebs, plebs_count);
+        const uint16_t w[] = {plebs::kFirePrevention, plebs::kBuildingMaintenance, plebs::kRoadMaintenance,
+                              plebs::kConstruction, plebs::kArmyDuty};
+        for (size_t i = 0; i < 5; ++i) set_global_word(s, w[i], d[i]);
+        plebs::assign(s);
+        std::array<int, 6> out{};
+        for (size_t i = 0; i < 5; ++i) out[i] = global_word(s, w[i]);
+        out[5] = global_word(s, plebs::kUnassigned);
+        return out;
+    };
+    CHECK((duties(*st, 108, {20, 15, 16, 6, 1}) == std::array<int, 6>{20, 15, 16, 6, 1, 0}));
+    CHECK((duties(*st, 200, {20, 15, 16, 6, 50}) == std::array<int, 6>{20, 15, 16, 6, 50, 43}));
+    CHECK((duties(*st, 60, {20, 15, 16, 6, 1}) == std::array<int, 6>{10, 0, 0, 0, 0, 0}));
+    CHECK((duties(*st, 150, {5, 5, 5, 5, 100}) == std::array<int, 6>{5, 5, 5, 5, 80, 0}));
+    CHECK(global_word(*st, 0x6C52) == 5);  // army duty cut: auxiliaries 80 / 16
+    CHECK((duties(*st, 40, {5, 5, 5, 5, 5}) == std::array<int, 6>{0, 0, 0, 0, 0, 0}) && global_word(*st, 0x6C64) == 40);
+
+    // Thresholds: 20 of 23 on fire prevention is 86 %.
+    set_global_word(*st, plebs::kFirePrevention, 20);
+    set_global_word(*st, plebs::kFireNeed, 23);
+    set_global_word(*st, plebs::kBuildingMaintenance, 13);
+    set_global_word(*st, plebs::kBuildingNeed, 12);
+    set_global_word(*st, plebs::kRoadMaintenance, 0);
+    set_global_word(*st, plebs::kRoadNeed, 13);
+    set_global_word(*st, plebs::kConstruction, 1);
+    CHECK(plebs::set_thresholds(*st, 4) == 25);
+    CHECK(global_word(*st, 0x6BE4) == 86 && global_word(*st, 0x6BE2) == 100 && global_word(*st, 0x6BE0) == 0);
+
+    // Welfare: 112 plebs, 1 unassigned, rank 1 expect 89.
+    auto welfare = [&](int paid) {
+        set_global_word(*st, plebs::kPlebs, 112);
+        set_global_word(*st, plebs::kUnassigned, 1);
+        set_global_word(*st, plebs::kWelfare, paid);
+        plebs::pay_welfare(*st);
+        return global_word(*st, plebs::kPlebs);
+    };
+    CHECK(welfare(89) == 112 && welfare(90) == 112 && welfare(0) == 102 && welfare(200) == 117);
+}
+
+// Every save's pleb figures are what the routines give from its own counts.
+void test_plebs_match_saves() {
+    std::printf("test_plebs_match_saves (the pleb routines vs each real save)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        auto y = std::make_unique<CityState>(*st);
+        const int construction_need = plebs::set_needs(*y, 0);
+        plebs::pay_welfare(*y);
+        plebs::assign(*y);
+        plebs::set_thresholds(*y, construction_need);
+        bool same = true;
+        for (uint16_t ds : {plebs::kFireNeed, plebs::kBuildingNeed, plebs::kRoadNeed, plebs::kPlebs, plebs::kUnassigned,
+                            plebs::kFirePrevention, plebs::kBuildingMaintenance, plebs::kRoadMaintenance,
+                            plebs::kConstruction, plebs::kArmyDuty, uint16_t{0x6C52}, uint16_t{0x6BE4},
+                            uint16_t{0x6BE2}, uint16_t{0x6BE0}}) {
+            if (global_word(*y, ds) != global_word(*st, ds)) {
+                std::printf("  %s: DS:0x%04X %d, saved %d\n", name, ds, global_word(*y, ds), global_word(*st, ds));
+                same = false;
+            }
+        }
+        CHECK(same);
+    }
+}
+
+// The province terrain's cost shift and the build routine's pleb gate.
+void test_economy_province_costs() {
+    std::printf("test_economy_province_costs (0x11CD4 terrain shift, 0x11C72 pleb gate)\n");
+    using namespace gaius::systems;
+    CHECK(economy::province_cost_shift(35, 0x25) == 2 && economy::province_cost_shift(35, 0x2C) == 2);
+    CHECK(economy::province_cost_shift(35, 0x2D) == 1 && economy::province_cost_shift(35, 0x35) == 1);
+    CHECK(economy::province_cost_shift(35, 0x1D) == 0 && economy::province_cost_shift(29, 0x25) == 0);
+    CHECK((15 << economy::province_cost_shift(35, 0x28)) == 60);  // the manual's clearing costs
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    set_global_word(*st, 0x6C56, 49);
+    CHECK(!economy::enough_plebs(*st, 36) && economy::enough_plebs(*st, 31) && economy::enough_plebs(*st, 34));
+    CHECK(!economy::enough_plebs(*st, 30));
+    set_global_word(*st, 0x6C56, 50);
+    CHECK(economy::enough_plebs(*st, 36));
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -4246,6 +4369,9 @@ int main() {
     test_province_towns();
     test_province_commands();
     test_province_construction();
+    test_plebs_duties();
+    test_plebs_match_saves();
+    test_economy_province_costs();
     test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();

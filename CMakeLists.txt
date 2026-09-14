@@ -89,6 +89,7 @@ add_library(gaius_systems STATIC
   systems/military.cpp
   systems/battle.cpp
   systems/province.cpp
+  systems/plebs.cpp
 )
 target_link_libraries(gaius_systems PUBLIC gaius_model)
 

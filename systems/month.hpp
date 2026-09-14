@@ -82,7 +82,9 @@ struct SimState {
     int ticks = 0;                   // the frame counters DS:0x6D34-0x6D44, as one count
     // 0x2DF7D rolls an event when the generator's walk exceeds its threshold:
     // DS:0x6BE0 road wear, 0x6BE2 collapse, 0x6BE4 fire (saved global words).
-    // 99, never, unless read from a save. What sets them isn't traced.
+    // Step 105 sets them from the plebs assigned to each duty (systems::plebs:
+    // the share of the need covered, 100 when covered); 99, never, until then
+    // unless read from a save.
     int road_wear_threshold = 99;
     int collapse_threshold = 99;
     int fire_threshold = 99;
@@ -96,8 +98,9 @@ struct SimState {
     // in six) and DS:0x6DFC (the worn-road message, one month in four).
     int town_counter = 0;
     int province_wear_counter = 0;
-    // DS:0x6BDE: the walk must exceed it for a province road to wear. Set by
-    // 0x2DEC8 (100, or a computed value not yet read); 100, never, by default.
+    // DS:0x6BDE: the walk must exceed it for a province road to wear. Set at
+    // step 105 from the plebs on construction (systems::plebs::set_thresholds);
+    // the save doesn't keep it, so 100, never, until then.
     int province_wear_threshold = 100;
     // Called when a Cohort reaches the army it attacks (systems::province::
     // Hooks::battle); without it the battle doesn't start.

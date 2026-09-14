@@ -12,6 +12,7 @@
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
 #include "systems/military.hpp"
+#include "systems/plebs.hpp"
 #include "systems/province.hpp"
 
 namespace gaius::systems::month {
@@ -82,11 +83,18 @@ void finish_scans(SimState& sim, model::CityState* state) {
         model::set_global_word(*state, 0x6BEE, s.market_count / 4);
         model::set_global_word(*state, 0x6BEA, s.industry_count / 16);
         model::set_global_word(*state, 0x6BEC, s.school_count / 4);
-        // 0x2E0BE, the first monthly routine: the province pass, which wears
-        // away the road last month's fourth roll picked. The four pleb and
-        // welfare routines after it (0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F) aren't
-        // modeled.
+        // The monthly routines (0x29429-0x2943D): the province pass, which
+        // wears away the road last month's fourth roll picked, then the plebs --
+        // needs, welfare, assignment -- and the event thresholds their
+        // coverage sets for the rolls below.
         province::monthly_pass(*state, sim.province_wear_counter);
+        const int construction_need = plebs::set_needs(*state, sim.difficulty);
+        plebs::pay_welfare(*state);
+        plebs::assign(*state);
+        sim.province_wear_threshold = plebs::set_thresholds(*state, construction_need);
+        sim.fire_threshold = model::global_word(*state, 0x6BE4);
+        sim.collapse_threshold = model::global_word(*state, 0x6BE2);
+        sim.road_wear_threshold = model::global_word(*state, 0x6BE0);
         model::set_global_word(*state, 0x6C88, -1);  // 0x2DF8F
     }
     s.road_wear_target = roll_target(sim.random, sim.road_wear_threshold, s.road_count);

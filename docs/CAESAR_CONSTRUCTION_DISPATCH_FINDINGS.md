@@ -314,7 +314,7 @@ A scan of the whole table, bounded at each handler's true end, found no other DS
 ### 15.6 Still open
 
 - Who calls `0x2DA7E` (the -8..+50 land-value step), and so how land value is actually bounded over time. -- answered in section 16: the housing development pass.
-- The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from. **The routines are read in section 21**; where the thresholds come from is still open.
+- The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from. **The routines are read in section 21**; the plebs set the thresholds (section 29).
 - The housing grade-change routine; the identities of `0x94`/`95`, `0xA2`-`B2`, `0xB9`/`BB`/`BC` and `0xF5`/`F6`; what sets `C9D4.01` and `DS:0x6BF8`. -- the grade-change routine is answered in section 16.
 - What reads the C9D4 service bits.
 
@@ -776,7 +776,7 @@ Every handler the service scan (`0x2BBBB`) reaches for a counted tile first bump
      - collapse: threshold `0x6BE2`, count `0x6BF2`;
      - fire: threshold `0x6BE4`, count `0x6BF2`;
      - the fourth: threshold `0x6BDE`, count `0x6C8A`, result in `0x6C88`.
-  4. The first three thresholds are saved global words. What sets them, and what reads `0x6C88`, isn't traced.
+  4. The first three thresholds are saved global words; the pleb routines set all four (section 29), and `0x6C88` is the province road the monthly pass wears away (section 28.6).
 
 ### 21.2 Demolition, fire and burning tiles
 
@@ -923,7 +923,8 @@ The city's money runs through three places: the build routine charges constructi
 - **The build routine** (`0x11D97`-`0x120BF`) calls a command's handler through `DS:127C` only when its cost is no more than the funds `DS:0x6CA2`. When the handler succeeds (`DS:0x6D0A` = 0) it takes the cost from the funds and adds it to the year's construction `DS:0x6BC0`.
 - **The costs** are the 44 words at `3496:1548`, by command id; the Forum's is `3496:15A0`[grade]. They are the manual's prices: Clear Area 1, Road 3, Reservoir/pipe 3, Wall 5, Tower 10, Well 5, Fountain 10, Housing 2, Temple 20, Bath Houses 40, Hospital 60, School 60, Oracle 200, Theater 100, Coliseum 200, Hippodrome 300, Plaza 10, Barracks 80, Prefecture 25, Heavy Industry 300, Market 20, Workshop 50, Fort 500.
 - **Road, pipe and wall** (commands 4, 5 and 7, `0x11E12`) charge each cell as the drag lays it and keep a running total; a right-click cancel gives it back (funds `+=`, `DS:0x6BC0` `-=`).
-- **Province commands** (ids 36, 37 and 42) have their cost doubled or quadrupled by the province terrain under the cursor (`0x11CD4`-`0x11D86`). Not modeled.
+- **Province commands** have their cost, and the charge, shifted left by the terrain under the cursor while the province map is shown (`DS:0x6CAE` = 1, `0x11CD4`-`0x11D92`): by 2 on tiles `0x25`-`0x2C`, by 1 on `0x2D`-`0x35`, not at all elsewhere or for the Fort -- the manual's "15 Denarii to 60 Denarii to clear". `economy::province_cost_shift`.
+- **Plebs.** With fewer than 50 pleb groups (`DS:0x6C56`) the build routine refuses every command but the Cohort orders 31-34, with a message (`0x11C72`). `economy::enough_plebs`.
 - **Emergency funds, `0x120C0`.** When a placement can't be afforded, the first time in a game (`DS:0x6C9A`) and only up to rank 6 (`DS:0x6C30`), Rome sends 500 Dn with a message. The placement isn't retried.
 - **Every other write to the funds:**
   - a new province (`0x57BE`, `0xF7C5`) sets them from `DS:0x6C0C`, then takes 1000 for each rank above 1, up to three times, while they're at least 5000, and above rank 4 another 200 x (rank - 4) while they're at least 4000, not below 4000;
@@ -992,7 +993,6 @@ When the calendar turns the year it:
 - **`gaius_viewer`** charges each placement, asks Rome for the emergency funds when it can't, shows the cost and current funds in the toolbar label (dropping the funds figure if the combined text wouldn't fit the panel), and prints the funds each month and the Treasurer's report each year. **2026-09-14:** a drag-built command (Road, Wall, Plaza, Clear Area) can be cancelled the manual's way -- right button while the left is still held (`platform::CommandType::CancelDrag`) -- which restores every cell the drag touched (a 7x7 box around each placed cell, wide enough to cover Clear Area's worst case of wrecking a building anchored up to 3 cells away) and refunds what it cost.
 - **Not modeled:**
   - the messages;
-  - the province commands' terrain multiplier;
   - the yearly routine's ratings, promotion and `0x2933B` (the Legion is section 26);
   - what pleb welfare does at step 105 (`0x2DF01`, `0x2DF40`).
 
@@ -1143,7 +1143,7 @@ The calendar sets `DS:0x6D97` when the 18-month counter wraps; the next step sta
 - **Towns, `0x2E249`,** at step 80 (after `0x2E209`'s draw): every town cell (compared with the occupancy bit) traced to the city through `3496:1CE0` -- roads, highway, gates, crossings, towns and forts pass, the city `0x4A`/`0x4B` is the goal -- counts in `DS:0x6C92` and, when `DS:0x6DFE` wraps (one month in six), grows a grade; a town not linked shrinks a grade every month.
 - **The highway, `0x2E220`:** `DS:0x6C8C` = the trace from the entry through `3496:1D62` (highway, gates and crossings only) reaches the city.
 - **The monthly pass, `0x2E0BE`,** the first of step 105's monthly routines: clears bit `0x80` over the map; counts the tiles `0x36`-`0x49` and `0x62`-`0x77` into `DS:0x6C8A`, and the one numbered `DS:0x6C88` turns to `0x1D` (with a message when `DS:0x6DFC`, cycling 0-3, is 0); then `DS:0x6C86` = straight pieces (`0x36`-`0x37`, `0x6D`-`0x6E`) less 4 per corner (`0x38`-`0x3B`, `0x6F`-`0x72`).
-- **Wear.** `0x2DF7D` resets `DS:0x6C88` to -1 and its fourth roll picks the next month's worn road among `DS:0x6C8A` when the walk exceeds `DS:0x6BDE` (set by `0x2DEC8`, unread).
+- **Wear.** `0x2DF7D` resets `DS:0x6C88` to -1 and its fourth roll picks the next month's worn road among `DS:0x6C8A` when the walk exceeds `DS:0x6BDE` (set by `0x2DE0F` from the plebs on construction, section 29).
 - **Checked.** In every save the highway entry holds `0x78`, and the recomputed `DS:0x6C8C`, `0x6C8A` and `0x6C86` equal the saved ones -- all 0, as no save's province has a road yet, so this is consistent rather than a strong test. `test_province_towns`, `test_province_matches_saves`.
 
 ### 28.7 The Fort and the Cohort commands
@@ -1174,6 +1174,39 @@ Clear Area, Provincial road, Highway and Great Wall work like the city's drag-bu
 
 ### 28.9 Not modeled
 
-- the province commands' terrain cost multiplier (`0x11CD4`-`0x11D86`);
 - the pleb routines between the monthly pass and the rolls;
 - messages and sounds.
+
+## 29. The plebs (2026-09-14)
+
+Four of step 105's monthly routines run between the province pass `0x2E0BE` and the event rolls `0x2DF7D`, in this order: `0x2DC72`, `0x2DEC8`, `0x2DD21`, `0x2DE0F`. They are the Tribune of the Plebs' model: what each duty needs, how welfare changes the pleb count, who is assigned where, and how well each duty is covered -- which is what sets the city's fire, collapse and road-wear thresholds (section 21) and the province's road wear (section 28.6). `systems::plebs` implements them.
+
+### 29.1 The words
+
+The manual's Tribune screen shows "five sets of numbers ... the numbers of plebs assigned to each of the five duties" with "the amounts of pleb groups needed" in parentheses; the names follow what each duty's shortfall does. STRONG INFERENCE for the names.
+
+| Assigned | Needed | Duty | Its shortfall raises the chance of |
+|---|---|---|---|
+| `DS:0x6C62` | `DS:0x6C44` | fire prevention | fire, `DS:0x6BE4` |
+| `DS:0x6C60` | `DS:0x6C42` | building maintenance | collapse, `DS:0x6BE2` |
+| `DS:0x6C5E` | `DS:0x6C40` | road maintenance | city road wear, `DS:0x6BE0` |
+| `DS:0x6C5C` | `DS:0x6C3E` (not saved) | construction (the manual says the Tribune handles it) | province road wear, `DS:0x6BDE` (not saved) |
+| `DS:0x6C5A` | -- | army duty | -- (auxiliaries `DS:0x6C52` = army duty / 16) |
+
+`DS:0x6C56` is the pleb groups, `DS:0x6C58` the unassigned, `DS:0x6C46` the welfare expenditure.
+
+### 29.2 The routines
+
+- **Needs, `0x2DC72`.** shift = 4 at rank (`DS:0x6C30`) 1 or below, 3 at ranks 2-3, 2 above, and 1 on the hard difficulty (`DS:0x6CB8` = 2); 16 more buildings are counted at rank 3. Fire prevention = (buildings `DS:0x6BF2` + extra) >> shift; building maintenance = (buildings + extra + 16) >> (shift + 1); road maintenance = (roads `DS:0x6BF0` + extra) >> shift; construction = province roads `DS:0x6C8A` >> (shift - 1). Each at least 1. The manual: "A harder game increases the number of plebs you need to maintain the city."
+- **Welfare, `0x2DEC8`.** expected = (plebs - unassigned / 4 + (plebs / 20) x rank + 150) / 3. If the welfare paid is less, the plebs lose the difference, at most 10; if more, they gain half the difference, at most 5, up to 2000. (The routine also shifts `DS:0x6DD9` three times without using it.)
+- **Assignment, `0x2DD21`.** With 50 plebs or fewer, every duty and the unassigned are 0 and `DS:0x6C64` = the plebs. Otherwise 50 are kept back and the rest go through the duties in the table's order: a duty assigned at least what's left is cut to it, the later duties and the unassigned become 0, and if the cut duty is army duty the auxiliaries are recomputed. What's left after army duty is unassigned. (The Tribune's screen sets the duties; `0x0E85A` also recomputes the auxiliaries.)
+- **Thresholds, `0x2DE0F`.** For each of the four duties: assigned >= needed, or needed <= 0, gives 100 and resets that event's target (`DS:0x6CFE`, `0x6D00`, `0x6D02`, `0x6C88`); otherwise assigned x 100 / needed. `0x2DF7D` then rolls each event when the generator's walk (1-99) exceeds its threshold -- so a fully staffed duty never lets its event happen.
+
+### 29.3 Checked against the saves
+
+In all 17 saves, recomputing from the saved counts (difficulty 0) gives the saved needs, the assignment leaves every duty, the unassigned and the auxiliaries as saved, the three saved thresholds match -- including `CAESARWX`'s fire threshold of 90 (10 of 11) and `CAESARXT`/`XR`'s 86 (20 of 23) -- and welfare leaves the pleb count unchanged, each save sitting at the point where the expectation equals the welfare or falls short by one (half of which rounds to nothing). `test_plebs_duties`, `test_plebs_match_saves`.
+
+### 29.4 In Gaius
+
+`systems::plebs`: `set_needs`, `pay_welfare`, `assign`, `set_thresholds`; `systems::month` runs them at step 105 in the engine's order and feeds the thresholds to the rolls, which until now kept the saved values (or 99). The Tribune's screen and its messages aren't modeled.
+

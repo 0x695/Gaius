@@ -20,15 +20,15 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
-| 6 | Economy & military | **In progress** — city economy, Legion, battles, province armies, Cohorts, forts and towns done | Province roads, walls, towers and highway construction; auxiliaries |
-| 7 | Forum, advisors, ratings | Not started | Everything |
+| 6 | Economy & military | **Systems done** | Province view and battle screen in the viewer |
+| 7 | Forum, advisors, ratings | Started (plebs done) | Ratings, promotion, Forum UI, maps panel |
 | 8 | Format completeness & save write-back | Started | Save loader, formats, music, terrain generation |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3231 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3267 checks.
 
-**Critical path now:** Phase 6's battle resolution and province level. Phases 7 and 9 are unblocked and can run alongside it.
+**Critical path now:** Phase 7's ratings and promotion, then the Forum UI and a province view, which together make the single-player loop playable. Phase 9 is unblocked alongside.
 
 ---
 
@@ -226,12 +226,11 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
   - A walker's path, and the random draws' timing. Saves don't carry the generator's state; checking needs it, or an event (a fire, a collapse) caught between two saves.
 - **Simulation**
   - The random draws on frames between steps at slower game speeds (Gaius draws once per step).
-  - The yearly routine's calls after the histories (`0x289C0` army, `0x28C43` ratings, `0x29023` promotion, `0x2933B`), and the step-105, 18-month and province routines — Phases 6-7.
+  - The yearly routine's ratings (`0x28C43`), promotion (`0x29023`) and `0x2933B` — Phase 7. (The Legion, the 18-month spawner, the step-105 routines and the province pass are done — Phase 6.)
 - **Save model**
   - What the loader does after reading, beyond rebuilding `DS:0x6BFE`.
 - **Build mode**
   - A touch drag gesture for roads and walls.
-  - The province commands' terrain cost multiplier.
 - **Platform**
   - Android: real-device ABI and a `gaius_viewer` port (Phase 1).
   - Touch gestures beyond single-finger drag and tap.
@@ -241,7 +240,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 ## Phase 6 — Economy & military
 
-**Status: In progress.** The city economy is done (2026-09-14); battles, the military and the province level are not started.
+**Status: Systems done** (2026-09-14). Every system the phase names is transcribed and, where a save can show it, checked against real saves; what's left is presenting the province and the battle in `gaius_viewer`.
 
 **Goal:** Heavy Industry, Workshops and Markets, and the Cohort battle system.
 
@@ -249,30 +248,32 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **Economic actors** (2026-09-13, findings section 20) — type 8 workshop traders sell on market cells and feed their workshop's 0-7 level; 4 barracks patrols; 5-7 invaders; 10 rioters; 0-2 forum citizens.
 - [x] **`systems::economy`** (2026-09-14, findings section 25) — the loop as the engine has it: heavy industry in reach adds 2 to a workshop's level, markets let its traders sell, levels become the industrial tax, housing grades the population tax, and the year's settlement pays operating costs and the tribute. Also construction costs, emergency funds and donations. Every save's funds history balances year by year; each save's last year is reproduced exactly.
 - [x] **`systems::military`, the Legion** (2026-09-14, findings section 26) — the yearly recruitment (`0x289C0`: regular Centuries from wages, irregular from population x conscription) and the assignment of Centuries to Cohorts (`0x28A8F`, mobilized/demobilized). All 17 saves' regulars, irregulars and Cohorts reproduced.
-
-**Open**
 - [x] **`systems::battle`** (2026-09-14, findings section 27) — the four tactics against the province's race (16 races, strengths per tactic), rounds, casualties, morale, victory, defeat and retreat. All 17 saves' race words reproduced. Not modeled: the screen itself and the Cohort 2 hand-over.
-- [ ] **The rest of `systems::military`** — the auxiliaries' pleb source (step 105's pleb routine, the Tribune's screen), forts creating and transferring Cohorts (`0x1560A`, `0x23272`).
+- [x] **Auxiliaries and the plebs** (2026-09-14, findings section 29) — army duty's plebs / 16 are the auxiliaries (`0x2DD21`), in the full pleb model below. `0x23272`, once read as a fort transfer, applies Cohort 2's battle result from `cohort.csr`: not needed.
 - [x] **`systems::province`, the province actors** (2026-09-14, findings section 28) — the province walker, barbarian armies (the 18-month spawner, marching, wrecking, pillaging towns, invading the city), and Cohorts halting, patrolling, attacking and going home into battle. Save actors checked against the map's occupancy bits.
 - [x] **Towns, the highway and road wear** (2026-09-14, findings section 28.6) — the road trace `0x2E377`, towns growing when linked to the city and shrinking when not, the Imperial Highway link, the monthly province pass.
 - [x] **Fort and the Cohort orders** (2026-09-14, findings section 28.7) — placing forts and their Cohorts, Halt, Patrol, Attack, Go Home.
 - [x] **Province construction** (2026-09-14, findings section 28.8) — Clear Area, Provincial road, Highway, Great Wall and Great Tower on the city's drag auto-tiling, with the province's pieces, gates and crossings.
-- [ ] **Confirm the DOS process juggling isn't needed** — the batch file alternating `csr.exe`/`cohort.exe` becomes a screen transition; `COHORT.CSR` only needs its behaviour, not its format.
+- [x] **The DOS process juggling isn't needed** (findings sections 26.5, 27) — `csr.exe cohort` resumes a game after the external Cohort 2 fought the battle, and `cohort.csr` (read back by `0x23272`) carries the result; Gaius resolves battles itself (`systems::battle`).
+- [x] **Province costs** (findings section 25.1) — the terrain under the cursor shifts a province command's cost and charge; the build routine refuses construction under 50 pleb groups.
 
-**Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **City half met.**
+**Open**
+- [ ] **A province view and the battle screen in `gaius_viewer`** — drawing the province map (`SPRITE2.PL8` actors, the map tiles) with its toolbar, and the battle screen's rounds, on the systems above.
 
-**RE blockers:** the city economy's are closed — heavy industry and markets are fully accounted for (their handlers, scan counts, and effects on workshops). Open: forts and the military, and the battle trace.
+**Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **Met in the simulation**; not yet on screen.
+
+**RE blockers:** none left. Still unread and not needed for the simulation: the battle and Tribune screens' drawing, the messages, and the Cohort 2 hand-over.
 
 ---
 
 ## Phase 7 — Forum, advisors, ratings & win/loss
 
-**Status: Not started.** Mostly engineering.
+**Status: Started.** The plebs came with Phase 6; the rest is mostly engineering.
 
 **Goal:** the administrative layer — seven advisors, four ratings (Peace, Culture, Prosperity, Empire), promotion, the annual tribute, plebs.
 
 **Open**
-- [ ] **`systems::population`** — pleb groups, welfare expenditure, task assignment. Specified qualitatively in the manual; what welfare does at step 105 (`0x2DF01`, `0x2DF40`) is in the executable.
+- [x] **`systems::plebs`** (2026-09-14, done in Phase 6, findings section 29) — each duty's need, welfare growing or shrinking the pleb count, the assignment, and the fire, collapse and road-wear thresholds their coverage sets. Every save reproduced.
 - [ ] **`systems::administration`** — the four ratings; the yearly routine's ratings (`0x28C43`) and promotion (`0x29023`) calls are located.
 - [ ] **Forum UI** — seven advisors, promotion flow, tribute, game over after three missed tributes (the settlement already counts them: `economy::settle_accounts`).
 - [ ] **Maps panel** — Urbanization, Water, Administration, Road, Land Value, Trouble overlays, drawn from the modeled layers.

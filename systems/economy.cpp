@@ -190,4 +190,16 @@ Settlement run_year(model::CityState& state, int& industrial_rate_sum) {
     return s;
 }
 
+int province_cost_shift(int command_id, uint8_t tile) {
+    int shift = 0;
+    if (tile >= 0x25 && tile <= 0x2C) shift = 2;
+    if (tile >= 0x2D && tile <= 0x35) shift = 1;
+    if (command_id == 29) shift = 0;
+    return shift;
+}
+
+bool enough_plebs(const model::CityState& state, int command_id) {
+    return g(state, 0x6C56) >= 50 || (command_id >= 31 && command_id <= 34);
+}
+
 }  // namespace gaius::systems::economy
