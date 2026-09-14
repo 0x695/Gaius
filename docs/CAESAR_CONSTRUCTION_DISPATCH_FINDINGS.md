@@ -1247,5 +1247,44 @@ When the year equals `DS:0x6C98`, that word grows by (walk & 7) + 1 and `0x09AFD
 
 ### 30.5 In Gaius, and what's open
 
-`systems::month::run_step` runs the ratings, promotion (answered through `SimState::on_promotion`) and the notice when the year turns. Not modeled: the screens and their texts, and what starting the new province does (the map, the city, the funds -- `0x57BE`, section 25.1).
+`systems::month::run_step` runs the ratings, promotion (answered through `SimState::on_promotion`) and the notice when the year turns. Not modeled: the screens and their texts. Starting the new province is section 31.
+
+## 31. A new game, a new province, and the city's terrain (2026-09-15)
+
+`systems::campaign` implements them.
+
+### 31.1 A new province
+
+When a promotion is accepted (`DS:0x6C26` = 1) the main loop's `0x0F81B` calls `0x0FB34`: screens, `0x0FF1C` (loads `empire2.0NN` into `3496:2752`, the province map), and the reset `0x05730`:
+
+- a draw; `DS:0x6C26`, `0x6C24`, `0x6C20`-`0x6C22`, `0x6C1E`, `0x6C66`-`0x6C6A`, `0x6C9A`, `0x6C7A`, `0x6C70`-`0x6C72`, the walker counters `0x6C12`-`0x6C1A`, `0x6C9C`-`0x6CA0` and the units `0x6C10` to 0; the month `DS:0x6C1C` to 1;
+- the funds `DS:0x6CA2` = the starting funding `DS:0x6C0C` (the start screen's 500-8000, `0x27E1A`), less 1000 for each of ranks 2, 3 and 4 while they're at least 5000, and above rank 4 less (rank - 4) x 200 while at least 4000, not below 4000;
+- the next notice year `DS:0x6C98` + 1;
+- plebs 120, 50 kept back (`DS:0x6C64`), 10 on each duty, 20 unassigned, welfare 88; army wages 20, conscription 10; both tax rates 5; the ratings, Culture's raw scores, the population, the auxiliaries and irregulars, the needs to 0; regulars 2; the rate sums 5; the monthly counts, the accounts and the industrial tax pressure to 0; the tribute due 50;
+- `0x05A9A` zeroes the four city layers other than the tiles; `0x05ADD` frees every actor; `0x05B17`, `0x05B33`, `0x05B4F` clear the forum, workshop and barracks records; `0x05B80`, `0x05B95` the goods and milestone tables; `0x05BAA` the five histories;
+- `0x0621F` places the Prima Cohors on the first province cell holding `0x4A`: fort there, number `DS:0x6C12` - 1 (so 0), state 10, morale 5, 2 regular Centuries;
+- the event targets to -1; the race words (section 27.1); the pleb needs, assignment and thresholds (section 29); and `0x06307`, which turns the first `0x41` on the province map (row by row) into `0x78` and keeps its column and row in `DS:0x6C90`/`0x6C8E` -- the highway's entry, and the "unexplained" `0x41` -> `0x78` of docs/FORMATS.md.
+
+A new game (`0x056B8`) first sets the year to -13, rank 1, savings 100, salary 10, `DS:0x6C2A` 1, the donation 20, clears the provinces given, and schedules the first notice at year -12 with topics from the generator.
+
+### 31.2 The city's terrain (`0x06F05`)
+
+A draw, then seven passes, repeated from the start until the river fits (`DS:0x4F56`):
+
+1. **`0x06F42`, lakes.** Every tile grass `0x1D`. For rows 1-99 and columns 1-98, a draw whose low 11 bits are 0 or 1 makes the 2x2 block from that cell water (0). Then for every cell of columns 1-99: a draw; if its low7 is below 80 and the cell is water, another draw: a walk of 50 or more makes the 2x2 block to its south-west water, and a low7 below 50 the block to its south-east. The writes follow the flat index, so a block at column 99 spills into the next row.
+2. **`0x072DD`, three times.** A land cell becomes water when `0x074A1`'s count of its neighbours (edges count as land) finds no land above or below, none left or right, 2 or fewer land neighbours, a longest run of land around it of 2 or less, or 5 or more land neighbours with a diagonal pair and a run of exactly 3.
+3. **`0x07228`, shores.** A grass cell with water among its eight neighbours takes the tile of the first of twelve patterns at `3496:15D8` its neighbours fit (0 water, 1 land or edge, 2 either): straight shores 1, 4, 7, 10 and the diagonals 13, 16, 19, 22, each alternating with the next tile (the static `DS:0x079C` toggling), and the corners 25-28 fixed.
+4. **`0x07180`, grass.** Two draws per grass cell: an odd low7 gives `0x2E` + (low7 & 7), an even one `0x1E` + (low7 & 15).
+5. **`0x07BBC`** keeps a copy of the tiles in the C9D4 layer.
+6. **`0x07C12`, the river,** up to three tries, restoring the copy (`0x07BE7`) after each failure. The source is the first grass cell of row 0 at column low7 / 2 + 24 (drawing again while not grass), marked `0x4A`; the river then stands at row 1 heading south. Each step draws: low7 up to 60 goes on (`0x07CD9`), 61-90 prefers a turn west (`0x07FC1`), above 90 a turn east (`0x08161`). Going south it lays `0x4A` if the cell below is grass, else bends west (`0x6A`) or east (`0x6E`) onto grass; going west or east it lays `0x56` if the next cell is grass, else bends south (`0x62` from the west, `0x66` from the east); a turn step bends when it can and otherwise goes on. No grass to go to ends the try; leaving the map (a column past either edge, or the bottom rows) is success.
+
+### 31.3 Checked
+
+- **Against the saves:** every shore tile of all 17 saves' maps is the tile the pattern rule gives its neighbours -- the original generator's output, so the rule and the patterns are confirmed (`test_campaign_terrain_matches_saves`). The lakes, erosion, grass and river depend on the generator's state at the time, which no save keeps.
+- **Generated maps** hold only water, shores, grass and river pieces, a river from row 0, and shores that obey the rule; the same generator state gives the same map (`test_campaign_terrain`). `test_campaign_start_province` checks the reset, the funds by rank, the Prima Cohors and the highway's entry.
+
+### 31.4 Open
+
+- Who calls `0x06F05` isn't traced, so where the terrain is made within a province's start is inferred; `start_province` makes it first.
+- The start screen (funding, difficulty, name) and the first province's choice for a new game.
 

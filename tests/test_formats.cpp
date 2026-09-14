@@ -34,6 +34,7 @@
 #include "systems/actors.hpp"
 #include "systems/administration.hpp"
 #include "systems/battle.hpp"
+#include "systems/campaign.hpp"
 #include "systems/plebs.hpp"
 #include "systems/province.hpp"
 #include "systems/construction.hpp"
@@ -3275,6 +3276,146 @@ void test_administration_matches_saves() {
     }
 }
 
+// The shore rule (0x07228) as a check over any map: every shore tile is the
+// first fitting pattern's tile, or its alternate.
+int shore_mismatches(const gaius::model::CityMap& city) {
+    static const int kPat[12][10] = {
+        {0, 2, 1, 2, 1, 2, 1, 2, 7, 0},  {1, 2, 1, 2, 0, 2, 1, 2, 1, 0},  {1, 2, 0, 2, 1, 2, 1, 2, 10, 0},
+        {1, 2, 1, 2, 1, 2, 0, 2, 4, 0},  {0, 2, 1, 2, 1, 2, 0, 2, 27, 1}, {1, 2, 1, 2, 0, 2, 0, 2, 25, 1},
+        {0, 2, 0, 2, 1, 2, 1, 2, 28, 1}, {1, 2, 0, 2, 0, 2, 1, 2, 26, 1}, {1, 2, 2, 2, 2, 2, 1, 0, 22, 0},
+        {1, 0, 1, 2, 2, 2, 2, 2, 16, 0}, {2, 2, 1, 0, 1, 2, 2, 2, 19, 0}, {2, 2, 2, 2, 1, 0, 1, 2, 13, 0}};
+    static const int kOff[8][2] = {{-1, 0}, {-1, 1}, {0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}};
+    int bad = 0;
+    for (int y = 0; y < 100; ++y) {
+        for (int x = 0; x < 100; ++x) {
+            const int v = city.tile[static_cast<size_t>(y)][static_cast<size_t>(x)];
+            if (v < 1 || v > 0x1C) continue;
+            int f[8];
+            for (int k = 0; k < 8; ++k) {
+                const int ny = y + kOff[k][0], nx = x + kOff[k][1];
+                f[k] = (ny < 0 || ny > 99 || nx < 0 || nx > 99) ? 1
+                       : city.tile[static_cast<size_t>(ny)][static_cast<size_t>(nx)] == 0 ? 0 : 1;
+            }
+            const int* match = nullptr;
+            for (const auto& p : kPat) {
+                bool fits = true;
+                for (int k = 0; k < 8 && fits; ++k) fits = p[k] == 2 || p[k] == f[k];
+                if (fits) {
+                    match = p;
+                    break;
+                }
+            }
+            if (!match || !(v == match[8] || (match[9] == 0 && v == match[8] + 1))) ++bad;
+        }
+    }
+    return bad;
+}
+
+// 0x06F05 on a fresh generator.
+void test_campaign_terrain() {
+    std::printf("test_campaign_terrain (0x6F05: lakes, erosion, shores, grass, river)\n");
+    using namespace gaius::systems;
+    auto a = std::make_unique<CityState>(), b = std::make_unique<CityState>();
+    month::Random ra, rb;
+    int va = 0, vb = 0;
+    campaign::generate_city(a->city, ra, va);
+    campaign::generate_city(b->city, rb, vb);
+    CHECK(a->city.tile == b->city.tile);  // deterministic from the generator's state
+
+    int water = 0, shore = 0, grass = 0, river = 0, other = 0;
+    for (const auto& row : a->city.tile) {
+        for (uint8_t t : row) {
+            if (t == 0) ++water;
+            else if (t <= 0x1C) ++shore;
+            else if (t >= 0x1E && t <= 0x35) ++grass;
+            else if (t == 0x4A || t == 0x56 || t == 0x62 || t == 0x66 || t == 0x6A || t == 0x6E) ++river;
+            else ++other;
+        }
+    }
+    std::printf("  water %d, shore %d, grass %d, river %d, other %d\n", water, shore, grass, river, other);
+    CHECK(other == 0 && grass > 5000 && river >= 20);
+    bool source = false;
+    for (int x = 24; x <= 87; ++x) source = source || a->city.tile[0][static_cast<size_t>(x)] == 0x4A;
+    CHECK(source);
+    CHECK(shore_mismatches(a->city) == 0);
+
+    // Another map from where the generator stands now differs.
+    campaign::generate_city(b->city, rb, vb);
+    CHECK(!(a->city.tile == b->city.tile) && shore_mismatches(b->city) == 0);
+}
+
+// Every save's map was made by the original generator: its shores obey the rule.
+void test_campaign_terrain_matches_saves() {
+    std::printf("test_campaign_terrain_matches_saves (shore patterns 3496:15D8 vs each real save)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        CHECK(shore_mismatches(st->city) == 0);
+    }
+}
+
+// 0x05730 and friends on a city in the middle of a game.
+void test_campaign_start_province() {
+    std::printf("test_campaign_start_province (0x5730 reset, 0x621F Prima Cohors, 0x6307 highway, 0x56B8 new game)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->table_480.assign(480, 7);
+    st->table_60_c.assign(60, 9);
+    month::Random rnd;
+    campaign::new_game(*st, rnd);
+    CHECK(global_word(*st, 0x6C32) == -13 && global_word(*st, 0x6C30) == 1 && global_word(*st, 0x6C2E) == 100);
+    CHECK(global_word(*st, 0x6C98) == -12 && st->table_50.size() == 50);
+
+    set_global_word(*st, 0x6C0C, 8000);
+    set_global_word(*st, 0x6CA6, 20);
+    st->city.coverage[3][3] = 9;
+    actors::spawn(*st, 5, 10, 10);  // an invader still in the old city
+    gaius::formats::empire2::EmpireMap map{};
+    map.cells.fill(0x1D);
+    map.cells[23 * 40 + 21] = 0x4A;
+    map.cells[17 * 40 + 0] = 0x41;
+    int variant = 0;
+    campaign::start_province(*st, map, rnd, 0, variant);
+    CHECK(global_word(*st, 0x6CA2) == 8000 && global_word(*st, plebs::kPlebs) == 120);
+    CHECK(global_word(*st, 0x6BBA) == 50 && global_word(*st, military::kRegulars) == 2 && global_word(*st, 0x6C98) == -11);
+    CHECK(st->city.coverage[3][3] == 0 && st->table_480[0] == 0 && st->table_60_c[0] == 0);
+    CHECK(global_word(*st, 0x6C90) == 0 && global_word(*st, 0x6C8E) == 17 && st->empire.cells[17 * 40] == 0x78);
+    CHECK(global_word(*st, 0x6BD6) == 9);  // province 20's Picts
+    CHECK(global_word(*st, 0x6BE4) == 100 && global_word(*st, plebs::kFireNeed) == 1);
+    int cohorts = 0, others = 0;
+    for (const auto& a : st->objects) {
+        if (!a.active()) continue;
+        if (a.type() == military::kCohortType) {
+            ++cohorts;
+            CHECK(a.raw[0x2E] == 21 && a.raw[0x2F] == 23 && a.raw[0x2A] == 0 && a.raw[military::kCohortRegulars] == 2);
+            CHECK(a.raw[0x31] == military::kCohortMobilized && a.raw[military::kCohortMorale] == 5);
+        } else {
+            ++others;
+        }
+    }
+    CHECK(cohorts == 1 && others == 0 && global_word(*st, 0x6C12) == 1);
+    bool no_plain_grass = true;
+    for (const auto& row : st->city.tile)
+        for (uint8_t t : row) no_plain_grass = no_plain_grass && t != 0x1D;
+    CHECK(no_plain_grass);
+
+    // Funds by rank.
+    auto funds_at = [&](int rank) {
+        set_global_word(*st, 0x6C30, rank);
+        campaign::start_province(*st, map, rnd, 0, variant);
+        return global_word(*st, 0x6CA2);
+    };
+    CHECK(funds_at(3) == 6000 && funds_at(6) == 4600 && funds_at(10) == 4000);
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -4557,6 +4698,9 @@ int main() {
     test_administration_ratings();
     test_administration_promotion();
     test_administration_matches_saves();
+    test_campaign_terrain();
+    test_campaign_terrain_matches_saves();
+    test_campaign_start_province();
     test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();
