@@ -1044,3 +1044,39 @@ A new province starts with 2 regular Centuries and nothing else (`0x058C0`-`0x05
   - what conscription and wages do to the city besides (the manual: "your citizens don't like being drafted");
   - battles. Their code is located: `0x22000`-`0x23600`, with morale changes at `0x225B7`-`0x226F7`, the tactic comparisons at `0x22A02`-`0x22A4A` and casualties at `0x22C16`. It uses the "Cohort ?"/"Retreat ?" texts `DS:0x4599`/`0x45B4` (table at `0x27851`).
 - **The `cohort` argument.** `CAESAR.BAT` runs `csr.exe cohort` after the external Cohort 2. `0x0F687` tests whether `cohort.exe` exists (`DS:0x6CF8`, which decides whether the battle screen offers it), and `0x03344`/`0x03388` write and read `cohort.csr`, 14 bytes, the battle's hand-over. With any argument (argc > 1, `0x0F6BD`) the start-up skips the title music and loads the province screen's sheets (`0x0FBBE`: `p_blocks.pl8`, `pointers.pl8`, `font1.pl8`) before running the game. So the argument most likely only resumes a game after Cohort 2 has fought the battle, and the internal battle screen runs from the province map itself (STRONG INFERENCE: the argv string isn't compared anywhere found, and the path from `0x0F6C7` into the resumed game isn't traced).
+
+## 27. The battle screen (2026-09-14)
+
+When a Cohort attacking an army (province state 12, `0x24FF7`) comes within 16 pixels of it in both directions (`0x26EF1`, which keeps the army's slot in the Cohort's +0x26), `0x25148` runs the battle screen `0x22116`. `systems::battle` implements the rounds and their outcomes; the screen itself (sheets, texts, the Cohort 2 hand-over `0x2357E`/`0x23493` when `cohort.exe` exists) is not modeled.
+
+### 27.1 The barbarians
+
+- **Race by province.** `0x22146` sets `DS:0x6BD6` = `3496:175E`[province `DS:0x6CA6`], one byte for each of the 50 provinces.
+- **Race rows.** `3496:1790`[race x 8] gives, in order, the banner sprite `DS:0x6BD8` (40-43), the city invader type less 5 `DS:0x6BDA` (0-2, used by `0x2D891`), and the strength against each tactic: `DS:0x6BD4` Assault, `0x6BD2` Flank, `0x6BD0` Charge, `0x6BCE` Tortoise. The last two bytes of each row are 0.
+- **Names.** `DS:0x2BAD`, 16 characters each, drawn by `0x2268A` as race x 16: Carthaginians, Mauri, Blemmyes, Sassanids, Huns, Ostrogoths, Visigoths, Alamanni, Saxons, Picts, Celts, Celtiberians, Helvetii, Ligurians, Illyrians, Volcae -- the manual's "sixteen types of barbarians".
+- **Checked.** All 17 saves hold the race words the tables give for their province: 47 (Caeariensis) the Mauri, 20 (W. Britannia) the Picts.
+- **The army.** A barbarian army is a province actor of type 11 (marching) or 12 (becoming 11 once blocked, `0x240A2`); its size is +0x30, 1-8 when placed.
+
+### 27.2 A round
+
+The screen's buttons (`0x2250F`, by the click's x) run Tortoise `0x2308E`, Assault `0x231E2`, Flank `0x23212`, Charge `0x23242` or Retreat `0x230BE`. Each tactic computes the barbarians' figure and calls `0x229A3`:
+
+- barbarians = the race's strength against the tactic x 2 + the army's size + (`2EF9:0286` & 7);
+- Romans = regulars x 3 + irregulars x 2 + auxiliaries / 2 + (`2EF9:0288` & 3), with morale 0-1 costing 4, 2-3 costing 2, 6-7 adding 1 and 8-9 adding 2;
+- both are shifted right by 2 (arithmetic);
+- **equal:** a text, nothing else;
+- **Romans stronger:** if `0286` is odd, morale +1; the army's size loses the difference; at 0 or below, victory;
+- **barbarians stronger:** if `0286` is odd, morale -1; the Cohort loses one Century of each kind it still has -- auxiliaries, irregulars, regulars -- and the Legion's words `DS:0x6C52`/`0x6C4A`/`0x6C4E` with them; with none left, defeat.
+
+After the routine, morale is clamped to 0-9 (`0x225AD`). The difference in strength decides whether a side loses, but not how much the Cohort loses: at most three Centuries a round.
+
+### 27.3 The outcomes
+
+- **Victory, `0x22D5D`:** morale +2. With no patrol (+0x2C = 0) the Cohort stops where it stands (state 10, destination = position / 16); otherwise it resumes its patrol (state 11, destination +0x22/+0x24). The army is freed (`0x05DC7`).
+- **Defeat, `0x22EDB`:** morale -3; all three Century counts 0; state 10; the province cell it stood on loses bit 0x80; the standard returns to the fort at +0x2E/+0x2F (position x 16, destination the same, +0x0F = 0). The army stays.
+- **Retreat, `0x230BE`,** after "Retreat ?" is confirmed (`0x23708`): morale -2, and the Cohort stops where it stands.
+
+### 27.4 In Gaius, and what's open
+
+- **`systems::battle`**: `kRaces`, `kProvinceRace`, `load_race`, `tactic_strength`, `fight_round`, `win`, `lose`, `retreat`. The two random words are the caller's: between clicks the screen draws once a frame, which no save pins. `test_battle_rounds`, `test_battle_race_matches_saves`.
+- **Not modeled:** the screen and its texts; the Cohort 2 hand-over.

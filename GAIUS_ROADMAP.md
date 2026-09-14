@@ -20,13 +20,13 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
-| 6 | Economy & military | **In progress** — city economy and Legion recruitment done | Battles, forts and auxiliaries, province level |
+| 6 | Economy & military | **In progress** — city economy, Legion and battles done | Province level (armies, Cohort orders, forts, towns), auxiliaries |
 | 7 | Forum, advisors, ratings | Not started | Everything |
 | 8 | Format completeness & save write-back | Started | Save loader, formats, music, terrain generation |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3017 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3050 checks.
 
 **Critical path now:** Phase 6's battle resolution and province level. Phases 7 and 9 are unblocked and can run alongside it.
 
@@ -251,7 +251,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **`systems::military`, the Legion** (2026-09-14, findings section 26) — the yearly recruitment (`0x289C0`: regular Centuries from wages, irregular from population x conscription) and the assignment of Centuries to Cohorts (`0x28A8F`, mobilized/demobilized). All 17 saves' regulars, irregulars and Cohorts reproduced.
 
 **Open**
-- [ ] **Battle resolution** — located: `0x22000`-`0x23600` holds the morale changes, the tactic comparisons and the casualties, which take a Century from the Cohort and the Legion together (findings section 26.5). The `cohort` argument (`CAESAR.BAT`) only resumes a game after the external Cohort 2; `cohort.csr` is the 14-byte hand-over. Next: transcribe the four tactics' resolution (the manual is only qualitative).
+- [x] **`systems::battle`** (2026-09-14, findings section 27) — the four tactics against the province's race (16 races, strengths per tactic), rounds, casualties, morale, victory, defeat and retreat. All 17 saves' race words reproduced. Not modeled: the screen itself and the Cohort 2 hand-over.
 - [ ] **The rest of `systems::military`** — the auxiliaries' pleb source (step 105's pleb routine, the Tribune's screen), forts creating and transferring Cohorts (`0x1560A`, `0x23272`).
 - [ ] **Province level** — forts, cohort patrol/attack/go-home, barbarian armies, small towns, the Imperial Highway; the province actors (types 11-13, states 9-14) and what sends an invasion (`0x2D891`, `0x2D6F4`).
 - [ ] **Confirm the DOS process juggling isn't needed** — the batch file alternating `csr.exe`/`cohort.exe` becomes a screen transition; `COHORT.CSR` only needs its behaviour, not its format.

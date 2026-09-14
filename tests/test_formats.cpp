@@ -32,6 +32,7 @@
 #include "render/city_render.hpp"
 #include "stb_image.h"
 #include "systems/actors.hpp"
+#include "systems/battle.hpp"
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
@@ -2476,6 +2477,130 @@ void test_military_year_matches_saves() {
     }
 }
 
+// 0x229A3 and the outcome routines on a made-up Cohort and army.
+void test_battle_rounds() {
+    std::printf("test_battle_rounds (0x229A3 rounds, 0x22D5D victory, 0x22EDB defeat, 0x230BE retreat)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    set_global_word(*st, 0x6CA6, 20);  // W. Britannia: the Picts
+    battle::load_race(*st);
+    CHECK(global_word(*st, 0x6BD6) == 9 && global_word(*st, 0x6BD8) == 41);
+    CHECK(battle::tactic_strength(*st, battle::Tactic::Assault) == 4 &&
+          battle::tactic_strength(*st, battle::Tactic::Flank) == 7 &&
+          battle::tactic_strength(*st, battle::Tactic::Charge) == 4 &&
+          battle::tactic_strength(*st, battle::Tactic::Tortoise) == 7);
+
+    auto cohort = [&](int regulars, int irregulars, int auxiliaries, int morale) {
+        auto& r = st->objects[0].raw;
+        r.fill(0);
+        r[0x06] = 1;
+        r[0x07] = military::kCohortType;
+        r[0x31] = 12;
+        r[0x02] = 0x50;  // x 336 = column 21
+        r[0x03] = 0x01;
+        r[0x04] = 0x70;  // y 368 = row 23
+        r[0x05] = 0x01;
+        r[0x18] = 0xAD;  // cell 23 * 40 + 21 = 941
+        r[0x19] = 0x03;
+        r[battle::kCohortHomeX] = 5;
+        r[battle::kCohortHomeY] = 6;
+        r[military::kCohortRegulars] = static_cast<uint8_t>(regulars);
+        r[military::kCohortIrregulars] = static_cast<uint8_t>(irregulars);
+        r[military::kCohortAuxiliaries] = static_cast<uint8_t>(auxiliaries);
+        r[military::kCohortMorale] = static_cast<uint8_t>(morale);
+        set_global_word(*st, military::kRegulars, regulars);
+        set_global_word(*st, military::kIrregulars, irregulars);
+        set_global_word(*st, military::kAuxiliaries, auxiliaries);
+    };
+    auto army = [&](int size) {
+        auto& r = st->objects[1].raw;
+        r.fill(0);
+        r[0x06] = 1;
+        r[0x07] = 11;
+        r[0x31] = 9;
+        r[battle::kArmySize] = static_cast<uint8_t>(size);
+        set_global_word(*st, 0x6C16, 1);
+    };
+    month::Random rnd;
+
+    // Romans (2x3 + 1x2 + 3/2 + 2) / 4 = 2 against (4x2 + 3 + 5) / 4 = 4: one
+    // Century of each kind lost, morale down.
+    cohort(2, 1, 3, 5);
+    army(3);
+    rnd.walk = 5;
+    rnd.low7 = 2;
+    auto r1 = battle::fight_round(*st, 0, 1, battle::Tactic::Assault, rnd);
+    CHECK(r1.romans == 2 && r1.barbarians == 4 && r1.outcome == battle::Outcome::BarbariansWon && !r1.defeat);
+    CHECK(st->objects[0].raw[military::kCohortRegulars] == 1 && st->objects[0].raw[military::kCohortIrregulars] == 0 &&
+          st->objects[0].raw[military::kCohortAuxiliaries] == 2 && st->objects[0].raw[military::kCohortMorale] == 4);
+    CHECK(global_word(*st, military::kRegulars) == 1 && global_word(*st, military::kIrregulars) == 0 &&
+          global_word(*st, military::kAuxiliaries) == 2);
+
+    // Victory: (1x3 + 0 + 2/2 + 0) / 4 = 1 against a size-1 army with its
+    // Tortoise strength set to 0, (0 + 1 + 0) / 4 = 0.
+    set_global_word(*st, 0x6BCE, 0);
+    army(1);
+    rnd.walk = 0;
+    rnd.low7 = 0;
+    auto r2 = battle::fight_round(*st, 0, 1, battle::Tactic::Tortoise, rnd);
+    CHECK(r2.romans == 1 && r2.barbarians == 0 && r2.victory);
+    CHECK(st->objects[0].raw[military::kCohortMorale] == 6 && st->objects[0].raw[0x31] == 10);
+    CHECK(st->objects[0].raw[0x12] == 21 && st->objects[0].raw[0x13] == 23);
+    CHECK(st->objects[1].raw[0x06] == 0 && global_word(*st, 0x6C16) == 0);
+
+    // Even: (1x3 + 0 + 0 + 1) / 4 = 1 against (0 + 4 + 0) / 4 = 1.
+    cohort(1, 0, 0, 5);
+    army(4);
+    rnd.low7 = 1;
+    auto r3 = battle::fight_round(*st, 0, 1, battle::Tactic::Tortoise, rnd);
+    CHECK(r3.outcome == battle::Outcome::Even && st->objects[1].raw[battle::kArmySize] == 4);
+
+    // Defeat: morale 1 costs 4, (3 - 4) / 4 = -1 against (4x2 + 5 + 7) / 4 = 5.
+    cohort(1, 0, 0, 1);
+    army(5);
+    st->empire.cells[941] = 0xCA;
+    rnd.walk = 7;
+    rnd.low7 = 0;
+    auto r4 = battle::fight_round(*st, 0, 1, battle::Tactic::Charge, rnd);
+    CHECK(r4.romans == -1 && r4.barbarians == 5 && r4.defeat);
+    CHECK(st->objects[0].raw[military::kCohortMorale] == 0 && st->objects[0].raw[military::kCohortRegulars] == 0);
+    CHECK(st->objects[0].raw[0x02] == 0x50 && st->objects[0].raw[0x03] == 0 && st->objects[0].raw[0x04] == 0x60);
+    CHECK(st->objects[0].raw[0x12] == 5 && st->objects[0].raw[0x13] == 6 && st->objects[0].raw[0x31] == 10);
+    CHECK(st->empire.cells[941] == 0x4A && st->objects[1].raw[0x06] == 1);
+
+    // Retreat: morale -2, stopped where it stands.
+    cohort(1, 0, 0, 5);
+    battle::retreat(*st, 0);
+    CHECK(st->objects[0].raw[military::kCohortMorale] == 3 && st->objects[0].raw[0x31] == 10 &&
+          st->objects[0].raw[0x12] == 21 && st->objects[0].raw[0x13] == 23);
+}
+
+// Every save keeps its province's race words: the tables must give them.
+void test_battle_race_matches_saves() {
+    std::printf("test_battle_race_matches_saves (3496:175E/1790 vs each real save's DS:0x6BCE-0x6BDA)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        auto y = std::make_unique<CityState>(*st);
+        battle::load_race(*y);
+        bool same = true;
+        for (uint16_t ds = 0x6BCE; ds <= 0x6BDA; ds += 2) same = same && global_word(*y, ds) == global_word(*st, ds);
+        const int race = global_word(*st, 0x6BD6);
+        std::printf("  %s: province %d, race %d (%s)\n", name, global_word(*st, 0x6CA6), race,
+                    race >= 0 && race < 16 ? battle::kRaces[static_cast<size_t>(race)].name : "?");
+        CHECK(same);
+    }
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -3745,6 +3870,8 @@ int main() {
     test_economy_year_end_matches_saves();
     test_military_recruitment();
     test_military_year_matches_saves();
+    test_battle_rounds();
+    test_battle_race_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();
     test_render_walkers();
