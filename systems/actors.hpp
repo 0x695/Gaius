@@ -68,6 +68,10 @@
 #include "model/city_state.hpp"
 #include "systems/month.hpp"
 
+namespace gaius::systems::province {
+struct Hooks;
+}
+
 namespace gaius::systems::actors {
 
 namespace field {
@@ -117,8 +121,9 @@ void release(model::CityState& state, int slot);
 
 // 0x23C4C: one tick for every active walker. `tick` is the number of times
 // the frame counters (0x1147E) have run, including this one; the 16-, 32- and
-// 64-period counters the handlers test are its remainders.
-void update(model::CityState& state, month::Random& random, int tick);
+// 64-period counters the handlers test are its remainders. Province actors
+// (types 11-13) run systems::province::update_actor in their slot's turn.
+void update(model::CityState& state, month::Random& random, int tick, const province::Hooks* hooks = nullptr);
 
 // The per-row spawners, run after the housing row of steps 0-99: forums
 // (0x2D2F5, steps 0 and 50), workshops (0x2CE7C, step 25 + record) and

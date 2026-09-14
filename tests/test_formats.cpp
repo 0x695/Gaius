@@ -33,6 +33,7 @@
 #include "stb_image.h"
 #include "systems/actors.hpp"
 #include "systems/battle.hpp"
+#include "systems/province.hpp"
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
@@ -2601,6 +2602,180 @@ void test_battle_race_matches_saves() {
     }
 }
 
+// 0x26059 on an open province: a Cohort walks to its destination one cell
+// every 16 frames, and around an obstacle.
+void test_province_movement() {
+    std::printf("test_province_movement (0x26059, the province walker)\n");
+    using namespace gaius::systems;
+    for (const bool obstacle : {false, true}) {
+        auto st = std::make_unique<CityState>();
+        st->global_words_128.assign(256, 0);
+        st->final_state.assign(68, 0);
+        st->empire.cells.fill(0x1D);
+        if (obstacle) st->empire.cells[5 * 40 + 6] = 0x05;  // blocks everyone
+        const int c = actors::spawn(*st, province::kCohortType, 5, 5);
+        CHECK(c == 0);
+        auto& r = st->objects[static_cast<size_t>(c)].raw;
+        r[0x31] = province::kHalt;
+        r[0x12] = 8;
+        r[0x13] = 5;
+        month::Random rnd;
+        int arrived_at = 0;
+        for (int tick = 1; tick <= 300 && arrived_at == 0; ++tick) {
+            province::update_actor(*st, rnd, tick, c);
+            const int x = r[0x02] | (r[0x03] << 8), y = r[0x04] | (r[0x05] << 8);
+            if (x == 128 && y == 80 && r[0x0F] == 0) arrived_at = tick;
+        }
+        std::printf("  %s: arrived after %d frames\n", obstacle ? "around an obstacle" : "open ground", arrived_at);
+        CHECK(arrived_at > 0);
+        if (!obstacle) CHECK(arrived_at == 49);  // cell centres at frames 1, 17, 33, 49
+        CHECK(st->empire.cells[5 * 40 + 8] == 0x9D);
+        int occupied = 0;
+        for (uint8_t v : st->empire.cells) occupied += (v & 0x80) ? 1 : 0;
+        CHECK(occupied == 1);
+        if (obstacle) CHECK(st->empire.cells[5 * 40 + 6] == 0x05);
+    }
+}
+
+// Armies: the spawner, marching into the city, pillaging a town, and a
+// patrolling Cohort attacking.
+void test_province_armies() {
+    std::printf("test_province_armies (0x2D6F4 spawner, 0x24B66 march, 0x2D891 invasion, Cohort orders)\n");
+    using namespace gaius::systems;
+    auto fresh = [] {
+        auto st = std::make_unique<CityState>();
+        st->global_words_128.assign(256, 0);
+        st->final_state.assign(68, 0);
+        st->empire.cells.fill(0x1D);
+        return st;
+    };
+    month::Random rnd;
+
+    // The spawner: difficulty 0 at rank 1 sends armies in odd years from year
+    // 0 and every time from year 30; the last marker on the map wins.
+    {
+        auto st = fresh();
+        rnd.low7 = 2;
+        rnd.walk = 4;
+        st->empire.cells[3 * 40 + 4] = 0x59 + 2;
+        st->empire.cells[20 * 40 + 21] = province::kCityTile;
+        set_global_word(*st, 0x6C30, 1);
+        set_global_word(*st, 0x6C32, -1);
+        CHECK(province::spawn_army(*st, rnd, 0) == -1);
+        set_global_word(*st, 0x6C32, 4);
+        CHECK(province::spawn_army(*st, rnd, 0) == -1);
+        set_global_word(*st, 0x6C32, 5);
+        const int a = province::spawn_army(*st, rnd, 0);
+        CHECK(a == 0);
+        const auto& r = st->objects[0].raw;
+        CHECK(r[0x07] == province::kArmyType && r[0x31] == province::kMarch && r[0x30] == 5);
+        CHECK(r[0x12] == 21 && r[0x13] == 20 && (r[0x18] | (r[0x19] << 8)) == 3 * 40 + 4);
+        st->empire.cells[30 * 40 + 5] = 0x51 + 2;  // a sea marker later on the map
+        set_global_word(*st, 0x6C32, 30);
+        const int b = province::spawn_army(*st, rnd, 0);
+        CHECK(b == 1 && st->objects[1].raw[0x07] == province::kSeaArmyType);
+    }
+
+    // Marching into the city: the army is freed and invaders enter.
+    {
+        auto st = fresh();
+        st->empire.cells[10 * 40 + 12] = province::kCityTile;
+        set_global_word(*st, 0x6C30, 2);
+        set_global_word(*st, 0x6C3C, 20);
+        set_global_word(*st, 0x6BDA, 1);
+        st->city.tile[0][25] = 0x30;  // (50,0) isn't open land; (25,0) is
+        const int a = actors::spawn(*st, province::kArmyType, 10, 10);
+        auto& r = st->objects[static_cast<size_t>(a)].raw;
+        r[0x31] = province::kMarch;
+        r[0x12] = 12;
+        r[0x13] = 10;
+        rnd.low7 = 0;
+        rnd.walk = 50;
+        int invaded_at = 0;
+        for (int tick = 1; tick <= 60 && invaded_at == 0; ++tick) {
+            province::update_actor(*st, rnd, tick, a);
+            if (r[0x07] != province::kArmyType) invaded_at = tick;
+        }
+        CHECK(invaded_at == 33);
+        CHECK(r[0x06] == 1 && r[0x07] == 6 && r[0x31] == 3 && r[0x12] == 50 && r[0x13] == 50);
+        CHECK((r[0x02] | (r[0x03] << 8)) == 25 * 16 && st->city.tile[0][25] == 0x1D);
+        CHECK(global_word(*st, 0x6C3C) == 10 && global_word(*st, 0x6C84) == 1);
+    }
+
+    // Pillaging: blocked by a town, the army lowers its grade.
+    {
+        auto st = fresh();
+        st->empire.cells[10 * 40 + 11] = 0x4C;
+        const int a = actors::spawn(*st, province::kArmyType, 10, 10);
+        auto& r = st->objects[static_cast<size_t>(a)].raw;
+        r[0x31] = province::kMarch;
+        r[0x12] = 12;
+        r[0x13] = 10;
+        rnd.walk = 5;
+        province::update_actor(*st, rnd, 1, a);
+        CHECK(st->empire.cells[10 * 40 + 11] == 0x7A && r[0x1E] == 0x10 && (r[0x17] & 8));
+    }
+
+    // A patrolling Cohort sees an army within 64 px, attacks, and meets it.
+    {
+        auto st = fresh();
+        const int c = actors::spawn(*st, province::kCohortType, 5, 5);
+        const int a = actors::spawn(*st, province::kArmyType, 7, 8);
+        auto& r = st->objects[static_cast<size_t>(c)].raw;
+        r[0x31] = province::kPatrol;
+        r[0x12] = 9;
+        r[0x13] = 5;
+        r[0x2C] = 5;
+        r[0x2D] = 5;
+        int battles = 0;
+        province::Hooks hooks;
+        hooks.battle = [&](CityState&, int cohort, int army) {
+            CHECK(cohort == c && army == a);
+            ++battles;
+        };
+        province::update_actor(*st, rnd, 1, c, &hooks);
+        CHECK(r[0x31] == province::kAttack && r[0x14] == a && r[0x22] == 9 && r[0x24] == 5);
+        for (int tick = 2; tick <= 80 && battles == 0; ++tick) province::update_actor(*st, rnd, tick, c, &hooks);
+        CHECK(battles == 1);
+        actors::release(*st, a);
+        province::update_actor(*st, rnd, 200, c, &hooks);
+        CHECK(r[0x31] == province::kPatrol && r[0x12] == 9 && r[0x13] == 5);
+    }
+}
+
+// The saves' province actors stand where the map marks them, and a marching
+// army's destination is the city.
+void test_province_matches_saves() {
+    std::printf("test_province_matches_saves (province actors vs each real save's map)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        bool marked = true, heading_home = true;
+        int armies = 0;
+        for (const auto& a : st->objects) {
+            if (!a.active() || a.type() < 11 || a.type() > 13) continue;
+            marked = marked && (st->empire.cells[a.packed_xy() % 1600] & 0x80);
+            if (a.type() == province::kArmyType && a.state() == province::kMarch) {
+                ++armies;
+                heading_home = heading_home && (st->empire.at(a.raw_y() % 40, a.raw_x() % 40) & 0x7F) == province::kCityTile;
+            }
+        }
+        std::printf("  %s: %d marching armies%s\n", name, armies, marked ? "" : ", an actor's cell unmarked");
+        // CAESARXT's army stands on cell 16, whose byte is 0x24 without bit
+        // 0x80: something rewrote that terrain byte after the army marked it
+        // (the monthly routines at 0x2E0xx write province cells; not read).
+        if (std::string(name) != "CAESARXT.SAV") CHECK(marked);
+        CHECK(heading_home);
+    }
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -3872,6 +4047,9 @@ int main() {
     test_military_year_matches_saves();
     test_battle_rounds();
     test_battle_race_matches_saves();
+    test_province_movement();
+    test_province_armies();
+    test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();
     test_render_walkers();

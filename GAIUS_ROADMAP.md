@@ -26,7 +26,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3050 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3108 checks.
 
 **Critical path now:** Phase 6's battle resolution and province level. Phases 7 and 9 are unblocked and can run alongside it.
 
@@ -253,7 +253,8 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 **Open**
 - [x] **`systems::battle`** (2026-09-14, findings section 27) — the four tactics against the province's race (16 races, strengths per tactic), rounds, casualties, morale, victory, defeat and retreat. All 17 saves' race words reproduced. Not modeled: the screen itself and the Cohort 2 hand-over.
 - [ ] **The rest of `systems::military`** — the auxiliaries' pleb source (step 105's pleb routine, the Tribune's screen), forts creating and transferring Cohorts (`0x1560A`, `0x23272`).
-- [ ] **Province level** — forts, cohort patrol/attack/go-home, barbarian armies, small towns, the Imperial Highway; the province actors (types 11-13, states 9-14) and what sends an invasion (`0x2D891`, `0x2D6F4`).
+- [x] **`systems::province`, the province actors** (2026-09-14, findings section 28) — the province walker, barbarian armies (the 18-month spawner, marching, wrecking, pillaging towns, invading the city), and Cohorts halting, patrolling, attacking and going home into battle. Save actors checked against the map's occupancy bits.
+- [ ] **Province level, the rest** — towns growing and shrinking by their connection (`0x2E249`, path search `0x2E377`), the monthly province pass (`0x2E0BE`: road wear), forts and the Cohort commands on the province toolbar (`0x154xx`-`0x172xx`).
 - [ ] **Confirm the DOS process juggling isn't needed** — the batch file alternating `csr.exe`/`cohort.exe` becomes a screen transition; `COHORT.CSR` only needs its behaviour, not its format.
 
 **Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **City half met.**

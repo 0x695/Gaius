@@ -5,6 +5,7 @@
 
 #include "systems/construction.hpp"
 #include "systems/housing.hpp"
+#include "systems/province.hpp"
 
 namespace gaius::systems::actors {
 
@@ -595,7 +596,7 @@ void release(CityState& state, int slot) {
     a.r.fill(uint8_t{0});
 }
 
-void update(CityState& state, month::Random& random, int tick) {
+void update(CityState& state, month::Random& random, int tick, const province::Hooks* hooks) {
     for (int slot = 0; slot < kSlots; ++slot) {
         Rec a = rec(state, slot);
         if (a.b(kActive) != 1) continue;
@@ -604,7 +605,11 @@ void update(CityState& state, month::Random& random, int tick) {
             release(state, slot);
             continue;
         }
-        if (type >= static_cast<int>(kTypes.size())) continue;  // province actors
+        if (type >= 11 && type <= 13) {
+            province::update_actor(state, random, tick, slot, hooks);
+            continue;
+        }
+        if (type >= static_cast<int>(kTypes.size())) continue;
         const TypeInfo& info = kTypes[static_cast<size_t>(type)];
         if (!info.city) continue;
         Ctx c{state, random, tick, slot};

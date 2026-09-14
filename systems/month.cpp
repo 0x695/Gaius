@@ -12,6 +12,7 @@
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
 #include "systems/military.hpp"
+#include "systems/province.hpp"
 
 namespace gaius::systems::month {
 
@@ -96,7 +97,15 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
     // counters (0x1147E), the walkers (0x23C4C) and the step (0x2936A).
     sim.random.advance();
     ++sim.ticks;
-    if (state) actors::update(*state, sim.random, sim.ticks);
+    if (state) {
+        province::Hooks hooks;
+        hooks.battle = sim.on_battle;
+        actors::update(*state, sim.random, sim.ticks, &hooks);
+        // 0x2936B: the step starts with the army spawner when the 18-month
+        // counter has wrapped (DS:0x6D97).
+        if (sim.army_spawn_pending) province::spawn_army(*state, sim.random, sim.difficulty);
+    }
+    sim.army_spawn_pending = false;
 
     const int step = sim.step;
     if (step < kHousingSteps) {
@@ -152,7 +161,10 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
             sim.month = 0;
             ++sim.year;
         }
-        if (++sim.month_counter_18 >= 18) sim.month_counter_18 = 0;
+        if (++sim.month_counter_18 >= 18) {
+            sim.month_counter_18 = 0;
+            sim.army_spawn_pending = true;  // 0x294B3
+        }
     }
 }
 

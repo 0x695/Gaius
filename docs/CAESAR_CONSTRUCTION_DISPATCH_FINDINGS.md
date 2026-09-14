@@ -1080,3 +1080,64 @@ After the routine, morale is clamped to 0-9 (`0x225AD`). The difference in stren
 
 - **`systems::battle`**: `kRaces`, `kProvinceRace`, `load_race`, `tactic_strength`, `fight_round`, `win`, `lose`, `retreat`. The two random words are the caller's: between clicks the screen draws once a frame, which no save pins. `test_battle_rounds`, `test_battle_race_matches_saves`.
 - **Not modeled:** the screen and its texts; the Cohort 2 hand-over.
+
+## 28. The province map's actors (2026-09-14)
+
+Barbarian armies and the player's Cohorts live in the same 70-record actor table as the city's walkers and run in the same per-frame loop `0x23C4C`, through the type table `DS:0x134C` (types 11-13) and the state table `DS:0x1384` (states 9-15). They move on the province map: the save's embedded EMPIRE2 block (`3496:2754`, 40 x 40). `systems::province` implements them; `systems::actors::update` hands types 11-13 over in their slot's turn.
+
+### 28.1 Types and states
+
+| Type | Handler | What it does |
+|---|---|---|
+| 11 barbarian army | `0x24023` | runs its state; frame = the race's banner `DS:0x6BD8`; while the 64-frame counter `DS:0x6D3C` is 0 it ages (+0x1F), and at 120 goes to state 2 |
+| 12 army by sea | `0x24089` | runs its state; frame 0x2C-0x2F by facing; once a step is blocked (status bit 8) it becomes type 11 |
+| 13 Cohort | `0x24133` | frame = its number (+0x2A) x 4 + (`DS:0x6D3E` / 2 & 3), the waving flag; runs its state |
+
+| State | Handler | |
+|---|---|---|
+| 2 | `0x242EF` | freed (`0x05DC7`) |
+| 9 | `0x24B66` | march (table `3496:2098` for type 12, else `3496:200C`). Stopped on the city tile `0x4A`: `DS:0x6DA7` = low7 & 7, the army is freed, `0x2D891` sends invaders into the city, and the Peace rating `DS:0x6C3C` drops by 4 at rank 1 or 10 above (not below 0), `DS:0x6C84` = 1. Stopped elsewhere: state 15. Blocked (bit 8) with walk < 0x14: by the obstacle's class (+0x1E, via the table at `0x24E88`), class 1-2 with low7 = 0x21, class 4 with low7 11-13, class 8 or 0x20 with low7 21-31, class 0x40 with low7 25-31 turn the blocked cell (+0x1A) into `0x1D`; class 0x10 pillages a town one grade (`0x79` -> `0x61`, `0x7A` -> `0x79`, `0x4C` -> `0x7A`) |
+| 10 | `0x24ECE` | walk to the destination; stopped, `0x25484` |
+| 11 | `0x24EF4` | walk; stopped, swap the destination with +0x2C/+0x2D (the patrol's other end); at a cell centre, an army (type 11) within 64 px (`0x2533E`) becomes the target (+0x14), the destination is kept in +0x22/+0x24 and the state becomes 12 |
+| 12 | `0x24FF7` | the target not an active type 11: with no patrol (+0x2C = 0) state 10 where it stands, else state 11 back to +0x22/+0x24. Otherwise the destination is the army's cell; walk; at a centre, an army within 16 px (`0x26EF1`) starts the battle (section 27) |
+| 13 | `0x2514C` | as state 10 |
+| 14 | `0x25172` | frame = number x 4 |
+| 15 | `0x24EA4` | +0x28 counts up; past 16 the army is freed |
+
+States 10-13 are the toolbar's Halt, Patrol, Attack and Go Home, matched by what they do (STRONG INFERENCE; the command handlers aren't read).
+
+### 28.2 Movement (`0x26059`)
+
+The city walker's algorithm (section 20.3) with a 40-wide map, occupancy bit `0x80` and the stop routine `0x26C4F`. Differences:
+
+- at a cell centre the obstacle class +0x1E isn't cleared;
+- a successful step moves the first pixel **before** the occupied cell is recomputed, so a walker heading west or north already occupies the next cell; `CAESARXT`'s army at x = 272 facing east with cell 16 is this order;
+- turning goes clockwise with hand 0 and anticlockwise otherwise (the city version tests hand 1 separately);
+- the step test `0x26454` masks the occupancy bit, lets Cohorts through classes 7 and up, sets status bit 8 and keeps the blocked cell in +0x1A.
+
+Table `3496:200C` blocks the sea (tiles 0-0x1C) and passes grass (`0x1D`-`0x24`), the city (`0x4A`-`0x4B`) and the spawn markers (`0x51`-`0x60`); table `3496:2098` is its complement for ships.
+
+### 28.3 Where armies come from (`0x2D6F4`)
+
+The calendar sets `DS:0x6D97` when the 18-month counter wraps; the next step starts with `0x2D6F4`:
+
+- By the difficulty `DS:0x6CB8` (0, 1, 2 -- an options setting the save doesn't keep) a first year of 0, -6 or -11 and a yearly-from year of 30, 10 or 0, each less the rank `DS:0x6C30` - 1. Before the first year nothing comes; before the second, only in odd years.
+- r = low7 & 7. The whole map is scanned row by row: tile `0x51` + r marks a sea landing (type 12), `0x59` + r a land border (type 11), `0x4A` the city. The last marker found wins.
+- The army is placed (`0x05C39`) at the marker, heads for the city in state 9 with size (walk & 7) + 1, and a message names the place.
+
+### 28.4 Invaders in the city (`0x2D891`)
+
+- **Target:** `0x2D90F` walks the forum records (`table_480`): each active one's timer (+0x0C) counts down, and the first to fall below 0 is reset to 6 and becomes the target; with none, the map centre (50, 50).
+- **Entry:** `0x2D966` tries five cells of `3496:1828`[direction x 10] (the city map's edges and corners for each of the eight directions); the first holding a tile above `0x1C` and below `0x4A` becomes `0x1D`, and an invader of type 5 + `DS:0x6BDA` (the race's) is placed there in state 3 heading for the target (section 20).
+
+### 28.5 Checked against the saves
+
+- In 16 of 17 saves every province actor's cell has bit `0x80`. In `CAESARXT` the marching army's cell doesn't: the monthly province routine `0x2E0BE` clears the bit over the whole map (`0x2E0F9`), and the army hasn't reached a new cell since.
+- The three saves with a marching army (`CAESARXT`, `XS`, `XR`) all have it heading for the city tile, (28, 18).
+- `test_province_movement`, `test_province_armies`, `test_province_matches_saves`.
+
+### 28.6 Not modeled
+
+- the monthly province routine `0x2E0BE` and the towns `0x2E249` (next);
+- the Cohort command handlers and forts on the province toolbar;
+- messages and sounds.

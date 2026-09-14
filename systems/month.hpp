@@ -29,7 +29,7 @@
 // 0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F) aren't
 // read yet. Step 101's routine 0x28215 is run_economy below; of the yearly
 // routine 0x28238 the accounts (systems::economy), the history writes and the
-// Legion (systems::military) are modeled, and none of them draws; the 18-month routine 0x2D6F4 isn't. 
+// Legion (systems::military) are modeled, and none of them draws; the 18-month routine 0x2D6F4 is systems::province::spawn_army.
 //
 // The random draws. The land-value growth each housing row applies is
 // DS:0x6BF6 + (2EF9:0286 & 3) - 1, as a signed byte, and 2EF9:0286 only
@@ -45,6 +45,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 #include "model/city_state.hpp"
 #include "systems/service.hpp"
@@ -85,6 +86,15 @@ struct SimState {
     int road_wear_threshold = 99;
     int collapse_threshold = 99;
     int fire_threshold = 99;
+    // DS:0x6D97: the 18-month counter wrapped, and the next step starts with
+    // the army spawner (systems::province::spawn_army).
+    bool army_spawn_pending = false;
+    // DS:0x6CB8, the difficulty (0-2), which the save doesn't keep: it comes
+    // from the options screen (0x27F26). 0 unless the caller sets it.
+    int difficulty = 0;
+    // Called when a Cohort reaches the army it attacks (systems::province::
+    // Hooks::battle); without it the battle doesn't start.
+    std::function<void(model::CityState& state, int cohort, int army)> on_battle;
     Random random;
     service::ServiceState service;
 };
