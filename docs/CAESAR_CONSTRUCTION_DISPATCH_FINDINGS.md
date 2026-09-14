@@ -1356,3 +1356,40 @@ With `DS:0x6CAE` = 1 the map draw (`0x06369` -> `0x065D9`) scrolls the province 
 - The original screens' art and layout (`FORUM32`, `P_BLOCKS.PL8`, the advisor text picker `0x0D007`), and the manual's Trouble overlay.
 - The start screen (funding, difficulty, name) and a new game's first province.
 - The construction need `DS:0x6C3E` on the Tribune's page, which the save doesn't keep.
+
+
+## 33. Saving, loading and a new game (2026-09-15)
+
+### 33.1 The loader reads what the writer writes
+
+The writer (`0x033C8`, the calls from `0x033F2`) and the loader (`0x04537`, the calls from `0x04561` to `0x05685`) each make 175 calls to their file routine -- `0:32CC` writes, `0:2F78` reads -- and each call pushes a size and a DS or far address. Laid side by side the two sequences agree at every one of the 175: the same address, the same size, in the same order. (The loader's first call also pushes the file handle, which is the only textual difference.) So a save file is exactly those records end to end, and `formats::save::write` of a `model::serialize`d state is a file the engine reads. DEFINITIVE; `test_save_write_round_trip` writes every real save back and reads it byte-identical.
+
+After the reads the loader (`0x05688`-`0x056A4`) closes the file, sets `DS:0x6BFE` = `DS:0x6C02` x `DS:0x6C1C` (section 25.2), calls `0x2C918` -- every cell of `3496:2D94`, the coverage ceiling (`service::ServiceState::coverage_ceiling`), to `0x3F` -- and sets `DS:0x0620` = `DS:0x6C78` xor 1, an options toggle `0x0F006` copies back.
+
+**The difficulty is saved.** `DS:0x6CB8` is the seventh word of `final_state` (FORMATS.md); `systems::month::SimState` had said the save doesn't keep it. `sim_state_from_save` now reads it.
+
+**The menus.** Load (`0x0EE07`) and Save (`0x0EE93`) each open the file dialog (`0x0C558`, an 18-character name at `DS:0x02E4`, the pattern `*.sav` at `DS:0x0D53`/`0x0D59`), confirm overwriting an existing file (`0x0F43F`), call `0x04537` or `0x033C8`, and report the result. The default name is `CaesarXX.sav` (`DS:0x0DDD`).
+
+### 33.2 A new game
+
+The main loop's new game (`0x0F74F`-`0x0F7EE`):
+
+1. `DS:0x6C78` = 1 and `0x056B8`, the new game (section 31.1);
+2. the governor's 12-character name is copied to the buffer at `DS:0x5858` ("Octavian" by default, `DS:0x0DD0`);
+3. **the start screen `0x27DDF`**. Its arrows move the funding level `DS:0x6CBA` over 0-9 (`0x27F54`/`0x27F60`) and the difficulty `DS:0x6CB8` over 0-2 (`0x27F6C`/`0x27F78`). Each frame `DS:0x6C0C` = `3496:1718`[level]: 8000, 6000, 5000, 4000, 3000, 2000, 1500, 1000, 750, 250 Dn, named Trivial, Beginner, Easy, Simple, Medium, Testing, Challenging, Hard, Exacting, Impossible !! (the strings after the Cohort emblems). Above rank 1, Easy becomes Medium. Its Load button (`0x27FA9`) loads a game instead and sets `DS:0x6DE1`, which skips the rest;
+4. `0x2898E` and `0x289B0`: the first province is drawn and made current, as for a promotion (section 22.2);
+5. `0x0D1D3` (the empire's province list, `0x0D21E` over `3496:172C`), **`0x06F05` the city's terrain**, `0x09276`, `0x0D21E`, then `0x0FF1C` (the province's `EMPIRE2.0NN`) and `0x05730` (the reset);
+6. the funds `DS:0x6CA2` = `DS:0x6C0C` again, a message (`0x27ACE`), and the game starts.
+
+A promotion (`0x0FB34`) runs step 5 in the same order. That settles section 31.4's open question: the terrain is generated before the map loads and the city resets, as `campaign::start_province` does. DEFINITIVE.
+
+`systems::campaign::begin_new_game` runs steps 1, 3 and 4; the caller loads the map and calls `start_province`. `test_campaign_new_game` checks it.
+
+### 33.3 In the viewer
+
+`gaius_viewer <game folder>` opens the start screen: the funding level and the difficulty with their arrows, Begin and Load. The Forum has Save and Load, eight slots `CAESAR01.SAV`-`CAESAR08.SAV` in the per-user data folder or `--save-dir`, each labelled with its province and year. A game saved and loaded goes through the same `model::serialize`/`load` the tests prove.
+
+### 33.4 Open
+
+- Typing the governor's name (the start screen shows the default).
+- Whether a Gaius-written save of a Gaius-played city runs in the original: the format is proven, but a city Gaius built isn't checked in DOSBox.

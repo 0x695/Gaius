@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "systems/actors.hpp"
+#include "systems/administration.hpp"
 #include "systems/battle.hpp"
 #include "systems/military.hpp"
 #include "systems/plebs.hpp"
@@ -340,6 +341,17 @@ void generate_city(model::CityMap& city, month::Random& random, int& shore_varia
         vary_grass(t, random);
         if (lay_river(t, random)) return;
     }
+}
+
+int begin_new_game(model::CityState& state, month::Random& random, int funding_level, int difficulty) {
+    new_game(state, random);
+    funding_level = std::clamp(funding_level, 0, static_cast<int>(kStartingFunding.size()) - 1);
+    set(state, 0x6CBA, funding_level);
+    set(state, 0x6C0C, kStartingFunding[static_cast<size_t>(funding_level)]);
+    set(state, 0x6CB8, std::clamp(difficulty, 0, 2));
+    if (administration::pick_province(state, random) < 0) return -1;
+    administration::make_province_current(state);
+    return g(state, 0x6CA6);
 }
 
 void new_game(model::CityState& state, month::Random& random) {

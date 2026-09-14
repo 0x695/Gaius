@@ -140,17 +140,7 @@ Offer check_promotion(model::CityState& state, month::Random& random) {
     for (uint16_t rating : {kPeace, kCulture, kEmpire, kProsperity}) {
         if (need.each > g(state, rating)) return Offer::None;
     }
-    // 0x2898E: draw until a province not yet given. (A game that had given all
-    // 50 would loop forever; Gaius stops after 1000 draws.)
-    if (state.table_50.size() < 50) state.table_50.resize(50, 0);
-    for (int i = 0; i < 1000; ++i) {
-        random.advance();
-        const int province = random.walk >> 1;
-        if (province >= 0 && province < 50 && state.table_50[static_cast<size_t>(province)] == 0) {
-            set(state, 0x6CA4, province);
-            break;
-        }
-    }
+    pick_province(state, random);
     if (rank == 19) return Offer::Caesar;
     if (rank > 19) return Offer::None;
     return Offer::Promotion;
@@ -168,11 +158,29 @@ void accept_promotion(model::CityState& state, int& difficulty) {
     }
     set(state, kRank, rank + 1);
     set(state, 0x6C2A, g(state, 0x6C2A) + 5);
-    const int province = g(state, 0x6CA4);  // 0x289B0
+    make_province_current(state);
+    if (difficulty == 0) difficulty = 1;
+}
+
+int pick_province(model::CityState& state, month::Random& random) {
+    // A game that had given all 50 would loop forever; Gaius stops after 1000 draws.
+    if (state.table_50.size() < 50) state.table_50.resize(50, 0);
+    for (int i = 0; i < 1000; ++i) {
+        random.advance();
+        const int province = random.walk >> 1;
+        if (province >= 0 && province < 50 && state.table_50[static_cast<size_t>(province)] == 0) {
+            set(state, 0x6CA4, province);
+            return province;
+        }
+    }
+    return -1;
+}
+
+void make_province_current(model::CityState& state) {
+    const int province = g(state, 0x6CA4);
     set(state, 0x6CA6, province);
     if (state.table_50.size() < 50) state.table_50.resize(50, 0);
     if (province >= 0 && province < 50) state.table_50[static_cast<size_t>(province)] = 1;
-    if (difficulty == 0) difficulty = 1;
 }
 
 void defer_promotion(model::CityState& state, int years) {

@@ -91,7 +91,9 @@ struct SimState {
     // DS:0x6D97: the 18-month counter wrapped, and the next step starts with
     // the army spawner (systems::province::spawn_army).
     bool army_spawn_pending = false;
-    // DS:0x6CB8, the difficulty (0-2), which the save doesn't keep: it comes
+    // DS:0x6CB8, the difficulty (0-2), saved in final_state (sim_state_from_save
+    // reads it); set on the start screen (0x27F6C) and raised from Easy by a
+    // promotion. The note below predates finding it in the save: it comes
     // from the options screen (0x27F26). 0 unless the caller sets it.
     int difficulty = 0;
     // Province counters the save doesn't keep: DS:0x6DFE (towns grow one month

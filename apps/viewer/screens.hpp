@@ -15,12 +15,15 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <string>
+#include <vector>
 
 #include "model/city_state.hpp"
 #include "systems/administration.hpp"
 #include "systems/battle.hpp"
+#include "systems/campaign.hpp"
 #include "systems/economy.hpp"
 #include "systems/forum.hpp"
 #include "systems/military.hpp"
@@ -84,6 +87,12 @@ inline constexpr int kActionPrevCohort = 400, kActionNextCohort = 401, kActionMo
 inline constexpr int kActionAccept = 500, kActionWait9 = 501, kActionWait24 = 502;
 inline constexpr int kActionTactic = 600;    // + battle::Tactic
 inline constexpr int kActionRetreat = 610, kActionContinue = 611, kActionQuit = 612;
+inline constexpr int kActionOpenSave = 405, kActionOpenLoad = 406;
+inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDifficultyDown = 702,
+                     kActionDifficultyUp = 703, kActionBegin = 704;
+inline constexpr int kActionSlot = 710;  // + slot
+inline constexpr int kActionBack = 720;
+inline constexpr int kSaveSlots = 8;
 
 namespace detail {
 
@@ -113,6 +122,8 @@ inline ui::Page forum_page(const model::CityState& s, ForumTab tab) {
         page.tabs.push_back({kTabs[i], kActionTab + i});
     }
     page.selected_tab = tab;
+    page.buttons.push_back({"Save", kActionOpenSave});
+    page.buttons.push_back({"Load", kActionOpenLoad});
     page.buttons.push_back({"Close", kActionClose});
     const auto dn = [](int v) { return std::to_string(v) + " Dn"; };
     switch (tab) {
@@ -268,6 +279,35 @@ inline ui::Page promotion_page(const model::CityState& s, bool to_caesar) {
         page.buttons.push_back({"Wait 9 years", kActionWait9});
         page.buttons.push_back({"Wait 24 years", kActionWait24});
     }
+    return page;
+}
+
+// The start screen (0x27DDF): the funding level and the difficulty, each with
+// its arrows (0x27F54/0x27F60, 0x27F6C/0x27F78), and the governor's name, which
+// the engine keeps at DS:0x5858 ("Octavian" until the player types one).
+inline ui::Page start_page(int funding_level, int difficulty) {
+    namespace campaign = systems::campaign;
+    ui::Page page;
+    page.title = "A new career";
+    page.rows.push_back({"Governor", "Octavian"});
+    const size_t level = static_cast<size_t>(std::clamp(funding_level, 0, 9));
+    page.rows.push_back({"Funding", std::string(campaign::kFundingNames[level]) + ", " +
+                                        std::to_string(campaign::kStartingFunding[level]) + " Dn",
+                         kActionFundingDown, kActionFundingUp});
+    page.rows.push_back({"Difficulty", campaign::kDifficultyNames[static_cast<size_t>(std::clamp(difficulty, 0, 2))],
+                         kActionDifficultyDown, kActionDifficultyUp});
+    page.buttons.push_back({"Begin", kActionBegin});
+    page.buttons.push_back({"Load a game", kActionOpenLoad});
+    return page;
+}
+
+// The save and load slots: one button per slot (the caller labels them and
+// disables empty ones when loading), and Back.
+inline ui::Page files_page(bool saving, const std::vector<ui::PanelButton>& slots) {
+    ui::Page page;
+    page.title = saving ? "Save the game" : "Load a game";
+    page.rows.push_back({saving ? "Choose a slot to write" : "Choose a saved game", ""});
+    page.buttons = slots;
     return page;
 }
 

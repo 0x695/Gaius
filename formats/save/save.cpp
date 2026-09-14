@@ -50,6 +50,17 @@ SaveFile load(const std::string& path) {
     return sf;
 }
 
+void write(const SaveFile& sf, const std::string& path) {
+    if (sf.raw.size() != kSaveSize)
+        throw FormatError("save: a save is exactly " + std::to_string(kSaveSize) + " bytes, not " +
+                          std::to_string(sf.raw.size()));
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) throw FormatError("save: cannot write " + path);
+    const size_t n = std::fwrite(sf.raw.data(), 1, sf.raw.size(), f);
+    const bool closed = std::fclose(f) == 0;
+    if (n != kSaveSize || !closed) throw FormatError("save: short write to " + path);
+}
+
 std::pair<const uint8_t*, size_t> SaveFile::block(const std::string& name) const {
     for (const auto& b : block_table()) {
         if (b.name == name) {

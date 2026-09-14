@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "formats/empire2/empire2.hpp"
 #include "model/city_state.hpp"
 #include "systems/month.hpp"
@@ -48,9 +50,25 @@ void new_game(model::CityState& state, month::Random& random);
 // 50; every city layer, walker, record and history cleared; the Prima Cohors
 // on the city's province cell (0x0621F); the race, the plebs' needs,
 // assignment and thresholds; and the Imperial Highway's entry (0x06307).
-// The order of the terrain generation within this is STRONG INFERENCE (its
-// caller isn't traced); everything else follows 0x05730's order.
+// The order is the engine's: both callers -- a promotion (0x0FB34) and a new
+// game (0x0F7A2) -- generate the terrain (0x6F05) before loading the map
+// (0x0FF1C) and resetting (0x05730). DEFINITIVE (findings section 33).
 void start_province(model::CityState& state, const formats::empire2::EmpireMap& province_map,
                     month::Random& random, int difficulty, int& shore_variant);
+
+// The start screen (0x27DDF): the funding level DS:0x6CBA (0-9) picks the
+// starting funding DS:0x6C0C from 3496:1718, and DS:0x6CB8 is the difficulty
+// (0-2). The names are the executable's strings (after the Cohort emblems).
+inline constexpr std::array<int, 10> kStartingFunding = {8000, 6000, 5000, 4000, 3000, 2000, 1500, 1000, 750, 250};
+inline constexpr std::array<const char*, 10> kFundingNames = {"Trivial", "Beginner",    "Easy", "Simple",   "Medium",
+                                                              "Testing", "Challenging", "Hard", "Exacting", "Impossible !!"};
+inline constexpr std::array<const char*, 3> kDifficultyNames = {"Easy", "Medium", "Hard"};
+
+// A new game as the main loop runs it (0x0F74F-0x0F7C5): new_game (0x056B8),
+// the start screen's funding and difficulty, and the first province drawn and
+// made current (0x2898E, 0x289B0). Returns the province, or -1. The caller then
+// loads its EMPIRE2.0NN and calls start_province, whose funds at rank 1 are the
+// starting funding (0x0F7C5 sets them to it again).
+int begin_new_game(model::CityState& state, month::Random& random, int funding_level, int difficulty);
 
 }  // namespace gaius::systems::campaign

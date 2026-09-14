@@ -3435,6 +3435,12 @@ void test_ui_panel_pages() {
     bv.cohort = slot;
     bv.army = army;
     pages.push_back(gaius::viewer::battle_page(*st, bv));
+    pages.push_back(gaius::viewer::start_page(9, 2));
+    std::vector<gaius::ui::PanelButton> slots;
+    for (int i = 0; i < gaius::viewer::kSaveSlots; ++i)
+        slots.push_back({std::to_string(i + 1) + "  Britannia Sup., BC 13", gaius::viewer::kActionSlot + i});
+    slots.push_back({"Back", gaius::viewer::kActionBack});
+    pages.push_back(gaius::viewer::files_page(true, slots));
     pages.push_back(gaius::viewer::ending_page(*st, false));
     pages.push_back(gaius::viewer::ending_page(*st, true));
     bool inside = true, round_trip = true;
@@ -3502,6 +3508,59 @@ void test_province_render_corpus() {
         CHECK(img.width == 640 && img.height == 640 && img.pixels[0] == f.pixels[0]);
     }
     CHECK(saves > 0 && covered && actors_drawn);
+}
+
+void test_save_write_round_trip() {
+    std::printf("test_save_write_round_trip (every real save written back and read again, byte-identical)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    const std::string out = (std::filesystem::temp_directory_path() / "gaius_write_round_trip.sav").string();
+    int saves = 0;
+    bool identical = true;
+    for (const char* name : kRealSaves) {
+        const std::string path = std::string(assets) + "/gaius_test_saves/" + name;
+        if (!std::filesystem::exists(path)) continue;
+        const gaius::formats::save::SaveFile original = gaius::formats::save::load(path);
+        auto st = std::make_unique<CityState>(load(original));
+        gaius::formats::save::write(serialize(*st), out);
+        identical = identical && gaius::formats::save::load(out).raw == original.raw;
+        ++saves;
+    }
+    std::filesystem::remove(out);
+    CHECK(saves > 0 && identical);
+    // A short buffer is refused rather than written.
+    gaius::formats::save::SaveFile bad;
+    bad.raw.assign(10, 0);
+    bool threw = false;
+    try {
+        gaius::formats::save::write(bad, out);
+    } catch (const gaius::formats::FormatError&) {
+        threw = true;
+    }
+    CHECK(threw && !std::filesystem::exists(out));
+}
+
+void test_campaign_new_game() {
+    std::printf("test_campaign_new_game (0x0F74F-0x0F7C5: start screen, first province, start_province)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    CHECK(st->global_words_128.size() == 256 && st->final_state.size() == 68 && st->table_50.size() == 50);
+    month::Random rnd;
+    const int province = campaign::begin_new_game(*st, rnd, 3, 2);
+    CHECK(province >= 0 && province < 50 && global_word(*st, 0x6CA6) == province);
+    CHECK(st->table_50[static_cast<size_t>(province)] == 1);
+    CHECK(global_word(*st, 0x6C0C) == 4000 && global_word(*st, 0x6CBA) == 3 && global_word(*st, 0x6CB8) == 2);
+    CHECK(global_word(*st, 0x6C30) == 1 && global_word(*st, 0x6C32) == -13);
+    gaius::formats::empire2::EmpireMap map{};
+    map.cells.fill(0x1D);
+    map.cells[20 * 40 + 20] = 0x4A;
+    int variant = 0;
+    campaign::start_province(*st, map, rnd, 2, variant);
+    CHECK(global_word(*st, 0x6CA2) == 4000);  // rank 1: the starting funding, as 0x0F7C5 sets it
+    CHECK(month::sim_state_from_save(*st).difficulty == 2);
 }
 
 void test_campaign_start_province() {
@@ -4845,6 +4904,8 @@ int main() {
     test_campaign_terrain_matches_saves();
     test_campaign_start_province();
     test_forum_controls();
+    test_save_write_round_trip();
+    test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();
     test_province_matches_saves();

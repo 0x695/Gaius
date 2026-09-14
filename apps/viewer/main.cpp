@@ -55,6 +55,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -230,6 +231,7 @@ int main(int argc, char** argv) {
     std::vector<int> test_actions;  // --test-action N: a page action applied before the first frame
     bool test_battle = false;       // --test-battle: the first Cohort meets a new army
     bool test_promotion = false;    // --test-promotion: a promotion is offered now
+    std::string save_dir_option;    // --save-dir: where the save slots live (default: the per-user data folder)
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
@@ -239,6 +241,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--test-action") == 0 && i + 1 < argc) test_actions.push_back(std::atoi(argv[++i]));
         if (std::strcmp(argv[i], "--test-battle") == 0) test_battle = true;
         if (std::strcmp(argv[i], "--test-promotion") == 0) test_promotion = true;
+        if (std::strcmp(argv[i], "--save-dir") == 0 && i + 1 < argc) save_dir_option = argv[++i];
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -285,13 +288,16 @@ int main(int argc, char** argv) {
     // (formats::save::kSaveSize); no other size is valid input here. Same
     // "sniff structure, don't trust extensions" lesson as
     // docs/CAESAR_GOG_BUILD_FINDINGS.md's MINIFONT.PL1 finding.
+    // A folder is the game's own: a new career, from the start screen.
+    const bool new_career = fs::is_directory(in_path);
     std::error_code ec;
-    uintmax_t file_size = fs::file_size(in_path, ec);
+    uintmax_t file_size = new_career ? 0 : fs::file_size(in_path, ec);
     if (ec) {
         std::fprintf(stderr, "failed to stat %s: %s\n", in_path.c_str(), ec.message().c_str());
         return 2;
     }
-    bool save_mode = (file_size == formats::save::kSaveSize);
+    bool save_mode = new_career || (file_size == formats::save::kSaveSize);
+    if (new_career && assets_dir.empty()) assets_dir = in_path;
 
     EmpireMap map;
     formats::save::SaveFile save;
@@ -301,7 +307,9 @@ int main(int argc, char** argv) {
     int tool_index = 0;
 
     try {
-        if (save_mode) {
+        if (new_career) {
+            state = model::blank_state();
+        } else if (save_mode) {
             save = formats::save::load(in_path);
             state = model::load(save);
         } else {
@@ -506,8 +514,16 @@ int main(int argc, char** argv) {
     // ---- The screens: the city, the province, the Forum, a promotion offer and
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
-    enum class Screen { City, Province, Maps, Forum, Promotion, Battle, Ending };
+    enum class Screen { City, Province, Maps, Forum, Promotion, Battle, Ending, Start, Files };
     Screen screen = Screen::City;
+    Screen files_return = Screen::Forum;  // where the save / load page goes back to
+    bool files_saving = false;
+    int funding_level = 0, start_difficulty = 0;  // the start screen's DS:0x6CBA and DS:0x6CB8
+    std::vector<ui::PanelButton> slot_buttons;
+    if (new_career) {
+        screen = Screen::Start;
+        time_running = false;
+    }
     int overlay = 0;             // viewer::Overlay on the maps panel
     bool ending_caesar = false;  // the ending page: Caesar, or dismissed
     bool quit_requested = false;
@@ -569,14 +585,61 @@ int main(int argc, char** argv) {
         systems::month::Random random = sim.random;
         const int difficulty = sim.difficulty;
         systems::campaign::start_province(state, province_map, random, difficulty, shore_variant);
+        model::set_global_word(state, 0x6CB8, difficulty);  // a promotion may have raised it from Easy
         sim = systems::month::sim_state_from_save(state);
         sim.random = random;
-        sim.difficulty = difficulty;
         install_hooks();
         city_image_dirty = province_image_dirty = true;
         std::printf("new province: %s (%s), funds %d Dn\n", viewer::province_name(province), name,
                     model::global_word(state, systems::economy::kFunds));
         return true;
+    };
+
+    // The save slots: CAESAR01.SAV-CAESAR08.SAV in --save-dir, or the per-user
+    // data folder. The files are the original's format (formats::save::write).
+    auto slot_path = [&](int slot) {
+        std::string dir = save_dir_option;
+        if (dir.empty()) {
+            try {
+                dir = platform::data_path("saves");
+            } catch (const std::exception&) {
+                dir = game_dir;
+            }
+        }
+        std::error_code mkdir_error;
+        fs::create_directories(dir, mkdir_error);
+        char name[16];
+        std::snprintf(name, sizeof name, "CAESAR%02d.SAV", slot + 1);
+        return (fs::path(dir) / name).string();
+    };
+    auto refresh_slots = [&]() {
+        slot_buttons.clear();
+        for (int i = 0; i < viewer::kSaveSlots; ++i) {
+            const std::string path = slot_path(i);
+            std::string label = std::to_string(i + 1) + "  empty";
+            bool exists = false;
+            if (fs::exists(path)) {
+                try {
+                    const auto saved = std::make_unique<model::CityState>(model::load(formats::save::load(path)));
+                    label = std::to_string(i + 1) + "  " + viewer::province_name(model::global_word(*saved, 0x6CA6)) +
+                            ", " + viewer::year_text(model::global_word(*saved, 0x6C32));
+                    exists = true;
+                } catch (const formats::FormatError&) {
+                    label = std::to_string(i + 1) + "  unreadable";
+                }
+            }
+            slot_buttons.push_back({label, viewer::kActionSlot + i, files_saving || exists});
+        }
+        slot_buttons.push_back({"Back", viewer::kActionBack});
+    };
+    // After a load: the simulation restarts from the state's words, as the
+    // engine's loader leaves them (DS:0x6BFE = rate x month, 0x0568F).
+    auto adopt_state = [&]() {
+        const systems::month::Random random = sim.random;
+        sim = systems::month::sim_state_from_save(state);
+        sim.random = random;
+        install_hooks();
+        city_image_dirty = province_image_dirty = true;
     };
 
     auto current_page = [&]() -> ui::Page {
@@ -585,16 +648,68 @@ int main(int argc, char** argv) {
             case Screen::Promotion: return viewer::promotion_page(state, promotion_to_caesar);
             case Screen::Battle: return viewer::battle_page(state, battle_view);
             case Screen::Ending: return viewer::ending_page(state, ending_caesar);
+            case Screen::Start: return viewer::start_page(funding_level, start_difficulty);
+            case Screen::Files: return viewer::files_page(files_saving, slot_buttons);
             default: return ui::Page{};
         }
     };
     const auto page_screen = [&]() {
         return screen == Screen::Forum || screen == Screen::Promotion || screen == Screen::Battle ||
-               screen == Screen::Ending;
+               screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files;
     };
     auto apply_page_action = [&](int action) {
         namespace admin = systems::administration;
         namespace battle = systems::battle;
+        if (action == viewer::kActionOpenSave || action == viewer::kActionOpenLoad) {
+            files_return = screen;
+            files_saving = action == viewer::kActionOpenSave;
+            refresh_slots();
+            screen = Screen::Files;
+            return;
+        }
+        if (screen == Screen::Files) {
+            if (action == viewer::kActionBack) {
+                screen = files_return;
+                return;
+            }
+            const int slot = action - viewer::kActionSlot;
+            if (slot < 0 || slot >= viewer::kSaveSlots) return;
+            const std::string path = slot_path(slot);
+            try {
+                if (files_saving) {
+                    formats::save::write(model::serialize(state), path);
+                    std::printf("saved %s\n", path.c_str());
+                    screen = files_return;
+                } else {
+                    state = model::load(formats::save::load(path));
+                    adopt_state();
+                    std::printf("loaded %s\n", path.c_str());
+                    screen = Screen::City;
+                    time_running = true;
+                }
+            } catch (const std::exception& e) {
+                std::printf("%s: %s\n", path.c_str(), e.what());
+            }
+            return;
+        }
+        if (screen == Screen::Start) {
+            // 0x27F54-0x27F83: funding 0-9, difficulty 0-2.
+            if (action == viewer::kActionFundingDown && funding_level > 0) --funding_level;
+            if (action == viewer::kActionFundingUp && funding_level < 9) ++funding_level;
+            if (action == viewer::kActionDifficultyDown && start_difficulty > 0) --start_difficulty;
+            if (action == viewer::kActionDifficultyUp && start_difficulty < 2) ++start_difficulty;
+            if (action == viewer::kActionBegin) {
+                state = model::blank_state();
+                sim.difficulty = start_difficulty;
+                const int province =
+                    systems::campaign::begin_new_game(state, sim.random, funding_level, start_difficulty);
+                if (province >= 0 && start_new_province()) {
+                    screen = Screen::City;
+                    time_running = true;
+                }
+            }
+            return;
+        }
         if (screen == Screen::Forum) {
             if (!viewer::apply_forum_action(state, action, forum_tab)) screen = Screen::City;
         } else if (screen == Screen::Promotion) {

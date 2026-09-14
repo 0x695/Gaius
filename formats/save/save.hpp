@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Gaius — formats/save/save.hpp
 //
-// CAESARxx.SAV block-table reader — Layer 1, READ-ONLY.
+// CAESARxx.SAV block table, reader and writer — Layer 1.
 //
-// Per GAIUS_ROADMAP.md Phase 0/2: the save SERIALIZER is fully reconstructed
-// (CAESAR_SAVE_FORMAT.md / COMPLETE.md sections 64-68) but the LOADER is not
-// yet reverse engineered. This reader therefore only slices a save file into
-// the already-confirmed byte ranges — it does not claim to interpret every
-// field's meaning, and it must not be used to *write* a save file that the
-// original engine would accept until the loader work in roadmap Phase 8
-// closes that gap. Layer 3 (formats/save write-back) is a separate,
-// later concern.
+// The writer (0x033C8) and the loader (0x04537) are both read (2026-09-15,
+// docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 33): the loader reads
+// the same 175 records the writer writes, in the same order, each at the same
+// address and size, so a file is nothing but those records laid end to end and
+// a SaveFile written back is one the engine reads. DEFINITIVE. What each field
+// means is model::CityState's business, not this layer's.
 //
 // Total size is DEFINITIVE: exactly 0xDF26 (57126) bytes.
 
@@ -85,5 +83,9 @@ struct SaveFile {
 
 // Throws FormatError if the file isn't exactly kSaveSize bytes.
 SaveFile load(const std::string& path);
+
+// Writes the kSaveSize bytes of `sf` to `path`. Throws FormatError if `sf`
+// isn't that size or the file can't be written.
+void write(const SaveFile& sf, const std::string& path);
 
 }  // namespace gaius::formats::save

@@ -70,6 +70,12 @@ CityState load(const formats::save::SaveFile& sf) {
     return state;
 }
 
+CityState blank_state() {
+    formats::save::SaveFile sf;
+    sf.raw.assign(formats::save::kSaveSize, 0);
+    return load(sf);
+}
+
 formats::save::SaveFile serialize(const CityState& state) {
     formats::save::SaveFile sf;
     sf.raw.assign(formats::save::kSaveSize, 0);

@@ -141,6 +141,10 @@ struct CityState {
 // Reshapes an already-loaded save file into a CityState.
 CityState load(const formats::save::SaveFile& sf);
 
+// The state of an all-zero save: every block present at its size. A new game
+// starts from it (systems::campaign::begin_new_game).
+CityState blank_state();
+
 // A global word by its DS address: the 128 words of global_words_128 (see
 // formats::save::kGlobalWordDsAddress) and the 34 words of final_state (see
 // docs/FORMATS.md). Signed, as the engine uses them. Returns `fallback` for an
@@ -152,12 +156,11 @@ int global_word(const CityState& state, uint16_t ds, int fallback = 0);
 bool set_global_word(CityState& state, uint16_t ds, int value);
 
 // Inverse of load(): reproduces a formats::save::SaveFile's raw bytes
-// exactly, per the block table, from a CityState. NOTE this trusts the
-// serializer's block table is symmetric with the (not yet reverse
-// engineered) loader the original engine actually uses -- see
-// GAIUS_ROADMAP.md Phase 2 "RE blockers." Flag any real-save byte-diff
-// mismatch straight back into RE work, don't silently adjust this to
-// match.
+// exactly, per the block table, from a CityState. The engine's loader reads
+// the same records in the same order as its writer (DEFINITIVE, dispatch
+// findings section 33.1), so the result, written with formats::save::write,
+// is a save the original reads. Flag any real-save byte-diff mismatch straight
+// back into RE work, don't silently adjust this to match.
 formats::save::SaveFile serialize(const CityState& state);
 
 }  // namespace gaius::model

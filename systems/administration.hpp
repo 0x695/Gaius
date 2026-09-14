@@ -74,6 +74,13 @@ enum class Offer {
 // table_50) -- or, at rank 19, the title of Caesar.
 Offer check_promotion(model::CityState& state, month::Random& random);
 
+// 0x2898E: draws until the generator's walk / 2 is a province (0-49) not yet
+// given (table_50), and stores it in DS:0x6CA4. Returns it, or -1 if 1000
+// draws find none (the engine would draw forever).
+int pick_province(model::CityState& state, month::Random& random);
+// 0x289B0: DS:0x6CA4 becomes the current province DS:0x6CA6, marked given.
+void make_province_current(model::CityState& state);
+
 // The promotion screen's three buttons (DS:0x14E2):
 // 0x29280, accept: the governor's savings are cut to 4000 from rank 9, or
 // else to rank x 200 + 2300; the rank rises; DS:0x6C2A grows by 5 (1 at the

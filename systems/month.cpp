@@ -56,6 +56,7 @@ SimState sim_state_from_save(const model::CityState& state) {
     sim.collapse_threshold = saved_word(state, 0x6BE2);
     sim.fire_threshold = saved_word(state, 0x6BE4);
     sim.industrial_rate_sum = model::global_word(state, 0x6C02) * sim.month;
+    sim.difficulty = std::clamp(model::global_word(state, 0x6CB8), 0, 2);
     return sim;
 }
 

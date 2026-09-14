@@ -22,13 +22,13 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
 | 6 | Economy & military | **Done** | The original battle screen's art |
 | 7 | Forum, advisors, ratings | **Done** | The original screens' art and advisor texts; the Trouble overlay |
-| 8 | Format completeness & save write-back | Started | Save writer and loader, start screen, formats, music |
+| 8 | Format completeness & save write-back | **In progress** — saves, loader, new game done | Remaining formats, music, overlay art |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3429 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3440 checks.
 
-**Critical path now:** the single-player loop is playable in `gaius_viewer` from a save -- build, govern from the Forum, fight in the province, get promoted to a new province or dismissed. Next is Phase 8: writing saves so a game can be kept, and the start screen for a new game. Phase 9 is unblocked alongside.
+**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. What's left in Phase 8 is format completeness (the remaining sheets and animations, music); Phase 9 is unblocked alongside.
 
 ---
 
@@ -286,7 +286,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 ## Phase 8 — Format completeness & save write-back
 
-**Status: Started** (city renderer tables done).
+**Status: In progress** (2026-09-15). The city renderer, city terrain, saving, the loader and a new game are done; the remaining formats and music are open.
 
 **Goal:** write valid EMPIRE2 and `.SAV` files the original engine could read, close the remaining format gaps, and support "New Game".
 
@@ -294,12 +294,12 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **Renderer tile tables** (2026-09-13) — `render::render_city`: `FIXTS.PL8` below `0xC8`, `HOUSES.PL8` above, the `3496:14B2` building metrics, per-cell slices, `HOUSES2.PL8` special cases, water and fire animation, walkers. Pixel-exact against captures (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`).
 
 **Open**
-- [ ] **Save loader RE** — read order and `DS:0x6BFE` done (2026-09-14, findings section 25.2); still the biggest asymmetry: the block table is written correctly, but reading unknown fields the way the original does isn't proven.
+- [x] **Save loader RE and save writing** (2026-09-15, findings section 33.1) — the loader `0x04537` reads the 175 records the writer `0x033C8` writes, same addresses, sizes and order: DEFINITIVE. `formats::save::write`; every real save written back reads byte-identical. The difficulty `DS:0x6CB8` turned out to be saved. The viewer's Forum saves and loads eight slots.
 - [ ] **Remaining formats** — `CONTFRM.GD8` (varies by build, so probably localizable layout data), `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, the VAS win/lose animation. `EDATA.CSR` is stable across builds.
 - [ ] **Music** — `.MDI` is standard MIDI and needs no decoder; `.XMI`/`.XM2` only for bit-exact 1993 audio.
 - [ ] **Overlay map modes and the province view** in the renderer — the province view is drawn (2026-09-15, findings section 32.3, frame = tile by STRONG INFERENCE with no capture to check it), and the maps panel tints the city from the modeled layers; the original overlays' own art isn't read.
-- [ ] **The start screen** — funding, difficulty and name, and a new game's first province (`systems::campaign::new_game` is ready).
-- [x] **City terrain generation** (2026-09-15, findings section 31.2) — `campaign::generate_city`. Still open: the start screen and the first province's choice.
+- [x] **The start screen and a new game** (2026-09-15, findings section 33.2) — the main loop's new game read end to end: funding levels (`3496:1718`, Trivial 8000 Dn to Impossible 250 Dn), difficulty, the first province drawn, terrain before the map and the reset (which settles section 31.4). `campaign::begin_new_game`; `gaius_viewer <game folder>` opens the start screen. Still open: typing the governor's name.
+- [x] **City terrain generation** (2026-09-15, findings section 31.2) — `campaign::generate_city`.
 - [ ] **Bindiff the two `CSR.EXE` builds** whenever an item here stalls; differences are often faster to read than one disassembly.
 
 **Deliverable:** format parity, "New Game", pixel-accurate rendering.
