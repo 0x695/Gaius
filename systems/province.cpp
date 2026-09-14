@@ -36,6 +36,33 @@ const std::array<Cell, 40> kCityEntry = {{
     {0, 0},   {0, 20},  {20, 0},  {0, 40},  {40, 0},   // 7
 }};
 
+const std::array<Exits, 12> kRoadExits = {{
+    {0x00, 0}, {0x88, 0}, {0x22, 0}, {0x28, 0}, {0x0A, 0}, {0x82, 0},
+    {0xA0, 0}, {0xA2, 1}, {0xA8, 1}, {0x2A, 1}, {0x8A, 1}, {0xAA, 1},
+}};
+
+const std::array<uint8_t, 128> kTownRoads = {
+    0,  0,  0, 0, 0, 0, 0, 0, 0,   0,   0,  0,  0,  0,  0,  0,   // 0x00
+    0,  0,  0, 0, 0, 0, 0, 0, 0,   0,   0,  0,  0,  0,  0,  0,   // 0x10
+    0,  0,  0, 0, 0, 0, 0, 0, 0,   0,   0,  0,  0,  0,  0,  0,   // 0x20
+    0,  0,  0, 0, 0, 0, 1, 2, 3,   4,   5,  6,  9,  7,  10, 8,   // 0x30
+    11, 11, 0, 0, 1, 2, 0, 0, 0,   0,   255, 255, 11, 11, 0, 0,  // 0x40
+    0,  0,  0, 0, 0, 0, 0, 0, 0,   0,   0,  0,  0,  0,  0,  0,   // 0x50
+    0,  11, 0, 0, 0, 0, 0, 0, 0,   0,   0,  0,  0,  1,  2,  3,   // 0x60
+    4,  5,  6, 9, 7, 10, 8, 11, 11, 11, 11, 11, 11, 0,  0,  0,   // 0x70
+};
+
+const std::array<uint8_t, 128> kHighwayRoads = {
+    0, 0, 0, 0, 0, 0,  0, 0,  0,  0, 0,   0,   0, 0, 0, 0,   // 0x00
+    0, 0, 0, 0, 0, 0,  0, 0,  0,  0, 0,   0,   0, 0, 0, 0,   // 0x10
+    0, 0, 0, 0, 0, 0,  0, 0,  0,  0, 0,   0,   0, 0, 0, 0,   // 0x20
+    0, 0, 0, 0, 0, 0,  0, 0,  0,  0, 0,   0,   0, 0, 0, 0,   // 0x30
+    0, 0, 0, 0, 1, 2,  0, 0,  0,  0, 255, 255, 0, 0, 0, 0,   // 0x40
+    0, 0, 0, 0, 0, 0,  0, 0,  0,  0, 0,   0,   0, 0, 0, 0,   // 0x50
+    0, 0, 0, 0, 0, 0,  0, 0,  0,  0, 0,   0,   0, 1, 2, 3,   // 0x60
+    4, 5, 6, 9, 7, 10, 8, 11, 11, 0, 0,   1,   2, 0, 0, 11,  // 0x70
+};
+
 namespace {
 
 using model::CityState;
@@ -432,6 +459,229 @@ int invade_city(CityState& s, int direction_index) {
         return slot;  // sound 5, message 0x6E92 at the entry
     }
     return -1;
+}
+
+bool connected(const formats::empire2::EmpireMap& map, int x, int y, const std::array<uint8_t, 128>& classes) {
+    std::array<uint8_t, kMapW * kMapW> visited{};  // 3496:2112, cleared by 0x2EA22
+    struct Branch {
+        int x, y;
+        uint8_t exits, branch;
+    };
+    std::array<Branch, 50> stack{};
+    int top = -1;
+    auto cls = [&](int cx, int cy) { return classes[map.cells[static_cast<size_t>(cy * kMapW + cx)] & 0x7F]; };
+
+    visited[static_cast<size_t>(y * kMapW + x)] = 1;
+    int v = cls(x, y);
+    if (v == 0 || v >= static_cast<int>(kRoadExits.size())) return false;
+    uint8_t exits = kRoadExits[static_cast<size_t>(v)].exits;
+    uint8_t branch = 1;
+
+    // The four direction tests run in this order; each continues at the next,
+    // and after the last the trace goes round again while exits remain.
+    struct Dir {
+        uint8_t bit, back;
+        int dx, dy;
+    };
+    constexpr std::array<Dir, 4> kDirs = {{{0x80, 0x08, 0, -1}, {0x20, 0x02, 1, 0}, {0x08, 0x80, 0, 1}, {0x02, 0x20, -1, 0}}};
+    auto pop = [&] {
+        const Branch& b = stack[static_cast<size_t>(top--)];
+        x = b.x;
+        y = b.y;
+        exits = b.exits;
+        branch = b.branch;
+    };
+    size_t at = 0;
+    for (;;) {
+        if (at == kDirs.size()) {  // 0x2E9BC
+            at = 0;
+            if (exits != 0) continue;
+            if (top < 0) return false;
+            pop();
+            continue;
+        }
+        const Dir& d = kDirs[at++];
+        if (!(exits & d.bit)) continue;
+        exits &= static_cast<uint8_t>(~d.bit);
+        const bool inside = d.dy < 0 ? y > 0 : d.dy > 0 ? y < kMapW - 1 : d.dx > 0 ? x < kMapW - 1 : x > 0;
+        if (!inside) continue;
+        if (branch == 1) {
+            if (++top >= static_cast<int>(stack.size())) return false;
+            stack[static_cast<size_t>(top)] = {x, y, exits, branch};
+        }
+        x += d.dx;
+        y += d.dy;
+        uint8_t& seen = visited[static_cast<size_t>(y * kMapW + x)];
+        if (seen) {
+            if (top < 0) return false;
+            pop();
+            continue;
+        }
+        seen = 1;
+        v = cls(x, y);
+        if (v == 0xFF) return true;
+        if (v != 0 && v < static_cast<int>(kRoadExits.size())) {
+            exits = kRoadExits[static_cast<size_t>(v)].exits;
+            branch = kRoadExits[static_cast<size_t>(v)].branch;
+            if (exits & d.back) {
+                exits &= static_cast<uint8_t>(~d.back);
+                continue;
+            }
+        }
+        if (top < 0) return false;
+        pop();
+    }
+}
+
+int develop_towns(CityState& s, int& counter) {
+    int linked = 0;
+    if (++counter > 5) counter = 0;
+    for (int y = 0; y < kMapW; ++y) {
+        for (int x = 0; x < kMapW; ++x) {
+            uint8_t& cell = s.empire.cells[static_cast<size_t>(y * kMapW + x)];
+            if (cell != 0x4C && cell != 0x79 && cell != 0x7A && cell != 0x61) continue;
+            if (connected(s.empire, x, y, kTownRoads)) {
+                ++linked;
+                if (counter != 0) continue;
+                if (cell == 0x7A) cell = 0x4C;
+                if (cell == 0x79) cell = 0x7A;
+                if (cell == 0x61) cell = 0x79;
+            } else {
+                if (cell == 0x79) cell = 0x61;
+                if (cell == 0x7A) cell = 0x79;
+                if (cell == 0x4C) cell = 0x7A;
+            }
+        }
+    }
+    return linked;
+}
+
+void connect_highway(CityState& s) {
+    const int x = model::global_word(s, 0x6C90), y = model::global_word(s, 0x6C8E);
+    const bool inside = x >= 0 && x < kMapW && y >= 0 && y < kMapW;
+    model::set_global_word(s, 0x6C8C, inside && connected(s.empire, x, y, kHighwayRoads) ? 1 : 0);
+}
+
+bool monthly_pass(CityState& s, int& counter) {
+    int score = 0, roads = 0;
+    bool worn = false;
+    if (++counter > 3) counter = 0;
+    const int target = model::global_word(s, 0x6C88);
+    for (uint8_t& cell : s.empire.cells) {
+        cell &= 0x7F;
+        if ((cell >= 0x36 && cell <= 0x49) || (cell >= 0x62 && cell <= 0x77)) {
+            if (++roads == target) {
+                cell = 0x1D;
+                worn = true;
+                if (counter == 0) model::set_global_word(s, 0x6C7A, 0x4F);  // message 0x6E72, sound 0x11
+            }
+        }
+        if ((cell >= 0x36 && cell <= 0x37) || (cell >= 0x6D && cell <= 0x6E)) ++score;
+        if ((cell >= 0x38 && cell <= 0x3B) || (cell >= 0x6F && cell <= 0x72)) score -= 4;
+    }
+    model::set_global_word(s, 0x6C8A, roads);
+    model::set_global_word(s, 0x6C86, score);
+    return worn;
+}
+
+namespace {
+
+constexpr int kHomeX = 0x2E, kHomeY = 0x2F, kMorale = 0x2B;
+constexpr int kRegulars = 0x20, kIrregulars = 0x21, kAuxiliaries = 0x1D;
+
+// 0x0F4C1's result, as the handlers then check it.
+bool orderable(CityState& s, int cohort) {
+    if (cohort < 0 || cohort >= static_cast<int>(model::kActorCount)) return false;
+    Rec a = rec(s, cohort);
+    return a.b(kActive) != 0 && a.sb(kType) == kCohortType && a.sb(kState) != kDemobilized;
+}
+
+bool has_men(Rec& a) { return a.b(kRegulars) != 0 || a.b(kIrregulars) != 0 || a.b(kAuxiliaries) != 0; }
+
+}  // namespace
+
+int place_fort(CityState& s, int x, int y) {
+    if (x < 0 || x >= kMapW || y < 0 || y >= kMapW) return -1;
+    if (x == model::global_word(s, 0x6C90) && y == model::global_word(s, 0x6C8E)) return -1;
+    uint8_t& cell = s.empire.cells[static_cast<size_t>(y * kMapW + x)];
+    const bool grass = cell >= 0x1D && cell <= 0x35;
+    const bool border = cell >= 0x59 && cell <= 0x60;
+    if (!grass && !border) return -1;
+    if (model::global_word(s, 0x6C12) >= 10) return -1;
+    cell = 0x4D;
+    const int slot = actors::spawn(s, kCohortType, x, y);
+    if (slot < 0) return -1;
+    Rec a = rec(s, slot);
+    a.setb(kHomeX, a.w(kX) / 16);
+    a.setb(kHomeY, a.w(kY) / 16);
+    a.setb(kState, kHalt);
+    a.setb(kMorale, 5);
+    // 0x156BD: the first number no active Cohort has.
+    for (int n = 0; n < 10; ++n) {
+        bool used = false;
+        for (const model::Actor& other : s.objects) {
+            if (other.raw[kActive] == 1 && other.raw[kType] == kCohortType && static_cast<int8_t>(other.raw[kNumber]) == n) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) {
+            a.setb(kNumber, n);
+            break;
+        }
+    }
+    return slot;
+}
+
+void disband_fort(CityState& s, int x, int y) {
+    for (int j = 0; j < static_cast<int>(model::kActorCount); ++j) {
+        Rec a = rec(s, j);
+        if (a.b(kActive) != 1 || a.sb(kType) != kCohortType) continue;
+        if (a.sb(kHomeX) != x || a.sb(kHomeY) != y) continue;
+        actors::release(s, j);
+        return;
+    }
+}
+
+bool order_halt(CityState& s, int cohort) {
+    if (!orderable(s, cohort)) return false;
+    Rec a = rec(s, cohort);
+    a.setb(kState, kHalt);
+    stop_here(a);
+    return true;
+}
+
+bool order_patrol(CityState& s, int cohort, int x1, int y1, int x2, int y2) {
+    if (cohort < 0 || cohort >= static_cast<int>(model::kActorCount)) return false;
+    Rec a = rec(s, cohort);
+    if (!has_men(a) || !orderable(s, cohort)) return false;
+    a.setb(kDestX, x1);
+    a.setb(kDestY, y1);
+    a.setb(kState, kPatrol);
+    a.setb(kOtherX, x2);
+    a.setb(kOtherY, y2);
+    return true;
+}
+
+bool order_attack(CityState& s, int cohort, int army) {
+    if (cohort < 0 || cohort >= static_cast<int>(model::kActorCount)) return false;
+    if (army < 0 || army >= static_cast<int>(model::kActorCount)) return false;
+    Rec a = rec(s, cohort);
+    if (!has_men(a) || !orderable(s, cohort)) return false;
+    a.setb(kState, kAttack);
+    a.setb(kOtherX, 0);
+    a.setw(kTarget, rec(s, army).w(kIndex));
+    reset_search(a);  // 0x25438
+    return true;
+}
+
+bool order_go_home(CityState& s, int cohort) {
+    if (!orderable(s, cohort)) return false;
+    Rec a = rec(s, cohort);
+    a.setb(kState, kGoHome);
+    a.setb(kDestX, a.b(kHomeX));
+    a.setb(kDestY, a.b(kHomeY));
+    return true;
 }
 
 }  // namespace gaius::systems::province

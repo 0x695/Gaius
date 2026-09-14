@@ -92,6 +92,13 @@ struct SimState {
     // DS:0x6CB8, the difficulty (0-2), which the save doesn't keep: it comes
     // from the options screen (0x27F26). 0 unless the caller sets it.
     int difficulty = 0;
+    // Province counters the save doesn't keep: DS:0x6DFE (towns grow one month
+    // in six) and DS:0x6DFC (the worn-road message, one month in four).
+    int town_counter = 0;
+    int province_wear_counter = 0;
+    // DS:0x6BDE: the walk must exceed it for a province road to wear. Set by
+    // 0x2DEC8 (100, or a computed value not yet read); 100, never, by default.
+    int province_wear_threshold = 100;
     // Called when a Cohort reaches the army it attacks (systems::province::
     // Hooks::battle); without it the battle doesn't start.
     std::function<void(model::CityState& state, int cohort, int army)> on_battle;

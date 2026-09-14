@@ -38,7 +38,7 @@ cmake --build build -j
 GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
 ```
 
-Expect 3108/3108 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
+Expect 3188/3188 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
 
 ### What's implemented
 
@@ -75,7 +75,7 @@ Addenda in `docs/` document genuine reverse-engineering work done as a side effe
 8. **Done (2026-09-14): the economy's accounts** (`systems::economy`, findings section 25). Construction costs, both taxes, operating costs, the tribute, emergency funds and donations, transcribed from the build routine and the yearly routine. Every save's funds history balances year by year, with the two outside payments explained. Still open: the province commands' terrain cost multiplier, the yearly routine's ratings and promotion calls, and what pleb welfare does.
 9. **Done (2026-09-14): the Legion's recruitment** (`systems::military`, findings section 26). Regulars follow the wages at 8 Dn a Century, irregulars population x conscription, and the yearly assignment moves at most one Century of each kind into a Cohort. Still open: the auxiliaries' pleb source.
 10. **Done (2026-09-14): battles** (`systems::battle`, findings section 27). The province's race and its strength against each tactic, the round's arithmetic, casualties, morale, victory, defeat and retreat. The screen itself isn't modeled; the random words are the caller's.
-11. **Done (2026-09-14): the province actors** (`systems::province`, findings section 28). Barbarian armies from the 18-month spawner marching on the city, wrecking and pillaging on the way and sending invaders into the city; Cohorts halting, patrolling, attacking and going home, meeting armies in battle (`SimState::on_battle`). `actors::update` runs types 11-13 in slot order. Still open: towns and road wear (`0x2E0BE`, `0x2E249`), forts and the province toolbar's commands.
+11. **Done (2026-09-14): the province actors** (`systems::province`, findings section 28). Barbarian armies from the 18-month spawner marching on the city, wrecking and pillaging on the way and sending invaders into the city; Cohorts halting, patrolling, attacking and going home, meeting armies in battle (`SimState::on_battle`). `actors::update` runs types 11-13 in slot order. Towns, the Imperial Highway and road wear too (`0x2E249`, `0x2E220`, `0x2E0BE`). The Fort command and the Cohort orders too (`place_fort`, `order_halt`/`patrol`/`attack`/`go_home`). Still open: province roads, walls, towers and highway construction, and the auxiliaries' pleb source.
 
 More saves remain the cheapest validation. The second session (2026-09-14) covered reservoirs, working fountains and housing grades up to `0xD2`; a third set (2026-09-14) of six saves a month or less apart validated the month itself. Some saves are written mid-month -- `CAESARXS` between steps 101 and 102, `CAESARXW` and `CAESARXQ` after houses changed -- and the corpus tests name those cases rather than skipping them.
 

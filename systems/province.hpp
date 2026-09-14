@@ -112,4 +112,78 @@ int spawn_army(model::CityState& state, const month::Random& random, int difficu
 // there in state 3. Returns its slot, or -1.
 int invade_city(model::CityState& state, int direction);
 
+// ---------------------------------------------------------------------------
+// Roads, towns and the Imperial Highway
+//
+// Province roads are tiles 0x36-0x41 and the highway 0x6D-0x78 (0x78 is where
+// it enters the map, DS:0x6C90/0x6C8E, set when the province starts at
+// 0x06331); the towns are 0x61 < 0x79 < 0x7A < 0x4C, smallest to largest. The
+// names are STRONG INFERENCE from the traces below and the manual's "connect
+// the capital city to those small towns".
+
+// 3496:1810: the exits of a road class -- N 0x80, E 0x20, S 0x08, W 0x02 --
+// and whether the trace keeps a branch point on it (the T and X pieces).
+struct Exits {
+    uint8_t exits;
+    uint8_t branch;
+};
+extern const std::array<Exits, 12> kRoadExits;
+// 3496:1CE0: road classes for a town's link to the city: roads, highways,
+// bridges (0x44/0x45), towns and forts pass; the city (0x4A/0x4B) is 0xFF.
+extern const std::array<uint8_t, 128> kTownRoads;
+// 3496:1D62: the Imperial Highway's: highway pieces and bridges only.
+extern const std::array<uint8_t, 128> kHighwayRoads;
+
+// 0x2E377: follows the road from (x, y) through `classes`, keeping up to 50
+// branch points, and returns whether it reaches a class-0xFF tile. Each cell
+// is visited once (3496:2112).
+bool connected(const formats::empire2::EmpireMap& map, int x, int y, const std::array<uint8_t, 128>& classes);
+
+// 0x2E249, at step 80: every town linked to the city (kTownRoads) grows a
+// grade one month in six (`counter`, DS:0x6DFE); every town not linked shrinks
+// a grade. Returns the linked towns' count, DS:0x6C92, which the save doesn't
+// keep (the advisor's text 0x0D049 and the ratings read it).
+int develop_towns(model::CityState& state, int& counter);
+
+// 0x2E220, at step 80 after the towns: DS:0x6C8C = whether the highway from its
+// entry point reaches the city.
+void connect_highway(model::CityState& state);
+
+// 0x2E0BE, first of step 105's monthly routines: clears every occupancy bit;
+// counts the road, wall and highway tiles (0x36-0x49, 0x62-0x77) into
+// DS:0x6C8A, and the one numbered DS:0x6C88 (the last month's roll) wears away
+// to 0x1D; then DS:0x6C86 = straight pieces (0x36-0x37, 0x6D-0x6E) less 4 per
+// corner (0x38-0x3B, 0x6F-0x72). `counter` (DS:0x6DFC, 0-3) gates only the
+// message. Returns whether a road wore away.
+bool monthly_pass(model::CityState& state, int& counter);
+
+// ---------------------------------------------------------------------------
+// The province toolbar's Fort and Cohort commands (construction dispatcher
+// DS:127C, ids 29-33). The engine's handlers wait for the player's clicks; the
+// cell a click means is (x + 8) / 16 plus the map's scroll (DS:0x6CB2,
+// DS:0x6CB0). These take the clicked cells directly. Each order refuses a
+// demobilized Cohort; the build routine charges the cost (systems::economy).
+
+// 0x1548A, Fort: on grass (0x1D-0x35) or a land border marker (0x59-0x60),
+// compared with the occupancy bit, not on the highway's entry, and with fewer
+// than 10 Cohorts (DS:0x6C12): the cell becomes 0x4D and a Cohort stands there
+// in state 10 with morale 5, its fort at the cell, numbered by the first of
+// 0-9 no active Cohort has -- the new one, still 0, counts too. Returns its
+// slot, or -1.
+int place_fort(model::CityState& state, int x, int y);
+
+// 0x15710: the Cohort whose fort is at (x, y) is freed (clearing a fort).
+void disband_fort(model::CityState& state, int x, int y);
+
+// 0x1577C, Halt: the Cohort stops where it stands (state 10).
+bool order_halt(model::CityState& state, int cohort);
+// 0x1586D, Cohort Patrol: a Cohort with any Centuries walks to the first point
+// and patrols between it and the second (state 11).
+bool order_patrol(model::CityState& state, int cohort, int x1, int y1, int x2, int y2);
+// 0x15A15, Cohort Attack: a Cohort with any Centuries goes for the army
+// (state 12), forgetting its patrol.
+bool order_attack(model::CityState& state, int cohort, int army);
+// 0x15BB1, Cohort Go Home: back to its fort (state 13).
+bool order_go_home(model::CityState& state, int cohort);
+
 }  // namespace gaius::systems::province

@@ -82,14 +82,21 @@ void finish_scans(SimState& sim, model::CityState* state) {
         model::set_global_word(*state, 0x6BEE, s.market_count / 4);
         model::set_global_word(*state, 0x6BEA, s.industry_count / 16);
         model::set_global_word(*state, 0x6BEC, s.school_count / 4);
-        model::set_global_word(*state, 0x6C88, -1);
+        // 0x2E0BE, the first monthly routine: the province pass, which wears
+        // away the road last month's fourth roll picked. The four pleb and
+        // welfare routines after it (0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F) aren't
+        // modeled.
+        province::monthly_pass(*state, sim.province_wear_counter);
+        model::set_global_word(*state, 0x6C88, -1);  // 0x2DF8F
     }
     s.road_wear_target = roll_target(sim.random, sim.road_wear_threshold, s.road_count);
     s.collapse_target = roll_target(sim.random, sim.collapse_threshold, s.building_count);
     s.fire_target = roll_target(sim.random, sim.fire_threshold, s.building_count);
-    // The fourth roll sets DS:0x6C88 from DS:0x6C8A against DS:0x6BDE, which
-    // isn't saved and whose consumer isn't traced: drawn, never picked.
-    roll_target(sim.random, 99, 0);
+    // The fourth roll picks next month's worn province road (DS:0x6C88) among
+    // DS:0x6C8A, against DS:0x6BDE.
+    const int province_road = roll_target(sim.random, sim.province_wear_threshold,
+                                          state ? model::global_word(*state, 0x6C8A) : 0);
+    if (state && province_road >= 0) model::set_global_word(*state, 0x6C88, province_road);
 }
 
 void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state) {
@@ -128,7 +135,14 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
             for (const auto& [x, y] : collapsed) actors::spawn_rioter(*state, x, y);
             actors::run_spawners(*state, sim.random, step);
         }
-        if (step == kDrawStep) sim.random.advance();
+        if (step == kDrawStep) {
+            // 0x2E209: a draw, then the province's towns and the highway.
+            sim.random.advance();
+            if (state) {
+                province::develop_towns(*state, sim.town_counter);
+                province::connect_highway(*state);
+            }
+        }
     } else if (step == 100) {
         service::reset_tick(city, sim.service);
         if (sim.month_counter_18 == 0) service::derive_network_flags(city);

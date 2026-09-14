@@ -1136,8 +1136,27 @@ The calendar sets `DS:0x6D97` when the 18-month counter wraps; the next step sta
 - The three saves with a marching army (`CAESARXT`, `XS`, `XR`) all have it heading for the city tile, (28, 18).
 - `test_province_movement`, `test_province_armies`, `test_province_matches_saves`.
 
-### 28.6 Not modeled
+### 28.6 Roads, towns and the Imperial Highway
 
-- the monthly province routine `0x2E0BE` and the towns `0x2E249` (next);
-- the Cohort command handlers and forts on the province toolbar;
+- **Tiles.** Province roads are `0x36`-`0x41` and the highway `0x6D`-`0x78`, each run in the same 12 shapes; `0x44`/`0x45` and `0x7B`/`0x7C` are bridges, `0x4D` a fort. Towns are `0x61` < `0x79` < `0x7A` < `0x4C`. When a province starts (`0x06326`), the map's `0x41` becomes `0x78`, the highway's entry, and its cell goes to `DS:0x6C90`/`0x6C8E` -- the "unexplained" `0x41` -> `0x78` of docs/FORMATS.md. Names STRONG INFERENCE.
+- **The trace `0x2E377`** (x, y, class table) follows roads from a cell. A table gives each tile a class; `3496:1810`[class] gives the class's exits (N `0x80`, E `0x20`, S `0x08`, W `0x02`) and whether it's a branch piece (classes 7-11). Directions are tried N, E, S, W and round again while exits remain; a branch piece pushes its state (at most 50) before each step. A step onto a visited cell, a class-0 cell, or a piece without the matching entrance pops back; class `0xFF` is the goal. Visits are marked in `3496:2112`.
+- **Towns, `0x2E249`,** at step 80 (after `0x2E209`'s draw): every town cell (compared with the occupancy bit) traced to the city through `3496:1CE0` -- roads, highway, bridges, towns and forts pass, the city `0x4A`/`0x4B` is the goal -- counts in `DS:0x6C92` and, when `DS:0x6DFE` wraps (one month in six), grows a grade; a town not linked shrinks a grade every month.
+- **The highway, `0x2E220`:** `DS:0x6C8C` = the trace from the entry through `3496:1D62` (highway and bridges only) reaches the city.
+- **The monthly pass, `0x2E0BE`,** the first of step 105's monthly routines: clears bit `0x80` over the map; counts the tiles `0x36`-`0x49` and `0x62`-`0x77` into `DS:0x6C8A`, and the one numbered `DS:0x6C88` turns to `0x1D` (with a message when `DS:0x6DFC`, cycling 0-3, is 0); then `DS:0x6C86` = straight pieces (`0x36`-`0x37`, `0x6D`-`0x6E`) less 4 per corner (`0x38`-`0x3B`, `0x6F`-`0x72`).
+- **Wear.** `0x2DF7D` resets `DS:0x6C88` to -1 and its fourth roll picks the next month's worn road among `DS:0x6C8A` when the walk exceeds `DS:0x6BDE` (set by `0x2DEC8`, unread).
+- **Checked.** In every save the highway entry holds `0x78`, and the recomputed `DS:0x6C8C`, `0x6C8A` and `0x6C86` equal the saved ones -- all 0, as no save's province has a road yet, so this is consistent rather than a strong test. `test_province_towns`, `test_province_matches_saves`.
+
+### 28.7 The Fort and the Cohort commands
+
+The construction dispatcher's province ids (`DS:127C`) and their names (the string table continues past section 1's 34 entries): 29 Fort `0x1548A`, 30 Halt `0x1577C`, 31 Cohort Patrol `0x1586D`, 32 Cohort Attack `0x15A15`, 33 Cohort Go Home `0x15BB1`, 35 Clear Area `0x15C91`, 36 Provincial road `0x15EF0`, 37 Great Wall `0x169A9`, 41 Great Tower `0x17024`, 42 Highway `0x1645D`; 34 and 38-40 return at once (38 Infrastructure, 39 Construction and 40 Game Options are menus), 43 is Go to City. A click means the cell ((x + 8) / 16, (y + 8) / 16) plus the map's scroll `DS:0x6CB2`/`0x6CB0`.
+
+- **Fort:** fails (`DS:0x6D0A` = 1) on the highway's entry, on any cell but grass `0x1D`-`0x35` or a land border marker `0x59`-`0x60` (the byte compared with its occupancy bit), and with 10 Cohorts (`DS:0x6C12`). Otherwise the cell becomes `0x4D`, a type 13 is placed there (`0x05C39`) with its fort +0x2E/+0x2F = its cell, state 10 and morale 5, and `0x156BD` numbers it (+0x2A) with the first of 0-9 no active Cohort has -- the new record, still 0, counts, so a fort's Cohort is never number 0 while the Prima Cohors (numbered `DS:0x6C12` - 1 at `0x062B3`) is.
+- **Clearing a fort** (Clear Area on `0x4D`) frees the Cohort whose fort it was (`0x15710`).
+- The four orders pick a Cohort (`0x0F4C1`) that isn't demobilized; Patrol and Attack also need at least one Century. **Halt:** state 10 where it stands. **Patrol:** the first click is the destination, the second +0x2C/+0x2D, state 11. **Attack:** the army's record index (+0x08) into +0x14, +0x2C = 0, state 12, and `0x25438`. **Go Home:** state 13 towards its fort.
+- `test_province_commands`.
+
+### 28.8 Not modeled
+
+- Clear Area, Provincial road, Great Wall, Great Tower and Highway on the province map (next): they reuse the city's drag auto-tiling (`0x17C08`, `0x17C20`, `0x17CB9`) with their own neighbour updates (`0x19073`, `0x1A84E`, `0x1D504`);
+- the pleb routines between the monthly pass and the rolls;
 - messages and sounds.

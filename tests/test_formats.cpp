@@ -2773,7 +2773,112 @@ void test_province_matches_saves() {
         // (the monthly routines at 0x2E0xx write province cells; not read).
         if (std::string(name) != "CAESARXT.SAV") CHECK(marked);
         CHECK(heading_home);
+
+        // The highway's entry point, its link and the monthly pass's counts.
+        const int hx = global_word(*st, 0x6C90), hy = global_word(*st, 0x6C8E);
+        CHECK(hx >= 0 && hx < 40 && hy >= 0 && hy < 40 && (st->empire.at(hy, hx) & 0x7F) == 0x78);
+        auto y = std::make_unique<CityState>(*st);
+        province::connect_highway(*y);
+        int wear_counter = 0;
+        set_global_word(*y, 0x6C88, -1);
+        province::monthly_pass(*y, wear_counter);
+        CHECK(global_word(*y, 0x6C8C) == global_word(*st, 0x6C8C));
+        CHECK(global_word(*y, 0x6C8A) == global_word(*st, 0x6C8A) && global_word(*y, 0x6C86) == global_word(*st, 0x6C86));
     }
+}
+
+// 0x2E377's road trace, the towns, the highway and the monthly pass on a
+// made-up province.
+void test_province_towns() {
+    std::printf("test_province_towns (0x2E377 trace, 0x2E249 towns, 0x2E220 highway, 0x2E0BE monthly pass)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->empire.cells.fill(0x1D);
+    auto at = [&](int x, int y) -> uint8_t& { return st->empire.cells[static_cast<size_t>(y * 40 + x)]; };
+    at(10, 10) = province::kCityTile;
+    for (int x = 11; x <= 14; ++x) at(x, 10) = 0x37;  // an east-west road
+    at(15, 10) = 0x61;                                // a small town on it
+    at(10, 20) = 0x4C;                                // a large town on its own
+    CHECK(province::connected(st->empire, 15, 10, province::kTownRoads));
+    CHECK(!province::connected(st->empire, 10, 20, province::kTownRoads));
+
+    int counter = 5;  // wraps to 0: a growing month
+    const int linked = province::develop_towns(*st, counter);
+    CHECK(linked == 1 && counter == 0 && at(15, 10) == 0x79 && at(10, 20) == 0x7A);
+    province::develop_towns(*st, counter);  // linked towns hold, others keep shrinking
+    CHECK(at(15, 10) == 0x79 && at(10, 20) == 0x79);
+    at(12, 10) = 0x1D;
+    CHECK(!province::connected(st->empire, 15, 10, province::kTownRoads));
+
+    // The highway from its entry point: highway pieces only.
+    at(0, 5) = 0x78;
+    at(1, 5) = 0x6E;
+    at(2, 5) = province::kCityTile;
+    set_global_word(*st, 0x6C90, 0);
+    set_global_word(*st, 0x6C8E, 5);
+    province::connect_highway(*st);
+    CHECK(global_word(*st, 0x6C8C) == 1);
+    at(1, 5) = 0x37;  // an ordinary road doesn't carry it
+    province::connect_highway(*st);
+    CHECK(global_word(*st, 0x6C8C) == 0);
+
+    // The monthly pass: roads (1,1)-(4,1), the second of them worn away.
+    st->empire.cells.fill(0x1D);
+    at(1, 1) = 0x37;
+    at(2, 1) = 0x37;
+    at(3, 1) = 0x38;
+    at(4, 1) = 0x62;
+    at(5, 5) = 0x9D;
+    set_global_word(*st, 0x6C88, 2);
+    int wear_counter = 0;
+    CHECK(province::monthly_pass(*st, wear_counter));
+    CHECK(at(2, 1) == 0x1D && at(5, 5) == 0x1D && wear_counter == 1);
+    CHECK(global_word(*st, 0x6C8A) == 4 && global_word(*st, 0x6C86) == 1 - 4);
+}
+
+// 0x1548A Fort and the four Cohort orders.
+void test_province_commands() {
+    std::printf("test_province_commands (0x1548A Fort, 0x1577C-0x15BB1 Cohort orders)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    st->empire.cells.fill(0x1D);
+    st->empire.cells[2 * 40 + 2] = 0x05;  // sea
+    st->empire.cells[0 * 40 + 9] = 0x78;  // the highway's entry
+    set_global_word(*st, 0x6C90, 9);
+    set_global_word(*st, 0x6C8E, 0);
+
+    CHECK(province::place_fort(*st, 2, 2) == -1);
+    CHECK(province::place_fort(*st, 9, 0) == -1);
+    const int c = province::place_fort(*st, 5, 6);
+    CHECK(c == 0 && st->empire.cells[6 * 40 + 5] == 0x4D);
+    const auto& r = st->objects[static_cast<size_t>(c)].raw;
+    CHECK(r[0x07] == province::kCohortType && r[0x31] == province::kHalt && r[0x2B] == 5);
+    CHECK(r[0x2E] == 5 && r[0x2F] == 6 && r[0x2A] == 1);  // 0 is taken by itself
+    CHECK(global_word(*st, 0x6C12) == 1);
+    CHECK(province::place_fort(*st, 5, 6) == -1);  // already a fort
+
+    // Orders: a Cohort without men may halt and go home, not patrol or attack.
+    const int army = actors::spawn(*st, province::kArmyType, 20, 20);
+    CHECK(!province::order_patrol(*st, c, 8, 6, 12, 6));
+    CHECK(!province::order_attack(*st, c, army));
+    st->objects[static_cast<size_t>(c)].raw[0x20] = 1;
+    CHECK(province::order_patrol(*st, c, 8, 6, 12, 6));
+    CHECK(r[0x31] == province::kPatrol && r[0x12] == 8 && r[0x13] == 6 && r[0x2C] == 12 && r[0x2D] == 6);
+    CHECK(province::order_attack(*st, c, army));
+    CHECK(r[0x31] == province::kAttack && r[0x2C] == 0 && r[0x14] == army);
+    CHECK(province::order_halt(*st, c));
+    CHECK(r[0x31] == province::kHalt && r[0x12] == 5 && r[0x13] == 6);
+    CHECK(province::order_go_home(*st, c));
+    CHECK(r[0x31] == province::kGoHome && r[0x12] == 5 && r[0x13] == 6);
+    st->objects[static_cast<size_t>(c)].raw[0x31] = province::kDemobilized;
+    CHECK(!province::order_halt(*st, c) && !province::order_go_home(*st, c));
+
+    province::disband_fort(*st, 5, 6);
+    CHECK(st->objects[static_cast<size_t>(c)].raw[0x06] == 0 && global_word(*st, 0x6C12) == 0);
 }
 
 // The year turning inside run_step: the accounts run before the histories are
@@ -4049,6 +4154,8 @@ int main() {
     test_battle_race_matches_saves();
     test_province_movement();
     test_province_armies();
+    test_province_towns();
+    test_province_commands();
     test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();
