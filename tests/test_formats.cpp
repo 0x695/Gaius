@@ -35,6 +35,7 @@
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
+#include "systems/military.hpp"
 #include "systems/month.hpp"
 #include "systems/service.hpp"
 #include "ui/font.hpp"
@@ -2379,6 +2380,102 @@ void test_economy_year_end_matches_saves() {
     }
 }
 
+// 0x289C0/0x28A8F: recruitment and the assignment to Cohorts, on made-up
+// figures that reach every branch.
+void test_military_recruitment() {
+    std::printf("test_military_recruitment (0x289C0 recruiting, 0x28A8F assigning Centuries)\n");
+    using namespace gaius::systems;
+    CHECK(military::regulars_after_year(2, 19) == 2);  // 16 <= 19 < 24
+    CHECK(military::regulars_after_year(2, 24) == 3);
+    CHECK(military::regulars_after_year(2, 15) == 1);
+    CHECK(military::regulars_after_year(0, 0) == 0);
+    CHECK(military::irregulars_target(415, 10) == 1);  // 16600 / 10000
+    CHECK(military::irregulars_target(505, 12) == 2);
+    CHECK(military::irregulars_target(10000, 50) == 200);
+    CHECK(military::irregulars_after_year(0, 1) == 1);
+    CHECK(military::irregulars_after_year(6, 1) == 2);  // four at a time
+    CHECK(military::irregulars_after_year(2, 1) == 0);  // not below 0
+    CHECK(military::irregulars_after_year(3, 3) == 3);
+
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    auto cohort = [&](int i, uint8_t state, uint8_t regulars, uint8_t irregulars, uint8_t auxiliaries) {
+        auto& r = st->objects[i].raw;
+        r[0x06] = 1;
+        r[0x07] = military::kCohortType;
+        r[0x31] = state;
+        r[military::kCohortRegulars] = regulars;
+        r[military::kCohortIrregulars] = irregulars;
+        r[military::kCohortAuxiliaries] = auxiliaries;
+    };
+    cohort(0, military::kCohortMobilized, 0, 0, 0);
+    cohort(1, military::kCohortMobilized, 9, 0, 0);
+    cohort(2, military::kCohortDemobilized, 3, 3, 3);
+    st->objects[3].raw[0x06] = 1;
+    st->objects[3].raw[0x07] = 11;  // a barbarian army keeps its bytes
+    st->objects[3].raw[military::kCohortRegulars] = 7;
+    set_global_word(*st, military::kRegulars, 4);
+    set_global_word(*st, military::kIrregulars, 1);
+    set_global_word(*st, military::kAuxiliaries, 2);
+    set_global_word(*st, military::kArmyWages, 48);  // pays for 6 Centuries
+    set_global_word(*st, military::kConscription, 25);
+    set_global_word(*st, 0x6C10, 300);  // 300 x 100 / 10000 = 3 irregular Centuries
+    military::run_year(*st);
+    CHECK(global_word(*st, military::kRegularsLastYear) == 4 && global_word(*st, military::kRegulars) == 5);
+    CHECK(global_word(*st, military::kIrregularsLastYear) == 1 && global_word(*st, military::kIrregulars) == 2);
+    CHECK(global_word(*st, military::kAuxiliariesLastYear) == 2 && global_word(*st, military::kAuxiliaries) == 2);
+    // Two mobilized Cohorts: regulars 5 = 2 each, 1 over; irregulars 2 = 1 each.
+    CHECK(st->objects[0].raw[military::kCohortRegulars] == 1);  // below its share: one a year
+    CHECK(st->objects[1].raw[military::kCohortRegulars] == 3);  // down to its share, plus the one over
+    CHECK(st->objects[0].raw[military::kCohortIrregulars] == 1 && st->objects[1].raw[military::kCohortIrregulars] == 1);
+    CHECK(st->objects[0].raw[military::kCohortAuxiliaries] == 1 && st->objects[1].raw[military::kCohortAuxiliaries] == 1);
+    CHECK(st->objects[2].raw[military::kCohortRegulars] == 0 && st->objects[2].raw[military::kCohortIrregulars] == 0 &&
+          st->objects[2].raw[military::kCohortAuxiliaries] == 0);
+    CHECK(st->objects[3].raw[military::kCohortRegulars] == 7);
+}
+
+// Each save keeps last year's Legion beside this year's, and the population
+// units at the year's end in table_60_d: recruiting from those must give the
+// saved Legion, and the saved Cohorts must already hold their share.
+void test_military_year_matches_saves() {
+    std::printf("test_military_year_matches_saves (0x289C0 vs each real save's Legion)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto st = std::make_unique<CityState>(load(save::load(p.string())));
+        const int i = global_word(*st, 0x6B30);
+        const size_t o = static_cast<size_t>(i) * 4;
+        const int units = static_cast<int16_t>(st->table_60_d[o + 2] | (st->table_60_d[o + 3] << 8));
+        const int regulars = military::regulars_after_year(global_word(*st, military::kRegularsLastYear),
+                                                           global_word(*st, military::kArmyWages));
+        const int irregulars = military::irregulars_after_year(
+            global_word(*st, military::kIrregularsLastYear),
+            military::irregulars_target(units, global_word(*st, military::kConscription)));
+        std::printf("  %s: units %d, regulars %d (saved %d), irregulars %d (saved %d)\n", name, units, regulars,
+                    global_word(*st, military::kRegulars), irregulars, global_word(*st, military::kIrregulars));
+        CHECK(regulars == global_word(*st, military::kRegulars));
+        CHECK(irregulars == global_word(*st, military::kIrregulars));
+
+        auto assigned = std::make_unique<CityState>(*st);
+        military::assign_centuries(*assigned);
+        bool unchanged = true;
+        int cohorts = 0;
+        for (size_t k = 0; k < st->objects.size(); ++k) {
+            unchanged = unchanged && assigned->objects[k].raw == st->objects[k].raw;
+            if (st->objects[k].active() && st->objects[k].type() == military::kCohortType) ++cohorts;
+        }
+        CHECK(unchanged);
+        CHECK(cohorts == 1);
+    }
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -3646,6 +3743,8 @@ int main() {
     test_economy_taxes();
     test_economy_settle();
     test_economy_year_end_matches_saves();
+    test_military_recruitment();
+    test_military_year_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();
     test_render_walkers();

@@ -973,7 +973,7 @@ When the calendar turns the year it:
    - profit or loss `DS:0x6BB6` = taxes - construction - operating costs - tribute paid, copied with the other four figures to `0x6BB4`-`0x6BAC`, the Treasurer's report;
    - welfare is cut to the funds, if it exceeds them;
 6. zeroes both sums and copies the pleb count `DS:0x6C56` to last year's `DS:0x6C54`;
-7. writes the histories (section 22.3), then runs the army (`0x289C0`), the ratings (`0x28C43`), promotion (`0x29023`) and `0x2933B`, which aren't transcribed.
+7. writes the histories (section 22.3), then runs the Legion (`0x289C0`, section 26), the ratings (`0x28C43`), promotion (`0x29023`) and `0x2933B`; the last three aren't transcribed.
 
 ### 25.4 Checked against the saves
 
@@ -993,5 +993,54 @@ When the calendar turns the year it:
 - **Not modeled:**
   - the messages;
   - the province commands' terrain multiplier;
-  - the rest of the yearly routine;
+  - the yearly routine's ratings, promotion and `0x2933B` (the Legion is section 26);
   - what pleb welfare does at step 105 (`0x2DF01`, `0x2DF40`).
+
+## 26. The Legion: recruitment and Cohorts (2026-09-14)
+
+After the histories the yearly routine `0x28238` calls `0x289C0`, which recruits the province's Legion and falls through (`0x28A8B`) into `0x28A8F`, which shares it among the Cohorts. `systems::military` implements both.
+
+### 26.1 The words
+
+The Military Advisor's screen (`0x0B1B7`-`0x0B436`) draws three pairs of figures, which the manual calls "the total number of regular, irregular and auxiliary Centuries in your entire Legion", with "the amounts you had last year" in brackets. The names follow the arithmetic below; STRONG INFERENCE.
+
+| Word | Last year | Name | Set by |
+|---|---|---|---|
+| `DS:0x6C4E` | `DS:0x6C4C` | regular Centuries | the army wages `DS:0x6C08` |
+| `DS:0x6C4A` | `DS:0x6C48` | irregular Centuries | population and the conscription rate `DS:0x6C06` |
+| `DS:0x6C52` | `DS:0x6C50` | auxiliary Centuries | plebs on army duty `DS:0x6C5A` / 16 (`0x0E85A`, `0x2DDFC`) |
+
+A new province starts with 2 regular Centuries and nothing else (`0x058C0`-`0x058DE`, and the Prima Cohors' +0x20 = 2 at `0x062E3`). The manual says one; all 17 saves have two.
+
+### 26.2 Recruiting (`0x289C0`)
+
+1. Last year's figures: `0x6C4C` = `0x6C4E`, `0x6C48` = `0x6C4A`, `0x6C50` = `0x6C52`.
+2. The irregulars the city supplies: population units `DS:0x6C10` x (conscription x 4) / 10000, a long multiply (`0:0x3C1`) and signed long divide (`0:0x3DB`). Population is 4 per unit, so this is the population times the rate in hundreds of men.
+3. Irregulars one Century up while below that, **four** down while above it.
+4. Regulars one up if (regulars + 1) x 8 is no more than the wages, one down if regulars x 8 is more: 8 Dn a Century a year.
+5. Neither below 0. The auxiliaries aren't changed here.
+
+### 26.3 Assigning Centuries to Cohorts (`0x28A8F`)
+
+- A Cohort is an active actor of type 13. The Prima Cohors is placed by `0x0621F`-`0x062E3` on the first province cell (`3496:2754`, 40 x 40) holding tile `0x4A`, most likely the starting fort, a new fort's Cohort by `0x1560A`-`0x15676`; both start in state 10 with morale 5 (+0x2B).
+- A Cohort's Centuries are bytes in its record: regulars +0x20, irregulars +0x21, auxiliaries +0x1D. Battle casualties take one from the record and one from the Legion's word together (`0x22C16`-`0x22C87`), and the fort transfer screen moves them the same way (`0x23272`-`0x232E9`).
+- The Military Advisor's centre button (`0x0E5D4`) switches the Cohort on display (`DS:0x6C0A`) between state 10 and state 14: the manual's mobilized and demobilized.
+- The routine counts the mobilized Cohorts (type 13, state not 14), at least 1, and divides each pool by that count. For each Cohort in table order:
+  - demobilized: all three fields become 0;
+  - otherwise, per pool: a field at or above the quotient becomes the quotient, plus 1 while the remainder lasts (each use takes one from it); a field below the quotient gains 1.
+- So men join a Cohort one Century of each kind a year, as the manual says, and leave one that has too many at once. The Legion's words aren't changed: Centuries not yet in a Cohort are the manual's men "en route to join a unit".
+
+### 26.4 Checked against the saves
+
+- **Recruiting.** Every save keeps last year's Legion beside this year's, and the population units at the year's end are the newest record of `table_60_d` (section 22.3). Recruiting from last year's regulars and irregulars with those units and the saved wages and conscription gives the saved regulars and irregulars in all 17 saves. `CAESARXT`-`XQ` exercise the rule: wages 15 dropped the city's regulars from 2 to 1, and irregulars rose to 2 at 496 units and 12 % (`CAESARXR`) and fell back to 1 by `CAESARXQ`.
+- **Assigning.** Every save has one Cohort, holding the whole Legion; assigning the saved Legion leaves every actor record unchanged.
+- `test_military_year_matches_saves`.
+
+### 26.5 In Gaius, and what's open
+
+- **`systems::military`**: `regulars_after_year`, `irregulars_target`, `irregulars_after_year`, `assign_centuries` and `run_year`. `systems::month::run_step` runs `run_year` when the year turns, after the histories.
+- **Not modeled:**
+  - the auxiliaries' source, the pleb routines (`0x2DD45`-`0x2DE0E` at step 105 and the Tribune's screen `0x0E85A`);
+  - what conscription and wages do to the city besides (the manual: "your citizens don't like being drafted");
+  - battles. Their code is located: `0x22000`-`0x23600`, with morale changes at `0x225B7`-`0x226F7`, the tactic comparisons at `0x22A02`-`0x22A4A` and casualties at `0x22C16`. It uses the "Cohort ?"/"Retreat ?" texts `DS:0x4599`/`0x45B4` (table at `0x27851`).
+- **The `cohort` argument.** `CAESAR.BAT` runs `csr.exe cohort` after the external Cohort 2. `0x0F687` tests whether `cohort.exe` exists (`DS:0x6CF8`, which decides whether the battle screen offers it), and `0x03344`/`0x03388` write and read `cohort.csr`, 14 bytes, the battle's hand-over. With any argument (argc > 1, `0x0F6BD`) the start-up skips the title music and loads the province screen's sheets (`0x0FBBE`: `p_blocks.pl8`, `pointers.pl8`, `font1.pl8`) before running the game. So the argument most likely only resumes a game after Cohort 2 has fought the battle, and the internal battle screen runs from the province map itself (STRONG INFERENCE: the argv string isn't compared anywhere found, and the path from `0x0F6C7` into the resumed game isn't traced).

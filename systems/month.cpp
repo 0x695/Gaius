@@ -11,6 +11,7 @@
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "systems/housing.hpp"
+#include "systems/military.hpp"
 
 namespace gaius::systems::month {
 
@@ -274,11 +275,13 @@ void run_step(model::CityState& state, SimState& sim) {
     model::set_global_word(state, 0x6C1C, sim.month);
     model::set_global_word(state, 0x6C32, sim.year);
     // The calendar (0x29472) calls the yearly routine 0x28238 when the year
-    // turns: the accounts, then the history writes. The routines after them
-    // (the army, ratings, promotion) aren't transcribed.
+    // turns: the accounts, the history writes, then the Legion. The routines
+    // after it (the ratings 0x28C43, promotion 0x29023, 0x2933B) aren't
+    // transcribed.
     if (sim.year != year_before) {
         economy::run_year(state, sim.industrial_rate_sum);
         record_history(state, sim.year);
+        military::run_year(state);
     }
 }
 

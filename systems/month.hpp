@@ -28,8 +28,8 @@
 // the monthly routines (0x2E0BE,
 // 0x2DC72, 0x2DEC8, 0x2DD21, 0x2DE0F) aren't
 // read yet. Step 101's routine 0x28215 is run_economy below; of the yearly
-// routine 0x28238 the accounts (systems::economy) and the history writes are
-// modeled, and neither draws; the 18-month routine 0x2D6F4 isn't. 
+// routine 0x28238 the accounts (systems::economy), the history writes and the
+// Legion (systems::military) are modeled, and none of them draws; the 18-month routine 0x2D6F4 isn't. 
 //
 // The random draws. The land-value growth each housing row applies is
 // DS:0x6BF6 + (2EF9:0286 & 3) - 1, as a signed byte, and 2EF9:0286 only
@@ -126,9 +126,10 @@ void run_economy(model::CityState& state);
 // back to DS:0x6C1C / DS:0x6C32.
 //
 // When the year turns it runs the year's accounts (systems::economy::run_year:
-// taxes, operating costs, the tribute) and then appends last year's values to
-// the save's five history buffers (table_60_a-d, table_72; findings sections
-// 22 and 25).
+// taxes, operating costs, the tribute), appends last year's values to the
+// save's five history buffers (table_60_a-d, table_72), then recruits the
+// Legion and assigns it to the Cohorts (systems::military::run_year; findings
+// sections 22, 25 and 26).
 void run_step(model::CityState& state, SimState& sim);
 void run_month(model::CityState& state, SimState& sim);
 
