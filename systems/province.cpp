@@ -684,4 +684,283 @@ bool order_go_home(CityState& s, int cohort) {
     return true;
 }
 
+namespace {
+
+using construction::DragState;
+using Flags = std::array<uint8_t, 8>;
+
+bool on_map(int x, int y) { return x >= 0 && x < kMapW && y >= 0 && y < kMapW; }
+uint8_t& at(CityState& s, int x, int y) { return s.empire.cells[static_cast<size_t>(y * kMapW + x)]; }
+bool at_entry(const CityState& s, int x, int y) {
+    return x == model::global_word(s, 0x6C90) && y == model::global_word(s, 0x6C8E);
+}
+bool in(uint8_t t, int lo, int hi) { return t >= lo && t <= hi; }
+bool one_of(uint8_t t, std::initializer_list<uint8_t> set) {
+    for (uint8_t v : set)
+        if (t == v) return true;
+    return false;
+}
+
+// 0334:450D: the eight neighbours, clockwise from north; off the map 0, and a
+// 0 byte leaves the slot as it was.
+void snapshot(CityState& s, DragState& d, int x, int y) {
+    constexpr std::array<std::array<int, 2>, 8> kOffsets = {
+        {{-1, 0}, {-1, 1}, {0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}, {-1, -1}}};
+    for (size_t i = 0; i < kOffsets.size(); ++i) {
+        const int ny = y + kOffsets[i][0], nx = x + kOffsets[i][1];
+        if (!on_map(nx, ny)) {
+            d.neighbours[i] = 0;
+        } else if (at(s, nx, ny) != 0) {
+            d.neighbours[i] = at(s, nx, ny);
+        }
+    }
+}
+
+// 0x17C20
+int mark(const DragState& d, Flags& f, int lo, int hi) {
+    int n = 0;
+    for (size_t i = 0; i < f.size(); ++i) {
+        if (d.neighbours[i] >= lo && d.neighbours[i] <= hi) {
+            f[i] = 1;
+            ++n;
+        }
+    }
+    return n;
+}
+
+// 0x17CB9
+uint8_t match(DragState& d, const Flags& f) {
+    for (const construction::RoadPattern& p : construction::kRoadPatterns) {
+        bool fits = true;
+        for (size_t j = 0; j < f.size() && fits; ++j) fits = p.neighbours[j] == 2 || p.neighbours[j] == f[j];
+        if (!fits) continue;
+        for (size_t k = 0; k < 4; ++k) d.modes[k] = p.modes[k];
+        return p.tile;
+    }
+    return 0;
+}
+
+struct Retile {
+    std::initializer_list<uint8_t> keep_if;
+    uint8_t keep;
+    uint8_t other;
+};
+struct Rule {
+    int drow, dcol;
+    std::initializer_list<uint8_t> skip;
+    uint8_t straight;
+    int straight_unless;  // -1 for none
+    Retile mode2, mode3, mode4;
+};
+
+// 0x19073 (north, 0x19087 east, 0x19677... in the order N, E, S, W).
+const Rule kRoadRules[4] = {
+    {-1, 0, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x79, 0x7A, 0x7B, 0x7C}, 0x36, -1,
+     {{0x3B, 0x3F}, 0x3F, 0x38}, {{0x3A, 0x3E}, 0x3E, 0x39}, {{0x3D, 0x40, 0x41}, 0x40, 0x3C}},
+    {0, 1, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x79, 0x7A, 0x7B, 0x7C}, 0x37, -1,
+     {{0x38, 0x3C}, 0x3C, 0x39}, {{0x3B, 0x3D}, 0x3D, 0x3A}, {{0x3F, 0x40, 0x41}, 0x40, 0x3E}},
+    {1, 0, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x79, 0x7A, 0x7B, 0x7C}, 0x36, -1,
+     {{0x39, 0x3E}, 0x3E, 0x3A}, {{0x38, 0x3F}, 0x3F, 0x3B}, {{0x3C, 0x40, 0x41}, 0x40, 0x3D}},
+    {0, -1, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x79, 0x7A, 0x7B, 0x7C}, 0x37, -1,
+     {{0x3A, 0x3D}, 0x3D, 0x3B}, {{0x39, 0x3C}, 0x3C, 0x38}, {{0x3E, 0x40, 0x41}, 0x40, 0x3F}},
+};
+
+// 0x1A84E: the road's rules shifted to the highway's pieces, 0x78 skipped too.
+const Rule kHighwayRules[4] = {
+    {-1, 0, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x78, 0x79, 0x7A, 0x7B, 0x7C}, 0x6D, -1,
+     {{0x72, 0x76}, 0x76, 0x6F}, {{0x71, 0x75}, 0x75, 0x70}, {{0x74, 0x77, 0x78}, 0x77, 0x73}},
+    {0, 1, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x78, 0x79, 0x7A, 0x7B, 0x7C}, 0x6E, -1,
+     {{0x6F, 0x73}, 0x73, 0x70}, {{0x72, 0x74}, 0x74, 0x71}, {{0x76, 0x77, 0x78}, 0x77, 0x75}},
+    {1, 0, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x78, 0x79, 0x7A, 0x7B, 0x7C}, 0x6D, -1,
+     {{0x70, 0x75}, 0x75, 0x71}, {{0x6F, 0x76}, 0x76, 0x72}, {{0x73, 0x77, 0x78}, 0x77, 0x74}},
+    {0, -1, {0x44, 0x45, 0x4A, 0x4B, 0x4C, 0x4D, 0x61, 0x78, 0x79, 0x7A, 0x7B, 0x7C}, 0x6E, -1,
+     {{0x71, 0x74}, 0x74, 0x72}, {{0x70, 0x73}, 0x73, 0x6F}, {{0x75, 0x77, 0x78}, 0x77, 0x76}},
+};
+
+// 0x1D504. East's mode 4 keeps only 0x6B and 0x6C, as transcribed.
+const Rule kWallRules[4] = {
+    {-1, 0, {0x44, 0x45, 0x62, 0x63}, 0x43, 0x67, {{0x49, 0x6B, 0x65}, 0x6B, 0x46}, {{0x48, 0x6A, 0x64}, 0x6A, 0x47},
+     {{0x69, 0x6C, 0x41}, 0x6C, 0x68}},
+    {0, 1, {0x44, 0x45, 0x63, 0x64}, 0x42, 0x66, {{0x46, 0x68, 0x62}, 0x68, 0x47}, {{0x49, 0x69, 0x65}, 0x69, 0x48},
+     {{0x6B, 0x6C}, 0x6C, 0x6A}},
+    {1, 0, {0x44, 0x45, 0x64, 0x65}, 0x43, 0x67, {{0x47, 0x6A, 0x63}, 0x6A, 0x48}, {{0x46, 0x6B, 0x62}, 0x6B, 0x49},
+     {{0x68, 0x6C, 0x41}, 0x6C, 0x69}},
+    {0, -1, {0x44, 0x45, 0x62, 0x65}, 0x42, 0x66, {{0x48, 0x69, 0x64}, 0x69, 0x49}, {{0x47, 0x68, 0x63}, 0x68, 0x46},
+     {{0x6A, 0x6C, 0x41}, 0x6C, 0x6B}},
+};
+
+void retile(CityState& s, const DragState& d, int x, int y, const Rule rules[4]) {
+    for (int k = 0; k < 4; ++k) {
+        const Rule& r = rules[k];
+        const int nx = x + r.dcol, ny = y + r.drow;
+        if (!on_map(nx, ny)) continue;
+        uint8_t& t = at(s, nx, ny);
+        if (one_of(t, r.skip)) continue;
+        const Retile* rt = nullptr;
+        switch (d.modes[static_cast<size_t>(k)]) {
+            case 1:
+                if (t != r.straight_unless) t = r.straight;
+                continue;
+            case 2: rt = &r.mode2; break;
+            case 3: rt = &r.mode3; break;
+            case 4: rt = &r.mode4; break;
+            default: continue;
+        }
+        t = one_of(t, rt->keep_if) ? rt->keep : rt->other;
+    }
+}
+
+// 0x1669E: a road piece as the highway's (0x41 has no highway form).
+uint8_t highway_form(uint8_t road) { return in(road, 0x36, 0x40) ? static_cast<uint8_t>(road + 0x37) : road; }
+
+// 0x16CAD: a road piece as the wall's.
+uint8_t wall_form(uint8_t road) {
+    constexpr std::array<uint8_t, 11> kWall = {0x43, 0x42, 0x46, 0x47, 0x48, 0x49, 0x68, 0x69, 0x6A, 0x6B, 0x6C};
+    return in(road, 0x36, 0x40) ? kWall[static_cast<size_t>(road - 0x36)] : road;
+}
+
+// The common start of the construction handlers; nullptr when refused.
+uint8_t* open_cell(CityState& s, int x, int y) {
+    if (!on_map(x, y)) return nullptr;
+    uint8_t& t = at(s, x, y);
+    t &= 0x7F;
+    if (at_entry(s, x, y)) return nullptr;
+    return &t;
+}
+
+}  // namespace
+
+Built clear_province(CityState& s, int x, int y) {
+    uint8_t* cell = open_cell(s, x, y);
+    if (!cell) return Built::Refused;
+    uint8_t& t = *cell;
+    if (t == 0x4D) {
+        t = 0x1D;
+        disband_fort(s, x, y);
+        return Built::Charged;
+    }
+    if (t <= 0x24 || (t > 0x49 && t < 0x62) || t == 0x79 || t == 0x7A) return Built::Refused;
+    t = 0x1D;
+    return Built::Charged;
+}
+
+Built place_province_road(CityState& s, DragState& d, int x, int y) {
+    uint8_t* cell = open_cell(s, x, y);
+    if (!cell || *cell < 0x1D) return Built::Refused;
+    uint8_t& t = *cell;
+    snapshot(s, d, x, y);
+    Flags f{};
+    auto links = [&] {
+        mark(d, f, 0x36, 0x41);
+        mark(d, f, 0x4A, 0x4D);
+        mark(d, f, 0x61, 0x61);
+        mark(d, f, 0x44, 0x45);
+        mark(d, f, 0x79, 0x7C);
+    };
+    if (t <= 0x35 || in(t, 0x36, 0x41) || in(t, 0x59, 0x60)) {
+        links();
+        const uint8_t piece = match(d, f);
+        if (piece == 0) return Built::Refused;
+        const Built built = t > 0x35 ? Built::Free : Built::Charged;
+        t = piece;
+        retile(s, d, x, y, kRoadRules);
+        return built;
+    }
+    if (t == 0x43 || t == 0x42) {
+        links();
+        match(d, f);  // for its modes; the gate is fixed
+        t = t == 0x43 ? 0x45 : 0x44;
+        retile(s, d, x, y, kRoadRules);
+        return Built::Charged;
+    }
+    if (t == 0x6D) {
+        t = 0x7B;
+        return Built::Charged;
+    }
+    if (t == 0x6E) {
+        t = 0x7C;
+        return Built::Charged;
+    }
+    return Built::Refused;
+}
+
+Built place_highway(CityState& s, DragState& d, int x, int y) {
+    uint8_t* cell = open_cell(s, x, y);
+    if (!cell || *cell < 0x1D) return Built::Refused;
+    uint8_t& t = *cell;
+    snapshot(s, d, x, y);
+    Flags f{};
+    if (t <= 0x35 || in(t, 0x6D, 0x78) || in(t, 0x59, 0x60)) {
+        mark(d, f, 0x6D, 0x7C);
+        mark(d, f, 0x4A, 0x4D);
+        mark(d, f, 0x61, 0x61);
+        mark(d, f, 0x44, 0x45);
+        const uint8_t piece = highway_form(match(d, f));
+        if (piece == 0) return Built::Refused;
+        const Built built = t > 0x35 ? Built::Free : Built::Charged;
+        t = piece;
+        retile(s, d, x, y, kHighwayRules);
+        return built;
+    }
+    if (t == 0x43 || t == 0x42) {
+        const uint8_t gate = t == 0x43 ? 0x45 : 0x44;
+        if (mark(d, f, gate, gate) != 0) return Built::Refused;
+        t = gate;
+        return Built::Charged;
+    }
+    if (t == 0x37) {
+        t = 0x7B;
+        return Built::Charged;
+    }
+    if (t == 0x36) {
+        t = 0x7C;
+        return Built::Charged;
+    }
+    return Built::Refused;
+}
+
+Built place_great_wall(CityState& s, DragState& d, int x, int y) {
+    uint8_t* cell = open_cell(s, x, y);
+    if (!cell || *cell < 0x1D) return Built::Refused;
+    uint8_t& t = *cell;
+    snapshot(s, d, x, y);
+    Flags f{};
+    auto links = [&] {
+        mark(d, f, 0x42, 0x49);
+        mark(d, f, 0x62, 0x6C);
+    };
+    if (t <= 0x35 || in(t, 0x42, 0x43) || in(t, 0x62, 0x6C) || in(t, 0x46, 0x49) || in(t, 0x59, 0x60)) {
+        links();
+        const uint8_t piece = wall_form(match(d, f));
+        if (piece == 0) return Built::Refused;
+        const Built built = (in(t, 0x42, 0x49) || in(t, 0x62, 0x6C)) ? Built::Free : Built::Charged;
+        t = piece;
+        retile(s, d, x, y, kWallRules);
+        return built;
+    }
+    if (t == 0x37 || t == 0x6E || t == 0x36 || t == 0x6D) {
+        links();
+        match(d, f);
+        t = (t == 0x37 || t == 0x6E) ? 0x45 : 0x44;
+        retile(s, d, x, y, kWallRules);
+        return Built::Charged;
+    }
+    return Built::Refused;
+}
+
+Built place_great_tower(CityState& s, int x, int y) {
+    if (!on_map(x, y)) return Built::Refused;
+    uint8_t& t = at(s, x, y);
+    switch (t) {
+        case 0x42: t = 0x66; break;
+        case 0x43: t = 0x67; break;
+        case 0x46: t = 0x62; break;
+        case 0x47: t = 0x63; break;
+        case 0x48: t = 0x64; break;
+        case 0x49: t = 0x65; break;
+        default: return Built::Refused;
+    }
+    return Built::Charged;
+}
+
 }  // namespace gaius::systems::province

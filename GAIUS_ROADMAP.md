@@ -26,7 +26,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3188 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3231 checks.
 
 **Critical path now:** Phase 6's battle resolution and province level. Phases 7 and 9 are unblocked and can run alongside it.
 
@@ -256,7 +256,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **`systems::province`, the province actors** (2026-09-14, findings section 28) — the province walker, barbarian armies (the 18-month spawner, marching, wrecking, pillaging towns, invading the city), and Cohorts halting, patrolling, attacking and going home into battle. Save actors checked against the map's occupancy bits.
 - [x] **Towns, the highway and road wear** (2026-09-14, findings section 28.6) — the road trace `0x2E377`, towns growing when linked to the city and shrinking when not, the Imperial Highway link, the monthly province pass.
 - [x] **Fort and the Cohort orders** (2026-09-14, findings section 28.7) — placing forts and their Cohorts, Halt, Patrol, Attack, Go Home.
-- [ ] **Province construction** — Clear Area, Provincial road, Great Wall, Great Tower and Highway (`0x15C91`-`0x17024`), on the city's drag auto-tiling.
+- [x] **Province construction** (2026-09-14, findings section 28.8) — Clear Area, Provincial road, Highway, Great Wall and Great Tower on the city's drag auto-tiling, with the province's pieces, gates and crossings.
 - [ ] **Confirm the DOS process juggling isn't needed** — the batch file alternating `csr.exe`/`cohort.exe` becomes a screen transition; `COHORT.CSR` only needs its behaviour, not its format.
 
 **Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **City half met.**

@@ -1138,10 +1138,10 @@ The calendar sets `DS:0x6D97` when the 18-month counter wraps; the next step sta
 
 ### 28.6 Roads, towns and the Imperial Highway
 
-- **Tiles.** Province roads are `0x36`-`0x41` and the highway `0x6D`-`0x78`, each run in the same 12 shapes; `0x44`/`0x45` and `0x7B`/`0x7C` are bridges, `0x4D` a fort. Towns are `0x61` < `0x79` < `0x7A` < `0x4C`. When a province starts (`0x06326`), the map's `0x41` becomes `0x78`, the highway's entry, and its cell goes to `DS:0x6C90`/`0x6C8E` -- the "unexplained" `0x41` -> `0x78` of docs/FORMATS.md. Names STRONG INFERENCE.
+- **Tiles.** Province roads are `0x36`-`0x41` and the highway `0x6D`-`0x78`, each run in the same 12 shapes; `0x44`/`0x45` are a road through a wall (section 28.8), `0x7B`/`0x7C` a road crossing a highway, `0x4D` a fort. Towns are `0x61` < `0x79` < `0x7A` < `0x4C`. When a province starts (`0x06326`), the map's `0x41` becomes `0x78`, the highway's entry, and its cell goes to `DS:0x6C90`/`0x6C8E` -- the "unexplained" `0x41` -> `0x78` of docs/FORMATS.md. Names STRONG INFERENCE.
 - **The trace `0x2E377`** (x, y, class table) follows roads from a cell. A table gives each tile a class; `3496:1810`[class] gives the class's exits (N `0x80`, E `0x20`, S `0x08`, W `0x02`) and whether it's a branch piece (classes 7-11). Directions are tried N, E, S, W and round again while exits remain; a branch piece pushes its state (at most 50) before each step. A step onto a visited cell, a class-0 cell, or a piece without the matching entrance pops back; class `0xFF` is the goal. Visits are marked in `3496:2112`.
-- **Towns, `0x2E249`,** at step 80 (after `0x2E209`'s draw): every town cell (compared with the occupancy bit) traced to the city through `3496:1CE0` -- roads, highway, bridges, towns and forts pass, the city `0x4A`/`0x4B` is the goal -- counts in `DS:0x6C92` and, when `DS:0x6DFE` wraps (one month in six), grows a grade; a town not linked shrinks a grade every month.
-- **The highway, `0x2E220`:** `DS:0x6C8C` = the trace from the entry through `3496:1D62` (highway and bridges only) reaches the city.
+- **Towns, `0x2E249`,** at step 80 (after `0x2E209`'s draw): every town cell (compared with the occupancy bit) traced to the city through `3496:1CE0` -- roads, highway, gates, crossings, towns and forts pass, the city `0x4A`/`0x4B` is the goal -- counts in `DS:0x6C92` and, when `DS:0x6DFE` wraps (one month in six), grows a grade; a town not linked shrinks a grade every month.
+- **The highway, `0x2E220`:** `DS:0x6C8C` = the trace from the entry through `3496:1D62` (highway, gates and crossings only) reaches the city.
 - **The monthly pass, `0x2E0BE`,** the first of step 105's monthly routines: clears bit `0x80` over the map; counts the tiles `0x36`-`0x49` and `0x62`-`0x77` into `DS:0x6C8A`, and the one numbered `DS:0x6C88` turns to `0x1D` (with a message when `DS:0x6DFC`, cycling 0-3, is 0); then `DS:0x6C86` = straight pieces (`0x36`-`0x37`, `0x6D`-`0x6E`) less 4 per corner (`0x38`-`0x3B`, `0x6F`-`0x72`).
 - **Wear.** `0x2DF7D` resets `DS:0x6C88` to -1 and its fourth roll picks the next month's worn road among `DS:0x6C8A` when the walk exceeds `DS:0x6BDE` (set by `0x2DEC8`, unread).
 - **Checked.** In every save the highway entry holds `0x78`, and the recomputed `DS:0x6C8C`, `0x6C8A` and `0x6C86` equal the saved ones -- all 0, as no save's province has a road yet, so this is consistent rather than a strong test. `test_province_towns`, `test_province_matches_saves`.
@@ -1155,8 +1155,25 @@ The construction dispatcher's province ids (`DS:127C`) and their names (the stri
 - The four orders pick a Cohort (`0x0F4C1`) that isn't demobilized; Patrol and Attack also need at least one Century. **Halt:** state 10 where it stands. **Patrol:** the first click is the destination, the second +0x2C/+0x2D, state 11. **Attack:** the army's record index (+0x08) into +0x14, +0x2C = 0, state 12, and `0x25438`. **Go Home:** state 13 towards its fort.
 - `test_province_commands`.
 
-### 28.8 Not modeled
+### 28.8 Province construction
 
-- Clear Area, Provincial road, Great Wall, Great Tower and Highway on the province map (next): they reuse the city's drag auto-tiling (`0x17C08`, `0x17C20`, `0x17CB9`) with their own neighbour updates (`0x19073`, `0x1A84E`, `0x1D504`);
+Clear Area, Provincial road, Highway and Great Wall work like the city's drag-built commands (section 18): the eight-neighbour snapshot, now on the 40-wide map (`0334:450D`: off the map 0, a 0 byte leaves the slot as it was), flags for the connectable ranges (`0x17C20`), the first of the 161 patterns at `3496:0A9A` (`0x17CB9`), and a re-tiling of the four orthogonal neighbours by the pattern's modes. Each handler first clears the cell's occupancy bit and refuses the highway's entry and anything below `0x1D`. A handler that sets `DS:0x6D0A` isn't charged by the build routine -- which includes laying a piece again over one of its own, rewritten all the same.
+
+| Command | Handler | Lays on | Connects to | Piece | Re-tiling |
+|---|---|---|---|---|---|
+| 36 Provincial road | `0x15EF0` | `<= 0x35`, roads `0x36`-`0x41` (free), markers `0x59`-`0x60` | roads, city and forts `0x4A`-`0x4D`, `0x61`, gates `0x44`-`0x45`, `0x79`-`0x7C` | the pattern's | `0x19073`: the city road's rules (section 18), skipping gates, city, forts, towns and crossings |
+| 42 Highway | `0x1645D` | `<= 0x35`, highways `0x6D`-`0x78` (free), markers | highways and crossings `0x6D`-`0x7C`, `0x4A`-`0x4D`, `0x61`, gates | the pattern's + `0x37` (`0x41` unchanged) | `0x1A84E`: the road's rules + `0x37`, also skipping `0x78` |
+| 37 Great Wall | `0x169A9` | `<= 0x35`, walls `0x42`-`0x43`, `0x46`-`0x49`, `0x62`-`0x6C` (free), markers | `0x42`-`0x49`, `0x62`-`0x6C` | `0x36`-`0x40` -> `0x43 0x42 0x46 0x47 0x48 0x49 0x68 0x69 0x6A 0x6B 0x6C` | `0x1D504` (below) |
+
+- **Over another kind:** a road on a wall (`0x43`/`0x42`) makes a gate (`0x45`/`0x44`) and re-tiles; a road on a highway (`0x6D`/`0x6E`) makes `0x7B`/`0x7C`. A highway on a wall makes the gate unless a neighbour already is that gate, without re-tiling; on a road (`0x37`/`0x36`) `0x7B`/`0x7C`. A wall on a road or highway (`0x37`, `0x6E` / `0x36`, `0x6D`) makes `0x45`/`0x44` and re-tiles.
+- **The wall's re-tiling `0x1D504`,** per neighbour N, E, S, W: skip `0x44`, `0x45` and two towers (N `0x62 0x63`, E `0x63 0x64`, S `0x64 0x65`, W `0x62 0x65`); mode 1 writes `0x43` (N, S) or `0x42` (E, W) unless the neighbour is the tower `0x67`/`0x66`; modes 2-4 keep a piece or write another -- N `{49 6B 65}`->`6B`/`46`, `{48 6A 64}`->`6A`/`47`, `{69 6C 41}`->`6C`/`68`; E `{46 68 62}`->`68`/`47`, `{49 69 65}`->`69`/`48`, `{6B 6C}`->`6C`/`6A`; S `{47 6A 63}`->`6A`/`48`, `{46 6B 62}`->`6B`/`49`, `{68 6C 41}`->`6C`/`69`; W `{48 69 64}`->`69`/`49`, `{47 68 63}`->`68`/`46`, `{6A 6C 41}`->`6C`/`6B`.
+- **Great Tower `0x17024`:** `0x42` -> `0x66`, `0x43` -> `0x67`, `0x46`-`0x49` -> `0x62`-`0x65`, the byte compared as it stands (the occupancy bit isn't cleared); anything else refused.
+- **Clear Area `0x15C91`:** a fort `0x4D` becomes `0x1D` and its Cohort is freed (`0x15710`); `<= 0x24`, `0x4A`-`0x61` and the towns `0x79`/`0x7A` are refused; anything else becomes `0x1D`.
+- **Names.** `0x42`-`0x49` and `0x62`-`0x6C` are the wall because the wall writes them, `0x44`/`0x45` gates because road and wall both write them over each other, `0x62`-`0x67` towers because the Tower writes them over wall pieces. STRONG INFERENCE.
+- **Checked** on made-up maps: the same run laid on the city map and the province gives the same road pieces, the highway's shifted, the wall's mapped; a road laid from the city to a town links it (`test_province_construction`).
+
+### 28.9 Not modeled
+
+- the province commands' terrain cost multiplier (`0x11CD4`-`0x11D86`);
 - the pleb routines between the monthly pass and the rolls;
 - messages and sounds.

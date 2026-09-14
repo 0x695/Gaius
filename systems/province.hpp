@@ -51,6 +51,7 @@
 #include <utility>
 
 #include "model/city_state.hpp"
+#include "systems/construction.hpp"
 #include "systems/month.hpp"
 
 namespace gaius::systems::province {
@@ -129,9 +130,10 @@ struct Exits {
 };
 extern const std::array<Exits, 12> kRoadExits;
 // 3496:1CE0: road classes for a town's link to the city: roads, highways,
-// bridges (0x44/0x45), towns and forts pass; the city (0x4A/0x4B) is 0xFF.
+// wall gates (0x44/0x45), crossings, towns and forts pass; the city
+// (0x4A/0x4B) is 0xFF.
 extern const std::array<uint8_t, 128> kTownRoads;
-// 3496:1D62: the Imperial Highway's: highway pieces and bridges only.
+// 3496:1D62: the Imperial Highway's: highway pieces, gates and crossings.
 extern const std::array<uint8_t, 128> kHighwayRoads;
 
 // 0x2E377: follows the road from (x, y) through `classes`, keeping up to 50
@@ -185,5 +187,50 @@ bool order_patrol(model::CityState& state, int cohort, int x1, int y1, int x2, i
 bool order_attack(model::CityState& state, int cohort, int army);
 // 0x15BB1, Cohort Go Home: back to its fort (state 13).
 bool order_go_home(model::CityState& state, int cohort);
+
+// ---------------------------------------------------------------------------
+// Province construction: Clear Area (id 35), Provincial road (36), Great Wall
+// (37) and Highway (42). The pieces come from the city's drag auto-tiling --
+// the same eight-neighbour snapshot on the 40-wide map (0334:450D), the same
+// 161 patterns (construction::kRoadPatterns, 0x17CB9) -- with the province's
+// own connectable ranges and neighbour re-tiling (0x19073, 0x1A84E, 0x1D504).
+// Every handler first clears the cell's occupancy bit, and refuses the
+// highway's entry and anything below 0x1D.
+//
+// Tiles: roads 0x36-0x41 and highways 0x6D-0x78 in the city road's twelve
+// shapes (highway = road + 0x37); walls 0x42/0x43 straight, 0x46-0x49 and
+// 0x68-0x6C the other shapes; 0x44/0x45 a road or highway through a wall;
+// 0x7B/0x7C a road crossing a highway; 0x62-0x67 towers on walls. STRONG
+// INFERENCE for the names, from which pieces each handler writes.
+
+// What the build routine does with the cost: a refusal (DS:0x6D0A = 1) isn't
+// charged, and neither is a road, highway or wall laid again over one of its
+// own pieces, which the handlers rewrite but also flag with DS:0x6D0A = 1.
+enum class Built { Refused, Charged, Free };
+
+// 0x15C91: a fort (0x4D) is razed and its Cohort freed; grass (<= 0x24), the
+// city, spawn markers and towns (0x4A-0x61, 0x79, 0x7A) are refused; anything
+// else becomes 0x1D. Neighbours aren't re-tiled.
+Built clear_province(model::CityState& state, int x, int y);
+
+// 0x15EF0: on open land, a road, or a spawn marker: the pattern's piece among
+// roads, the city and forts (0x4A-0x4D), small towns (0x61), gates and
+// crossings. On a wall (0x42/0x43) a gate; on a highway (0x6D/0x6E) a crossing.
+Built place_province_road(model::CityState& state, construction::DragState& drag, int x, int y);
+
+// 0x1645D: as the road, among highways, the city, forts, small towns and
+// gates, with the road piece shifted to the highway's. On a wall a gate unless
+// a neighbour is already that gate; on a road (0x36/0x37) a crossing.
+Built place_highway(model::CityState& state, construction::DragState& drag, int x, int y);
+
+// 0x169A9: on open land, a wall or tower piece, or a spawn marker: the
+// pattern's piece among walls, gates and towers, in the wall's shapes. On a
+// road or highway a gate.
+Built place_great_wall(model::CityState& state, construction::DragState& drag, int x, int y);
+
+// 0x17024, Great Tower (id 41): a tower on a wall piece -- 0x42 -> 0x66, 0x43 ->
+// 0x67, 0x46-0x49 -> 0x62-0x65 -- compared with the occupancy bit, and not
+// cleared first; anything else is refused. Neighbours aren't re-tiled.
+Built place_great_tower(model::CityState& state, int x, int y);
 
 }  // namespace gaius::systems::province

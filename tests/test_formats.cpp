@@ -2881,6 +2881,95 @@ void test_province_commands() {
     CHECK(st->objects[static_cast<size_t>(c)].raw[0x06] == 0 && global_word(*st, 0x6C12) == 0);
 }
 
+// Province construction against the city's auto-tiling, crossings, gates,
+// rebuilding and clearing.
+void test_province_construction() {
+    std::printf("test_province_construction (0x15EF0 road, 0x1645D highway, 0x169A9 wall, 0x15C91 clear)\n");
+    using namespace gaius::systems;
+    using Built = province::Built;
+    auto fresh = [] {
+        auto st = std::make_unique<CityState>();
+        st->global_words_128.assign(256, 0);
+        st->final_state.assign(68, 0);
+        st->empire.cells.fill(0x1D);
+        set_global_word(*st, 0x6C90, 39);  // the highway's entry, out of the way
+        set_global_word(*st, 0x6C8E, 39);
+        return st;
+    };
+    auto cell = [](CityState& s, int x, int y) -> uint8_t& { return s.empire.cells[static_cast<size_t>(y * 40 + x)]; };
+
+    // An L-shaped run with a branch, laid on the city map and on three
+    // province maps: the same pieces, the highway's shifted, the wall's mapped.
+    const int run[][2] = {{10, 10}, {11, 10}, {12, 10}, {13, 10}, {12, 11}, {12, 12}, {11, 12}};
+    auto city = std::make_unique<CityState>();
+    for (auto& row : city->city.tile) row.fill(0x1D);
+    auto roads = fresh(), highways = fresh(), walls = fresh();
+    construction::DragState cd, rd, hd, wd;
+    for (const auto& p : run) {
+        construction::place_road(city->city, cd, p[0], p[1]);
+        CHECK(province::place_province_road(*roads, rd, p[0], p[1]) == Built::Charged);
+        CHECK(province::place_highway(*highways, hd, p[0], p[1]) == Built::Charged);
+        CHECK(province::place_great_wall(*walls, wd, p[0], p[1]) == Built::Charged);
+    }
+    constexpr std::array<uint8_t, 11> kWall = {0x43, 0x42, 0x46, 0x47, 0x48, 0x49, 0x68, 0x69, 0x6A, 0x6B, 0x6C};
+    bool same = true, shifted = true, walled = true;
+    for (const auto& p : run) {
+        const uint8_t c = city->city.tile[static_cast<size_t>(p[1])][static_cast<size_t>(p[0])];
+        const bool piece = c >= 0x36 && c <= 0x40;
+        same = same && cell(*roads, p[0], p[1]) == c;
+        shifted = shifted && cell(*highways, p[0], p[1]) == (piece ? c + 0x37 : c);
+        walled = walled && cell(*walls, p[0], p[1]) == (piece ? kWall[c - 0x36] : c);
+    }
+    CHECK(same && shifted && walled);
+
+    // Laying a road again over its own piece isn't charged.
+    CHECK(province::place_province_road(*roads, rd, 11, 10) == Built::Free);
+
+    // Crossings and gates.
+    auto st = fresh();
+    construction::DragState d;
+    cell(*st, 5, 5) = 0x6D;
+    CHECK(province::place_province_road(*st, d, 5, 5) == Built::Charged && cell(*st, 5, 5) == 0x7B);
+    cell(*st, 6, 6) = 0x36;
+    CHECK(province::place_highway(*st, d, 6, 6) == Built::Charged && cell(*st, 6, 6) == 0x7C);
+    cell(*st, 8, 8) = 0x37;
+    CHECK(province::place_great_wall(*st, d, 8, 8) == Built::Charged && cell(*st, 8, 8) == 0x45);
+    cell(*st, 20, 20) = 0x43;
+    cell(*st, 20, 19) = 0x45;
+    CHECK(province::place_highway(*st, d, 20, 20) == Built::Refused && cell(*st, 20, 20) == 0x43);
+    cell(*st, 20, 19) = 0x1D;
+    CHECK(province::place_highway(*st, d, 20, 20) == Built::Charged && cell(*st, 20, 20) == 0x45);
+    CHECK(province::place_province_road(*st, d, 39, 39) == Built::Refused);  // the entry
+    cell(*st, 30, 30) = 0x05;
+    CHECK(province::place_province_road(*st, d, 30, 30) == Built::Refused);
+
+    // A road from the city to a town links it.
+    auto linked = fresh();
+    cell(*linked, 10, 10) = province::kCityTile;
+    cell(*linked, 15, 10) = 0x61;
+    construction::DragState ld;
+    for (int x = 11; x <= 14; ++x) CHECK(province::place_province_road(*linked, ld, x, 10) == Built::Charged);
+    CHECK(province::connected(linked->empire, 15, 10, province::kTownRoads));
+
+    // Towers go on wall pieces only.
+    cell(*st, 25, 25) = 0x42;
+    CHECK(province::place_great_tower(*st, 25, 25) == Built::Charged && cell(*st, 25, 25) == 0x66);
+    CHECK(province::place_great_tower(*st, 25, 25) == Built::Refused && province::place_great_tower(*st, 26, 26) == Built::Refused);
+
+    // Clearing.
+    auto cl = fresh();
+    const int fort = province::place_fort(*cl, 3, 3);
+    CHECK(fort >= 0);
+    CHECK(province::clear_province(*cl, 3, 3) == Built::Charged && cell(*cl, 3, 3) == 0x1D);
+    CHECK(cl->objects[static_cast<size_t>(fort)].raw[0x06] == 0);
+    CHECK(province::clear_province(*cl, 4, 4) == Built::Refused);  // grass
+    cell(*cl, 5, 5) = 0x61;
+    cell(*cl, 6, 6) = 0x79;
+    cell(*cl, 7, 7) = 0x37;
+    CHECK(province::clear_province(*cl, 5, 5) == Built::Refused && province::clear_province(*cl, 6, 6) == Built::Refused);
+    CHECK(province::clear_province(*cl, 7, 7) == Built::Charged && cell(*cl, 7, 7) == 0x1D);
+}
+
 // The year turning inside run_step: the accounts run before the histories are
 // written, so the funds history records the funds after the tribute.
 void test_month_year_accounts() {
@@ -4156,6 +4245,7 @@ int main() {
     test_province_armies();
     test_province_towns();
     test_province_commands();
+    test_province_construction();
     test_province_matches_saves();
     test_month_year_accounts();
     test_render_building_metrics();
