@@ -763,9 +763,9 @@ void run_spawners(CityState& state, const month::Random& random, int step) {
     }
 }
 
-void spawn_rioter(CityState& state, int x, int y) {
+int spawn_rioter(CityState& state, int x, int y) {
     const int slot = spawn(state, 10, x, y);
-    if (slot < 0) return;
+    if (slot < 0) return -1;
     Rec a = rec(state, slot);
     a.setb(kDestX, x);
     a.setb(kDestY, y + 1);
@@ -773,6 +773,7 @@ void spawn_rioter(CityState& state, int x, int y) {
     a.setb(kFacing, 4);
     set_gw(state, 0x6C3C, std::max(0, gw(state, 0x6C3C) - 2));
     set_gw(state, 0x6C84, 2);
+    return slot;
 }
 
 }  // namespace gaius::systems::actors

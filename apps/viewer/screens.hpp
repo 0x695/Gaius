@@ -88,6 +88,7 @@ inline constexpr int kActionAccept = 500, kActionWait9 = 501, kActionWait24 = 50
 inline constexpr int kActionTactic = 600;    // + battle::Tactic
 inline constexpr int kActionRetreat = 610, kActionContinue = 611, kActionQuit = 612;
 inline constexpr int kActionOpenSave = 405, kActionOpenLoad = 406;
+inline constexpr int kActionSpeedDown = 407, kActionSpeedUp = 408;
 inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDifficultyDown = 702,
                      kActionDifficultyUp = 703, kActionBegin = 704;
 inline constexpr int kActionSlot = 710;  // + slot
@@ -113,7 +114,9 @@ inline ui::PanelRow duty_row(const model::CityState& s, const char* label, syste
 
 }  // namespace detail
 
-inline ui::Page forum_page(const model::CityState& s, ForumTab tab) {
+// `speed`, when not negative, adds the game speed (DS:0x5292) to the governor's
+// page -- the original keeps it on its options screen (0x0F0D8).
+inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = -1) {
     namespace forum = systems::forum;
     using detail::g;
     ui::Page page;
@@ -222,6 +225,7 @@ inline ui::Page forum_page(const model::CityState& s, ForumTab tab) {
             page.rows.push_back(detail::control_row(s, "Salary", forum::Control::Salary, " Dn"));
             page.rows.push_back({"Personal savings", dn(g(s, 0x6C2E))});
             page.rows.push_back(detail::control_row(s, "Donation", forum::Control::Donation, " Dn"));
+            if (speed >= 0) page.rows.push_back({"Game speed", std::to_string(speed), kActionSpeedDown, kActionSpeedUp});
             page.buttons.insert(page.buttons.begin(), {"Donate", kActionDonate});
             break;
         }
@@ -308,6 +312,21 @@ inline ui::Page files_page(bool saving, const std::vector<ui::PanelButton>& slot
     page.title = saving ? "Save the game" : "Load a game";
     page.rows.push_back({saving ? "Choose a slot to write" : "Choose a saved game", ""});
     page.buttons = slots;
+    return page;
+}
+
+// A full-screen notice: its first line the title, the rest rows, and Continue.
+// The funds warning (0x084B1) is one.
+inline ui::Page notice_page(const char* const* lines, size_t count) {
+    const auto trim = [](std::string t) {
+        const size_t a = t.find_first_not_of(' ');
+        if (a == std::string::npos) return std::string();
+        return t.substr(a, t.find_last_not_of(' ') - a + 1);
+    };
+    ui::Page page;
+    if (count > 0) page.title = trim(lines[0]);
+    for (size_t i = 1; i < count; ++i) page.rows.push_back({trim(lines[i]), ""});
+    page.buttons.push_back({"Continue", kActionContinue});
     return page;
 }
 

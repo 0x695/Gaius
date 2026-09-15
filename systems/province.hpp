@@ -52,6 +52,7 @@
 
 #include "model/city_state.hpp"
 #include "systems/construction.hpp"
+#include "systems/messages.hpp"
 #include "systems/month.hpp"
 
 namespace gaius::systems::province {
@@ -88,6 +89,9 @@ struct Hooks {
     // battle screen runs now. Without a hook nothing happens, and the Cohort
     // meets the army again on its next cell.
     std::function<void(model::CityState& state, int cohort, int army)> battle;
+    // A marching army posts a message: entering the city (0x2D908), or
+    // approaching roads, highway or towns as it wrecks and pillages (0x24C62).
+    std::function<void(const messages::Message& message)> message;
 };
 
 // One frame of the province actor in `slot` (types 11-13). `tick` is the

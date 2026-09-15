@@ -71,6 +71,7 @@
 #include "systems/month.hpp"
 #include "systems/province.hpp"
 #include "ui/panel.hpp"
+#include "ui/font.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
@@ -235,6 +236,8 @@ int main(int argc, char** argv) {
     bool test_battle = false;       // --test-battle: the first Cohort meets a new army
     bool test_promotion = false;    // --test-promotion: a promotion is offered now
     std::string save_dir_option;    // --save-dir: where the save slots live (default: the per-user data folder)
+    int start_speed = 100;          // --speed 0-100: DS:0x5292
+    int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
@@ -245,6 +248,8 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--test-battle") == 0) test_battle = true;
         if (std::strcmp(argv[i], "--test-promotion") == 0) test_promotion = true;
         if (std::strcmp(argv[i], "--save-dir") == 0 && i + 1 < argc) save_dir_option = argv[++i];
+        if (std::strcmp(argv[i], "--speed") == 0 && i + 1 < argc) start_speed = std::atoi(argv[++i]);
+        if (std::strcmp(argv[i], "--test-message") == 0 && i + 1 < argc) test_message = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -404,6 +409,7 @@ int main(int argc, char** argv) {
     // The simulation clock (systems::month), seeded from the save.
     systems::month::SimState sim;
     if (save_mode) sim = systems::month::sim_state_from_save(state);
+    sim.speed = std::clamp(start_speed / 10 * 10, 0, 100);
     bool time_running = save_mode && !start_paused;
     // One step every 19 ms: a month (106 steps) in about 2 s, and the walkers
     // move a pixel each step.
@@ -425,11 +431,15 @@ int main(int argc, char** argv) {
         province_image_dirty = true;
         report_month();
     };
+    // One frame of the main loop (systems::month::run_frame): at the game speed
+    // not every frame runs a step, but every frame draws and counts the message.
     auto advance_step = [&]() {
-        systems::month::run_step(state, sim);
-        city_image_dirty = true;
-        province_image_dirty = true;
-        if (sim.step == 0) report_month();
+        const int month_before = sim.month;
+        if (systems::month::run_frame(state, sim)) {
+            city_image_dirty = true;
+            province_image_dirty = true;
+            if (sim.month != month_before) report_month();
+        }
     };
 
     // One placement for the click handler and --test-build: the drag-built
@@ -480,6 +490,21 @@ int main(int argc, char** argv) {
         namespace economy = systems::economy;
         // The engine checks the cost before calling the handler and charges it
         // only when the handler succeeds; a drag pays per cell (0x11DAC-0x120B0).
+        namespace msg = systems::messages;
+        // 0x11C72: fewer than 50 pleb groups refuses every construction command.
+        if (!economy::enough_plebs(state, static_cast<int>(tool))) {
+            sim.messages.post(msg::plain(msg::Id::ConstructionPlebs));
+            return false;
+        }
+        // 0x14E1D / 0x15252: at 30 forums or 30 workshops.
+        if (tool == construction::CommandId::Forum && model::global_word(state, 0x6CA0) >= 30) {
+            sim.messages.post(msg::plain(msg::Id::NoForum));
+            return false;
+        }
+        if (tool == construction::CommandId::Workshop && model::global_word(state, 0x6C9E) >= 30) {
+            sim.messages.post(msg::plain(msg::Id::NoFactory));
+            return false;
+        }
         const int cost = economy::construction_cost(tool, forum_grade);
         if (!economy::can_afford(state, cost)) {
             if (economy::grant_emergency_funds(state))
@@ -536,7 +561,8 @@ int main(int argc, char** argv) {
     // ---- The screens: the city, the province, the Forum, a promotion offer and
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
-    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files };
+    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice };
+    Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
     Screen files_return = Screen::Forum;  // where the save / load page goes back to
@@ -610,7 +636,9 @@ int main(int argc, char** argv) {
         const int difficulty = sim.difficulty;
         systems::campaign::start_province(state, province_map, random, difficulty, shore_variant);
         model::set_global_word(state, 0x6CB8, difficulty);  // a promotion may have raised it from Easy
+        const int speed = sim.speed;
         sim = systems::month::sim_state_from_save(state);
+        sim.speed = speed;
         sim.random = random;
         install_hooks();
         city_image_dirty = province_image_dirty = true;
@@ -660,7 +688,9 @@ int main(int argc, char** argv) {
     // engine's loader leaves them (DS:0x6BFE = rate x month, 0x0568F).
     auto adopt_state = [&]() {
         const systems::month::Random random = sim.random;
+        const int speed = sim.speed;
         sim = systems::month::sim_state_from_save(state);
+        sim.speed = speed;
         sim.random = random;
         install_hooks();
         city_image_dirty = province_image_dirty = true;
@@ -668,7 +698,10 @@ int main(int argc, char** argv) {
 
     auto current_page = [&]() -> ui::Page {
         switch (screen) {
-            case Screen::Forum: return viewer::forum_page(state, forum_tab);
+            case Screen::Forum: return viewer::forum_page(state, forum_tab, sim.speed);
+            case Screen::Notice:
+                return viewer::notice_page(systems::messages::kFundsWarning.data(),
+                                           systems::messages::kFundsWarning.size());
             case Screen::Promotion: return viewer::promotion_page(state, promotion_to_caesar);
             case Screen::Battle: return viewer::battle_page(state, battle_view);
             case Screen::Ending: return viewer::ending_page(state, ending_caesar);
@@ -679,11 +712,24 @@ int main(int argc, char** argv) {
     };
     const auto page_screen = [&]() {
         return screen == Screen::Forum || screen == Screen::Promotion || screen == Screen::Battle ||
-               screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files;
+               screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files ||
+               screen == Screen::Notice;
     };
     auto apply_page_action = [&](int action) {
         namespace admin = systems::administration;
         namespace battle = systems::battle;
+        if (action == viewer::kActionSpeedDown || action == viewer::kActionSpeedUp) {
+            // 0x0F204 / 0x0F217: tens, 0-100.
+            sim.speed = std::clamp(sim.speed + (action == viewer::kActionSpeedUp ? 10 : -10), 0, 100);
+            return;
+        }
+        if (screen == Screen::Notice) {
+            if (action == viewer::kActionContinue) {
+                screen = notice_return;
+                time_running = true;
+            }
+            return;
+        }
         if (action == viewer::kActionOpenSave || action == viewer::kActionOpenLoad) {
             files_return = screen;
             files_saving = action == viewer::kActionOpenSave;
@@ -728,6 +774,9 @@ int main(int argc, char** argv) {
                 const int province =
                     systems::campaign::begin_new_game(state, sim.random, funding_level, start_difficulty);
                 if (province >= 0 && start_new_province()) {
+                    // 0x0F7D3 / 0x0F7DA: the first message, shown 78 frames.
+                    sim.messages.post(systems::messages::plain(systems::messages::Id::NoCity));
+                    sim.messages.timer = 0x4E;
                     screen = Screen::City;
                     time_running = true;
                 }
@@ -810,7 +859,11 @@ int main(int argc, char** argv) {
         namespace economy = systems::economy;
         if (x < 0 || y < 0 || x >= province::kMapW || y >= province::kMapW) return false;
         if (!economy::enough_plebs(state, id)) {
-            std::printf("fewer than 50 pleb groups: nothing can be built\n");
+            sim.messages.post(systems::messages::plain(systems::messages::Id::ConstructionPlebs));  // 0x11C8F
+            return false;
+        }
+        if (id == 29 && model::global_word(state, 0x6C12) >= 10) {
+            sim.messages.post(systems::messages::plain(systems::messages::Id::NoFort));  // 0x15482
             return false;
         }
         const uint8_t tile = state.empire.cells[static_cast<size_t>(y) * province::kMapW + x] & 0x7F;
@@ -996,6 +1049,13 @@ int main(int argc, char** argv) {
                 if (strip.tabs[i].contains(lx, ly)) return static_cast<int>(i);
             return -1;
         };
+        // The message box, and whether it shows on this screen (the city,
+        // province and maps views; the messages option DS:0x6C78 on).
+        static constexpr ui::Rect kMessageBox{12, 16, 240, 28};
+        const auto message_visible = [&]() {
+            return (screen == Screen::City || screen == Screen::Province || screen == Screen::Maps) &&
+                   sim.messages.showing() && model::global_word(state, 0x6C78) != 0;
+        };
         const auto switch_to = [&](int i) {
             screen = i == 0   ? Screen::City
                      : i == 1 ? Screen::Province
@@ -1023,6 +1083,27 @@ int main(int argc, char** argv) {
             }
             if (const int tab = strip_hit(lx, ly); tab >= 0) {
                 switch_to(tab);
+                return;
+            }
+            if (message_visible() && kMessageBox.contains(lx, ly)) {
+                // 0x0F982: a message with a place takes the view there (its
+                // cell less 10 and 5), and the message goes.
+                const systems::messages::Message m = sim.messages.current;
+                if (m.place != systems::messages::Place::None) {
+                    sim.messages.timer = 0;
+                    if (m.place == systems::messages::Place::City) {
+                        screen = Screen::City;
+                        cam.x = (m.x - 10) * city_cell_px;
+                        cam.y = (m.y - 5) * city_cell_px;
+                        cam.clamp();
+                    } else {
+                        screen = Screen::Province;
+                        pcam.x = (m.x - 10) * render::kProvincePx;
+                        pcam.y = (m.y - 5) * render::kProvincePx;
+                        pcam.clamp();
+                        province_image_dirty = true;
+                    }
+                }
                 return;
             }
             if (screen == Screen::ForumHall) {
@@ -1083,6 +1164,11 @@ int main(int argc, char** argv) {
                         ok ? "OK" : "rejected (terrain not buildable / off grid)");
         };
 
+        if (save_mode && test_message > 0) {
+            const auto id = static_cast<systems::messages::Id>(test_message);
+            sim.messages.post(systems::messages::at(id, systems::messages::Place::City, 50, 50));
+            if (model::global_word(state, 0x6C78) == 0) model::set_global_word(state, 0x6C78, 1);
+        }
         if (save_mode && test_promotion) {
             model::set_global_word(state, 0x6CA4, (model::global_word(state, 0x6CA6) + 1) % 50);
             sim.on_promotion(state, false);
@@ -1145,6 +1231,15 @@ int main(int argc, char** argv) {
                                                                                           : 0);
                         break;
                     case platform::CommandType::Secondary:
+                        if (save_mode && message_visible()) {
+                            // 0x0F93A: a right-click on the message dismisses it.
+                            int mx = 0, my = 0;
+                            if (window.window_to_logical(cmd->x, cmd->y, &mx, &my) && kMessageBox.contains(mx, my)) {
+                                sim.messages.timer = 1;
+                                sim.messages.current.place = systems::messages::Place::None;
+                                break;
+                            }
+                        }
                         if (save_mode && screen == Screen::ForumHall) {
                             screen = Screen::City;  // right-click leaves the Forum
                             break;
@@ -1303,6 +1398,13 @@ int main(int argc, char** argv) {
                 for (int budget = 8; budget > 0 && time_running && now - last_step_ms >= kStepMs; --budget) {
                     advance_step();
                     last_step_ms += kStepMs;
+                    if (sim.funds_warning) {
+                        // 0x0FAD3: the one full-screen warning, which waits for a click.
+                        sim.funds_warning = false;
+                        notice_return = screen;
+                        screen = Screen::Notice;
+                        time_running = false;
+                    }
                     if (sim.dismissed) {
                         sim.dismissed = false;
                         ending_caesar = false;
@@ -1438,6 +1540,32 @@ int main(int argc, char** argv) {
             }
             if (save_mode && screen == Screen::City)
                 ui::render_strip(screen_tabs, 0, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+            if (save_mode && message_visible()) {
+                // 0x279AC: the message's two 28-character lines. The original
+                // draws them at (16, 14) and (16, 30); here they sit below the
+                // screen strip.
+                const std::string& t = sim.messages.current.text;
+                const std::string line1 = t.substr(0, std::min<size_t>(28, t.size()));
+                const std::string line2 = t.size() > 28 ? t.substr(28) : std::string();
+                for (int y = kMessageBox.y; y < kMessageBox.y + kMessageBox.h; ++y) {
+                    for (int x = kMessageBox.x; x < kMessageBox.x + kMessageBox.w; ++x) {
+                        const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
+                        const bool edge = y == kMessageBox.y || x == kMessageBox.x ||
+                                          y == kMessageBox.y + kMessageBox.h - 1 || x == kMessageBox.x + kMessageBox.w - 1;
+                        frame[i] = edge ? 140 : 58;
+                        frame[i + 1] = edge ? 132 : 55;
+                        frame[i + 2] = edge ? 100 : 40;
+                    }
+                }
+                for (const auto& [line, y] : {std::pair<const std::string&, int>{line1, kMessageBox.y + 3},
+                                              std::pair<const std::string&, int>{line2, kMessageBox.y + 15}}) {
+                    if (font)
+                        ui::draw_game_text(frame, kLogicalW, kLogicalH, kMessageBox.x + 4, y, line.c_str(), 1, *font);
+                    else
+                        ui::draw_text(frame, kLogicalW, kLogicalH, kMessageBox.x + 4, y, line.c_str(), 1,
+                                      formats::RGB{232, 226, 200});
+                }
+            }
             window.present_rgb24(frame);
             if (quit_requested) running = false;
             ++frame_count;

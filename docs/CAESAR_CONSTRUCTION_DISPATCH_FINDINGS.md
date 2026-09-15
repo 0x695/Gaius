@@ -1439,3 +1439,67 @@ Three 32 × 10 frames: a column's capital, shaft and base. The ratings advisor d
 - **`.XMI`/`.XM2`** is Miles Extended MIDI, also published. `formats::xmi` converts all 28 files to Standard MIDI at 120 ticks a second.
 - **The international build's `.MDI` files** are not those files converted (correcting `docs/CAESAR_GOG_BUILD_FINDINGS.md` section 7's "same music, different container"). They are re-orchestrated for General MIDI: drums moved from channel 9 to other channels and pitches, channels renumbered, velocities changed. Some are also renamed: the US `CZARJIN1` is the international `CZARJIN2`. What survives is the note count and the timing. Every note onset of the US `CZARJIN1`, `6`, `A` and `B` lands within 0.017 quarter notes of the matching `.MDI`'s, which confirms the 120-ticks-a-second conversion (`test_xmi_matches_mdi`).
 - **Playing either** needs an audio path Gaius doesn't have yet (Phase 9).
+
+
+## 35. Messages, the game speed, and the last unnamed words (2026-09-15)
+
+`systems::messages` and `systems::month::run_frame` implement the first two; the third names every saved word the code hadn't used.
+
+### 35.1 Messages
+
+**The board.** One message shows at a time:
+
+- A poster stores the text's far pointer in `DS:0x6C74` and starts the 80-frame timer `DS:0x6C7A`, but only while that timer is 0, so a message posted during another is lost.
+- Posters with a place set `DS:0x6C72` = 1 and `DS:0x6C70` (0 city, 1 province map), and keep the cell less 10 and 5 in `DS:0x6C6E`/`0x6C6C`.
+- The display routine `0x279AC` runs each frame while the messages option `DS:0x6C78` is on (a new game sets it, `0x0F74F`). It plays sound 6 on the first frame, draws the text's two 28-character lines at (16, 14) and (16, 30), counts the timer down, and forgets the place at 0.
+- A left click on the message area (x < 256, y < 48) with a place (`0x0F982`) switches to its view, scrolls it there and ends the message; a right click (`0x0F93A`) dismisses it.
+
+**The posters:**
+
+| Routine | Kind | Callers and texts |
+|---|---|---|
+| `0x27A54` | city place | `0x2D908` "Barbarians are entering the city" (the invader's entry cell); `0x2DC4B` "There is unrest in parts of the city" (a rioter's house) |
+| `0x27A91` | province place | `0x24CE5` "approaching your roads", `0x24D42` "... highway", `0x24E22` "... towns" (the army's cell) |
+| `0x27ACE` | plain | the population milestones; `0x284DA` "Your salary has been stopped"; `0x11C8F` "You must allocate more Plebs to construction work"; `0x14E1D`/`0x15252`/`0x15482` "no need for another forum/factory/fort"; `0x2E15E` "The provinces need more workers for maintenance" (timer then set to 79); `0x0F7D3` "13 BC - and as yet you have no city to govern !!." (timer then 78) |
+| `0x27AF3` | tribute | by the missed count `DS:0x6BB8`: unpaid, again, the arrest |
+| `0x27B3C` | province place | "Barbarians sighted." with characters 7-22 replaced by the province's 16-character name field |
+| `0x27BA1` | milestones | at step 80: population above 200, 1000, 2000, 4000, 8000, 12000, 16000, 20000, each once (`table_10`), the flag set whether or not the message shows |
+| `0x27CBA`, `0x27D58`, `0x27D09` | limited | road wear, collapse and fire (`0x2C4EA`, `0x2C525`, `0x2C54E`), each counting down its saved word `DS:0x6C66`/`0x6C68`/`0x6C6A` and posting at 0 (then 5): one in five |
+
+- **When they fire.** An army's road message fires when the draw's low 7 bits are 0x15-0x18, within the wreck's 0x15-0x1F. Its highway message comes with every highway wreck (0x19-0x1F), and its towns message with every pillage.
+- **The funds warning.** `0x0FAD3`, every frame: with the funds at or below 1000 and `DS:0x6BE6` clear, it sets the flag and shows the full-screen warning `0x084B1` (six lines at `DS:0x085F`), waiting for a click. It comes once a game.
+- **The texts** are loaded as far pointers by `0x277xx` into `DS:0x6E2A`-`0x6EFE`. There are more of them -- the file dialogs, the Cohort disk prompts, the industry report -- used by screens Gaius draws its own way. `DS:0x6ECE` "You have insufficient funds for construction work" is stored but never posted.
+- **Checked** by `test_messages_and_speed`: the board's rules, one in five, the milestones, the sighted substitution, the tribute count and the funds warning.
+- **Not modeled:** the sounds.
+
+### 35.2 The game speed
+
+The main loop `0x0FA13`, once a frame:
+
+1. steps the phase `DS:0x6DE3` (it becomes the old value + 1, or 0 after 10);
+2. draws a random number;
+3. asks the speed gate `0x0FAA2`, which reads byte `3496:0000`[`DS:0x5292` / 10 × 10 + phase] -- eleven rows of ten, from speed 0 (all 0) to speed 100 (all 1). Row k passes k of phases 0-9, and phase 10 reads the next row's first byte, so even speed 0 passes once in eleven frames;
+4. a frame that passes runs the frame counters, the walkers and a step;
+5. every frame runs the displays -- among them the message timer and the funds warning.
+
+The speed `DS:0x5292` moves in tens between 0 and 100 on the options screen (`0x0F204`/`0x0F217`). It lies outside the save, in the uninitialized data, so it comes from `csr0.dat` or the options.
+
+`month::run_frame` is this frame, and at speed 100 it is exactly `run_step`. Eleven frames at speed 50 run six steps and draw eleven times (`test_messages_and_speed`). `gaius_viewer` now runs frames, with the speed on the governor's page (`--speed`).
+
+### 35.3 The saved words that had no name
+
+| Words | Writer and reader | Name |
+|---|---|---|
+| `DS:0x6CBE`-`0x6CE2` | written by `0x23493`-`0x2357D`, read back by `0x23272` | the battle handed to the separate Cohort 2 program (section 27): a flag `0x6CE2`, the Cohort's and army's slots `0x6CDC`/`0x6CDE`, their Centuries and morale `0x6CCC`-`0x6CD8`, number `0x6CDA`, army sizes `0x6CC6`/`0x6CC8`, the race `0x6CCA`, year `0x6CC4`, month `0x6CC2`, province `0x6CC0`, and `0x6CBE` from `DS:0x6DE7`. `0x6CBC` is never read or written |
+| `DS:0x6CB6`, `0x6CB4` | `0x066C9` clamps them to 0-80 and 0-89 | the city view's scroll column and row |
+| `DS:0x6CB2`, `0x6CB0` | `0x066FE`, 0-20 and 0-29 | the province view's (section 32.3) |
+| `DS:0x6CAE` | | the view: 0 city, 1 province |
+| `DS:0x6CAC` | `0x06369`: with 0 the pointer doesn't scroll the view; toggled by `0x0FB6C` | the original's command / scroll mode |
+| `DS:0x6CAA` | `0x06369` narrows the scroll limits by 16 px per step, 0-6; the toolbar handlers set it | the build cursor's size (STRONG INFERENCE) |
+| `DS:0x6CA8` | the Fort and Cohort order handlers (`0x1578B`-`0x15C89`) set 1 and 2 | how far an order's clicks have got |
+| `DS:0x6C7C` | set to 80 by the calendar (`0x29498`), counted down by `0x278A8` | the new year's banner timer |
+| `DS:0x6C78` | `0x279AC`; copied from and to `DS:0x0620` by the loader and options | the messages option |
+| `DS:0x6C66`, `0x6C68`, `0x6C6A` | 35.1 | the message rate counters |
+| `DS:0x6C6C`, `0x6C6E` (not saved), `0x6C70`, `0x6C72` | 35.1 | the message's place |
+| `DS:0x6BE6` | `0x0FAD3` | the funds warning given |
+| `DS:0x6BDC` | nothing | unused |

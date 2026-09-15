@@ -56,7 +56,8 @@
 // (10), 0x6C12 type 13 (10). Cell layer 7BB4 bit 0x40 marks a cell a walker
 // stands on.
 //
-// Not modeled: sounds (0x32434) and messages (0x27A54) the spawns trigger.
+// Not modeled: the sounds (0x32434) the spawns trigger. Their messages (0x27A54)
+// are posted by systems::month (systems/messages.hpp).
 
 #pragma once
 
@@ -133,7 +134,7 @@ void run_spawners(model::CityState& state, const month::Random& random, int step
 
 // 0x2DB49's tail: a house whose land value passed its limit collapsed at
 // (x, y); a rioter comes out of it heading south, and DS:0x6C3C drops by 2.
-void spawn_rioter(model::CityState& state, int x, int y);
+int spawn_rioter(model::CityState& state, int x, int y);  // the slot, or -1
 
 // 0x2D19A + 0x2CE7C's formula: a workshop record's production level, 0-7.
 // Exposed for tests; run_spawners applies it.

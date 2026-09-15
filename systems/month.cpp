@@ -89,7 +89,11 @@ void finish_scans(SimState& sim, model::CityState* state) {
         // wears away the road last month's fourth roll picked, then the plebs --
         // needs, welfare, assignment -- and the event thresholds their
         // coverage sets for the rolls below.
-        province::monthly_pass(*state, sim.province_wear_counter);
+        if (province::monthly_pass(*state, sim.province_wear_counter) && sim.province_wear_counter == 0) {
+            // 0x2E15E: the message, then its timer set to 79 frames either way.
+            sim.messages.post(messages::plain(messages::Id::ProvinceWorkers));
+            sim.messages.timer = 0x4F;
+        }
         const int construction_need = plebs::set_needs(*state, sim.difficulty);
         plebs::pay_welfare(*state);
         plebs::assign(*state);
@@ -117,10 +121,19 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
     if (state) {
         province::Hooks hooks;
         hooks.battle = sim.on_battle;
+        hooks.message = [&sim](const messages::Message& m) { sim.messages.post(m); };
         actors::update(*state, sim.random, sim.ticks, &hooks);
         // 0x2936B: the step starts with the army spawner when the 18-month
         // counter has wrapped (DS:0x6D97).
-        if (sim.army_spawn_pending) province::spawn_army(*state, sim.random, sim.difficulty);
+        if (sim.army_spawn_pending) {
+            const int army = province::spawn_army(*state, sim.random, sim.difficulty);
+            if (army >= 0) {
+                // 0x2D88A: "Barbarians sighted" in the province, at the army's cell.
+                const model::Actor& a = state->objects[static_cast<size_t>(army)];
+                sim.messages.post(messages::sighted(model::global_word(*state, 0x6CA6), a.screen_x() >> 4,
+                                                    a.screen_y() >> 4));
+            }
+        }
     }
     sim.army_spawn_pending = false;
 
@@ -142,8 +155,14 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
         if (state) {
             // The engine spawns each rioter inside the row; nothing in the row
             // reads the actor table, so spawning after it is the same.
-            for (const auto& [x, y] : collapsed) actors::spawn_rioter(*state, x, y);
+            for (const auto& [x, y] : collapsed) {
+                // 0x2DC4B: "There is unrest in parts of the city", at the house.
+                if (actors::spawn_rioter(*state, x, y) >= 0)
+                    sim.messages.post(messages::at(messages::Id::Unrest, messages::Place::City, x, y));
+            }
             actors::run_spawners(*state, sim.random, step);
+            // 0x2CD18: the population milestones, in step 80's row routine.
+            if (step == kDrawStep) messages::check_milestones(*state, sim.messages);
         }
         if (step == kDrawStep) {
             // 0x2E209: a draw, then the province's towns and the highway.
@@ -162,12 +181,25 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
     } else if (step <= 105) {
         if (step == 102) service::reset_scan_counters(sim.service);
         sim.service.on_event = [&](service::CityEvent event, int x, int y) {
-            if (event == service::CityEvent::Collapse) {
+            // 0x2C4EA / 0x2C525 / 0x2C54E: the event, then its message, one in
+            // five (systems::messages::post_limited).
+            namespace msg = messages;
+            if (event == service::CityEvent::RoadWear) {
+                if (state)
+                    msg::post_limited(*state, sim.messages, msg::kRoadWearCounter,
+                                      msg::at(msg::Id::RoadMaintenance, msg::Place::City, x, y));
+            } else if (event == service::CityEvent::Collapse) {
                 if (state) construction::demolish(*state, sim.random, x, y);
                 else construction::demolish(city, sim.random, x, y);
+                if (state)
+                    msg::post_limited(*state, sim.messages, msg::kCollapseCounter,
+                                      msg::at(msg::Id::BuildingMaintenance, msg::Place::City, x, y));
             } else {
                 if (state) construction::burn(*state, sim.random, x, y);
                 else construction::burn(city, sim.random, x, y);
+                if (state)
+                    msg::post_limited(*state, sim.messages, msg::kFireCounter,
+                                      msg::at(msg::Id::FirePrevention, msg::Place::City, x, y));
             }
         };
         const int first_row = (step - 102) * 25;
@@ -314,7 +346,11 @@ void run_step(model::CityState& state, SimState& sim) {
     // turns: the accounts, the history writes, the Legion, the ratings,
     // promotion and the yearly notice.
     if (sim.year != year_before) {
-        if (economy::run_year(state, sim.industrial_rate_sum).dismissed) sim.dismissed = true;
+        const economy::Settlement settlement = economy::run_year(state, sim.industrial_rate_sum);
+        if (settlement.dismissed) sim.dismissed = true;
+        // 0x284DA and 0x285DD, in the settlement's order.
+        if (settlement.savings_capped) sim.messages.post(messages::plain(messages::Id::SalaryStopped));
+        if (settlement.tribute_missed) messages::tribute_missed(state, sim.messages);
         record_history(state, sim.year);
         military::run_year(state);
         administration::run_ratings(state);
@@ -337,6 +373,37 @@ void run_month(model::CityState& state, SimState& sim) {
     do {
         run_step(state, sim);
     } while (sim.step != 0);
+}
+
+namespace {
+
+// 3496:0000: eleven rows of ten, speed 0 to 100, and the byte after (the
+// population table's first) that phase 10 of speed 100 reads.
+constexpr std::array<uint8_t, 111> kSpeedGate = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,  1, 0, 0, 0, 0, 0, 0, 0, 0, 0,  1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+    1, 0, 0, 1, 0, 0, 1, 0, 0, 0,  1, 0, 1, 0, 0, 1, 0, 1, 0, 0,  1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+    1, 1, 1, 0, 1, 0, 1, 0, 1, 0,  1, 1, 1, 0, 1, 1, 0, 1, 1, 0,  1, 1, 1, 1, 0, 1, 1, 1, 1, 0,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 0,  1, 1, 1, 1, 1, 1, 1, 1, 1, 1,  247};
+
+}  // namespace
+
+bool speed_gate(int speed, int phase) {
+    const int index = std::clamp(speed, 0, 100) / 10 * 10 + phase;
+    return index >= 0 && index < static_cast<int>(kSpeedGate.size()) && kSpeedGate[static_cast<size_t>(index)] != 0;
+}
+
+bool run_frame(model::CityState& state, SimState& sim) {
+    const int previous = sim.speed_phase;
+    sim.speed_phase = previous >= 10 ? 0 : previous + 1;
+    const bool step = speed_gate(sim.speed, sim.speed_phase);
+    if (step) {
+        run_step(state, sim);
+    } else {
+        sim.random.advance();
+    }
+    if (model::global_word(state, 0x6C78) != 0) sim.messages.tick();
+    if (messages::funds_warning(state)) sim.funds_warning = true;
+    return step;
 }
 
 }  // namespace gaius::systems::month

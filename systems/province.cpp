@@ -204,7 +204,12 @@ void stop_here(Rec& a) {
 }
 
 // 0x24B66
-void march(CityState& s, const month::Random& random, int slot, Rec& a) {
+void march(CityState& s, const month::Random& random, int slot, Rec& a, const Hooks* hooks) {
+    // The army's messages name its cell (0x24CB3: x / 16, y / 16).
+    const auto post = [&](messages::Id id) {
+        if (hooks && hooks->message)
+            hooks->message(messages::at(id, messages::Place::Province, a.w(kX) / 16, a.w(kY) / 16));
+    };
     walk(s, slot, a.sb(kType) == kSeaArmyType ? kSeaClass : kLandClass);
     if (a.b(kStatus) & kStopped) {
         if ((map_cell(s, a.w(kCell)) & 0x7F) != kCityTile) {
@@ -213,7 +218,12 @@ void march(CityState& s, const month::Random& random, int slot, Rec& a) {
         }
         const int from = random.low7 & 7;  // DS:0x6DA7
         actors::release(s, slot);
-        invade_city(s, from);
+        const int invader = invade_city(s, from);
+        if (invader >= 0 && hooks && hooks->message) {
+            // 0x2D908: at the entry cell, where the invader stands.
+            const int cell = s.objects[static_cast<size_t>(invader)].packed_xy();
+            hooks->message(messages::at(messages::Id::BarbariansEntering, messages::Place::City, cell % 100, cell / 100));
+        }
         int peace = model::global_word(s, kPeaceRating);
         peace -= model::global_word(s, 0x6C30) == 1 ? 4 : 10;
         model::set_global_word(s, kPeaceRating, peace < 0 ? 0 : peace);
@@ -230,13 +240,20 @@ void march(CityState& s, const month::Random& random, int slot, Rec& a) {
         case 2: wreck = low7 == 0x21; break;
         case 4: wreck = low7 >= 0x0B && low7 <= 0x0D; break;
         case 8: wreck = low7 >= 0x15 && low7 <= 0x1F; break;
-        case 0x10:  // 0x24D44: a town is pillaged one grade (message 0x6E7E)
+        case 0x10:  // 0x24D44: a town is pillaged one grade, and message 0x6E7E
             if (cell == 0x79) cell = 0x61;
             if (cell == 0x7A) cell = 0x79;
             if (cell == 0x4C) cell = 0x7A;
+            post(messages::Id::ApproachingTowns);
             return;
-        case 0x20: wreck = low7 >= 0x15 && low7 <= 0x1F; break;  // message 0x6E7A at 0x15-0x18
-        case 0x40: wreck = low7 >= 0x19 && low7 <= 0x1F; break;  // message 0x6E76
+        case 0x20:  // 0x24C7C: message 0x6E7A at 0x15-0x18, then the wreck
+            wreck = low7 >= 0x15 && low7 <= 0x1F;
+            if (low7 >= 0x15 && low7 <= 0x18) post(messages::Id::ApproachingRoads);
+            break;
+        case 0x40:  // 0x24CF3: message 0x6E76, then the wreck
+            wreck = low7 >= 0x19 && low7 <= 0x1F;
+            if (wreck) post(messages::Id::ApproachingHighway);
+            break;
         default: return;
     }
     if (wreck) cell = 0x1D;
@@ -245,7 +262,7 @@ void march(CityState& s, const month::Random& random, int slot, Rec& a) {
 void run_state(CityState& s, month::Random& random, int slot, Rec& a, const Hooks* hooks) {
     switch (a.sb(kState)) {
         case 2: actors::release(s, slot); break;
-        case kMarch: march(s, random, slot, a); break;
+        case kMarch: march(s, random, slot, a, hooks); break;
         case kHalt:
         case kGoHome:
             walk(s, slot, kLandClass);
@@ -573,7 +590,8 @@ bool monthly_pass(CityState& s, int& counter) {
             if (++roads == target) {
                 cell = 0x1D;
                 worn = true;
-                if (counter == 0) model::set_global_word(s, 0x6C7A, 0x4F);  // message 0x6E72, sound 0x11
+                // With counter 0 the engine posts message 0x6E72 (sound 0x11)
+                // and sets its timer to 79 frames; systems::month posts it.
             }
         }
         if ((cell >= 0x36 && cell <= 0x37) || (cell >= 0x6D && cell <= 0x6E)) ++score;

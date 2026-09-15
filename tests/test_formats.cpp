@@ -3775,6 +3775,72 @@ void test_screen_data() {
     CHECK(on_screen);
 }
 
+void test_messages_and_speed() {
+    std::printf("test_messages_and_speed (0x27A54-0x27D58 posters, 0x279AC timer, 0x27BA1, 0x0FAA2 speed gate, 0x0FA13 frame)\n");
+    using namespace gaius::systems;
+    using messages::Id;
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+
+    // One message at a time, for 80 frames.
+    messages::Board board;
+    CHECK(board.post(messages::plain(Id::Unrest)) && board.timer == 80);
+    CHECK(!board.post(messages::plain(Id::FirePrevention)) && board.current.id == Id::Unrest);
+    for (int i = 0; i < 80; ++i) board.tick();
+    CHECK(!board.showing() && board.post(messages::plain(Id::FirePrevention)));
+
+    // The limited posters: one in five.
+    messages::Board limited;
+    int posted = 0;
+    for (int i = 0; i < 5; ++i) {
+        limited.timer = 0;
+        if (messages::post_limited(*st, limited, messages::kFireCounter, messages::plain(Id::FirePrevention))) ++posted;
+    }
+    CHECK(posted == 1 && global_word(*st, messages::kFireCounter) == 1);
+    limited.timer = 0;
+    CHECK(messages::post_limited(*st, limited, messages::kFireCounter, messages::plain(Id::FirePrevention)) &&
+          global_word(*st, messages::kFireCounter) == 5);
+
+    // "Barbarians sighted" names the province in its first line.
+    const messages::Message sighted = messages::sighted(0, 3, 4);
+    CHECK(sighted.text.substr(7, 16) == "    Sicilia     " && sighted.place == messages::Place::Province &&
+          sighted.text.size() == 54 && sighted.x == 3 && sighted.y == 4);
+
+    // Milestones set their flags even when the message can't show.
+    set_global_word(*st, 0x6C0E, 1500);
+    messages::Board milestones;
+    messages::check_milestones(*st, milestones);
+    CHECK(st->table_10[0] == 1 && st->table_10[1] == 1 && st->table_10[2] == 0 &&
+          milestones.current.id == Id::Population200);
+
+    set_global_word(*st, 0x6BB8, 2);
+    messages::Board tribute;
+    messages::tribute_missed(*st, tribute);
+    CHECK(tribute.current.id == Id::TributeAgain);
+
+    set_global_word(*st, 0x6CA2, 900);
+    CHECK(messages::funds_warning(*st) && !messages::funds_warning(*st));
+
+    // The speed gate: speed s passes s / 10 of phases 0-9; phase 10 reads the
+    // next row's first byte, so even speed 0 steps once in eleven frames.
+    bool rows = true;
+    for (int speed = 0; speed <= 100; speed += 10) {
+        int n = 0;
+        for (int p = 0; p < 10; ++p) n += month::speed_gate(speed, p) ? 1 : 0;
+        rows = rows && n == speed / 10;
+    }
+    CHECK(rows && month::speed_gate(0, 10) && month::speed_gate(100, 10));
+
+    // Eleven frames at speed 50 run six steps and draw eleven times.
+    auto city = std::make_unique<CityState>(gaius::model::blank_state());
+    month::SimState sim = month::sim_state_from_save(*city);
+    sim.speed = 50;
+    month::Random expected = sim.random;
+    int steps = 0;
+    for (int f = 0; f < 11; ++f) steps += month::run_frame(*city, sim) ? 1 : 0;
+    for (int f = 0; f < 11; ++f) expected.advance();
+    CHECK(steps == 6 && sim.step == 6 && sim.random.walk == expected.walk && sim.random.lfsr == expected.lfsr);
+}
+
 void test_campaign_start_province() {
     std::printf("test_campaign_start_province (0x5730 reset, 0x621F Prima Cohors, 0x6307 highway, 0x56B8 new game)\n");
     using namespace gaius::systems;
@@ -5116,6 +5182,7 @@ int main() {
     test_campaign_terrain_matches_saves();
     test_campaign_start_province();
     test_forum_controls();
+    test_messages_and_speed();
     test_save_write_round_trip();
     test_vas_animations();
     test_voc_sounds();

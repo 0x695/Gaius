@@ -102,12 +102,11 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 - [x] **Actor table** — `model::Actor` wraps the 50-byte record (every field laid out in `systems/actors.hpp`, dispatch findings section 20); `coord_space()` splits city types (< 11, `row*100+col`) from province types. For city actors use `packed_xy`: `raw_x/raw_y` hold the walker's destination.
 
 **Open**
-- [ ] **What some global words mean to the player** — a few words are read and written correctly but not yet named.
+- [x] **What every global word means** (2026-09-15, dispatch findings section 35.3) — the last unnamed ones: the Cohort 2 battle hand-over, the views' scroll and mode, the build cursor, the messages option and board, the funds warning; `0x6BDC` is unused.
 
 **Deliverable:** a save editor's backend — load, inspect every field, re-save byte-identical. **Met**; `save_inspect` prints blocks, global words with their DS addresses (`formats::save::kGlobalWordDsAddress`) and actors.
 
-**RE blockers (soft — fidelity, not the round trip):**
-- **The save loader** isn't fully read. Its read order matches the writer's, and it rebuilds `DS:0x6BFE` (2026-09-14, dispatch findings section 25.2); what else it does after reading isn't traced. Tracked in Phase 8.
+**RE blockers:** none. The save loader was read in Phase 8 (dispatch findings section 33.1): it reads exactly the writer's records, then rebuilds `DS:0x6BFE`, resets the coverage ceiling and copies the messages option.
 
 <details>
 <summary>History</summary>
@@ -224,11 +223,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 - **Needs new saves**
   - A walker's path, and the random draws' timing. Saves don't carry the generator's state; checking needs it, or an event (a fire, a collapse) caught between two saves.
-- **Simulation**
-  - The random draws on frames between steps at slower game speeds (Gaius draws once per step).
-  - Every routine the calendar calls is transcribed (Phases 6-7). What starting a new province does is Phase 7.
-- **Save model**
-  - What the loader does after reading, beyond rebuilding `DS:0x6BFE`.
+- **Closed since:** the random draws on frames between steps (the speed gate, `month::run_frame`, dispatch findings section 35.2); the game's messages (`systems::messages`, 35.1); every routine the calendar calls (Phases 6-7); what the loader does after reading (33.1); the record tables demolition updates (`construction::remove_forum` and its siblings).
 - **Build mode**
   - A touch drag gesture for roads and walls.
 - **Platform**

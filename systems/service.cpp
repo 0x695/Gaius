@@ -239,6 +239,7 @@ void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y) {
         if (++service.road_count == service.road_wear_target) {
             city.tile[y][x] = 0x1D;  // 0x2C4EA
             city.operational_state[y][x] = 0;
+            if (service.on_event) service.on_event(CityEvent::RoadWear, x, y);  // its message, 0x27CBA
             service.road_wear_target = -1;
             return;
         }

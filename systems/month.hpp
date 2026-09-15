@@ -37,7 +37,7 @@
 // five more times a month in the steps above (step 80, four at step 105).
 // At the fastest speed every frame is a step (row 10 of the speed gate at
 // 3496:0000 passes every frame); at slower speeds the frames between steps
-// draw too, which Gaius doesn't model -- it draws once per step. The
+// draw too, which run_frame models (run_step alone draws once per step). The
 // generator's state isn't in the save and is also advanced by terrain
 // generation and UI screens, so a real session's sequence can't be
 // recovered; Gaius starts it from the values in the executable image.
@@ -48,6 +48,7 @@
 #include <functional>
 
 #include "model/city_state.hpp"
+#include "systems/messages.hpp"
 #include "systems/service.hpp"
 
 namespace gaius::systems::month {
@@ -118,6 +119,15 @@ struct SimState {
     // tribute in a row (economy::Settlement::dismissed, DS:0x6D6A = 0x3C, the
     // game's end). The caller clears it.
     bool dismissed = false;
+    // The message along the top of the view (systems::messages): posted by the
+    // events a step runs, counted down by run_frame.
+    messages::Board messages;
+    // Set when run_frame gives the funds warning (0x0FAD3); the caller clears it.
+    bool funds_warning = false;
+    // DS:0x5292, the game speed, 0-100 in tens (the options screen's arrows,
+    // 0x0F204/0x0F217), and DS:0x6DE3, the frame's phase in the speed gate.
+    int speed = 100;
+    int speed_phase = 0;
     Random random;
     service::ServiceState service;
 };
@@ -165,5 +175,18 @@ void run_economy(model::CityState& state);
 // sections 22, 25 and 26).
 void run_step(model::CityState& state, SimState& sim);
 void run_month(model::CityState& state, SimState& sim);
+
+// 0x0FAA2, the speed gate: whether a frame of phase `phase` (0-10) at `speed`
+// runs a step -- 3496:0000[speed / 10 x 10 + phase], an 11-row table from never
+// (speed 0) to every frame (100). Phase 10 reads the next row's first byte.
+bool speed_gate(int speed, int phase);
+
+// One frame of the main loop (0x0FA13). The phase DS:0x6DE3 steps before the
+// gate reads it (1-10, then 0). A frame that passes runs run_step, whose first
+// act is the frame's random draw; one that doesn't only draws. Every frame then
+// counts the message down (0x279AC, while the messages option DS:0x6C78 is on)
+// and checks the funds warning (0x0FAD3). At speed 100 every frame is a step,
+// which is what run_step alone models. Returns whether a step ran.
+bool run_frame(model::CityState& state, SimState& sim);
 
 }  // namespace gaius::systems::month

@@ -99,7 +99,7 @@ inline const std::array<C9D4BitInfo, 8> kC9D4BitTable = {{
 
 // Runtime-only per-tick state -- not part of model::CityState or the save.
 // The two events a building handler can hand to its caller (see ServiceState).
-enum class CityEvent { Collapse, Fire };
+enum class CityEvent { Collapse, Fire, RoadWear };  // RoadWear: after the road at the cell became grass (0x2C4EA)
 
 struct ServiceState {
     ServiceState();

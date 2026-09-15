@@ -103,6 +103,7 @@ add_library(gaius_systems STATIC
   systems/administration.cpp
   systems/campaign.cpp
   systems/forum.cpp
+  systems/messages.cpp
 )
 target_link_libraries(gaius_systems PUBLIC gaius_model)
 

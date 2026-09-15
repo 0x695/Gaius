@@ -344,6 +344,7 @@ void generate_city(model::CityMap& city, month::Random& random, int& shore_varia
 }
 
 int begin_new_game(model::CityState& state, month::Random& random, int funding_level, int difficulty) {
+    set(state, 0x6C78, 1);  // 0x0F74F: the messages option on
     new_game(state, random);
     funding_level = std::clamp(funding_level, 0, static_cast<int>(kStartingFunding.size()) - 1);
     set(state, 0x6CBA, funding_level);
