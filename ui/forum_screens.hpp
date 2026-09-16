@@ -58,6 +58,17 @@ formats::IndexedImage load_governor_picture(const std::string& asset_dir);
 formats::IndexedImage compose_governor_screen(const model::CityState& state, const InterfaceArt& art,
                                               const formats::IndexedImage& picture);
 
+// The governor screen's three dialogs, each drawn over it: the promotion
+// requirements (0x0BE7C, button (18, 2)), the salary (0x0C06A, (18, 8)) and
+// the donation (0x0C17D, (18, 10)). A right click (DS:0x6D4C) ends each; a
+// donation is paid when its dialog ends (0x0C26E, economy::donate_savings).
+enum class GovernorDialog { None, Requirements, Salary, Donation };
+formats::IndexedImage compose_governor_dialog(const model::CityState& state, const InterfaceArt& art,
+                                              const formats::IndexedImage& picture, GovernorDialog dialog);
+// The salary and donation dialogs' two buttons (DS:0x0144, DS:0x0124): the up
+// arrow at cell (12, 6) gives +1, the down arrow at (13, 6) -1, elsewhere 0.
+int governor_dialog_arrow(GovernorDialog dialog, int x, int y);
+
 // 0x084B1: the funds warning -- a 20 x 12 panel and the six lines at
 // DS:0x085F in FONT1 from x 0.
 formats::IndexedImage compose_funds_warning_screen(const InterfaceArt& art);

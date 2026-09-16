@@ -370,7 +370,13 @@ int main(int argc, char** argv) {
     bool have_ratings_art = false;
     formats::IndexedImage governor_picture;  // C_VITAE.VPX
     bool have_governor_picture = false;
-    bool governor_details = false;  // the governor's arrows page, reached from the original screen
+    ui::GovernorDialog governor_dialog = ui::GovernorDialog::None;  // open over the governor's screen
+    // Ending a governor dialog; the donation's pays out (0x0C26E).
+    const auto close_governor_dialog = [&] {
+        if (governor_dialog == ui::GovernorDialog::Donation)
+            systems::economy::donate_savings(state, model::global_word(state, 0x6C28));
+        governor_dialog = ui::GovernorDialog::None;
+    };
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -801,7 +807,7 @@ int main(int argc, char** argv) {
         return screen == Screen::Forum && have_interface_art &&
                (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry || forum_tab == viewer::kTreasurer ||
                 forum_tab == viewer::kTribune || (forum_tab == viewer::kRatings && have_ratings_art) ||
-                (forum_tab == viewer::kGovernor && have_governor_picture && !governor_details) ||
+                (forum_tab == viewer::kGovernor && have_governor_picture) ||
                 (forum_tab == viewer::kLegion && have_province_sprites));
     };
     const auto page_screen = [&]() {
@@ -904,7 +910,7 @@ int main(int argc, char** argv) {
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
             if (forum_tab != tab_before) {
                 rating_hint = 0;
-                governor_details = false;
+                governor_dialog = ui::GovernorDialog::None;
             }
             if (action == viewer::kActionRankUp || action == viewer::kActionRankDown)
                 sim.difficulty = model::global_word(state, systems::forum::kDifficulty);
@@ -1197,6 +1203,21 @@ int main(int argc, char** argv) {
             province_drag_x = province_drag_y = -1;
             drag_undo.clear();
             drag_refund = 0;
+            if (original_forum_screen() && governor_dialog != ui::GovernorDialog::None) {
+                // A governor dialog: its arrows (DS:0x0144 / 0x0124), or any
+                // other click ends it (the original ends it on a right-click).
+                const int arrow = ui::governor_dialog_arrow(governor_dialog, lx, ly);
+                if (arrow != 0) {
+                    systems::forum::adjust(state,
+                                           governor_dialog == ui::GovernorDialog::Salary
+                                               ? systems::forum::Control::Salary
+                                               : systems::forum::Control::Donation,
+                                           arrow);
+                } else {
+                    close_governor_dialog();
+                }
+                return;
+            }
             if (original_forum_screen()) {
                 // The original's advisor screens: their arrows (the
                 // Treasurer's DS:0x0404), or anything else goes back to the
@@ -1211,9 +1232,8 @@ int main(int argc, char** argv) {
                     if (cell == 12 || cell == 13 || cell == 16 || cell == 17) return;
                 }
                 if (forum_tab == viewer::kGovernor) {
-                    // DS:0x0444: the name (18, 1) and the map (18, 4). The
-                    // requirements, salary and donation buttons open Gaius's
-                    // governor page, whose arrows do the same.
+                    // DS:0x0444: the name (18, 1), the requirements (18, 2),
+                    // the map (18, 4), the salary (18, 8) and the donation (18, 10).
                     const int cx = lx / 16, cy = ly / 16;
                     if (cx == 18 && cy == 1 && have_name_art) {
                         name_entry = ui::begin_name_entry(governor_name);
@@ -1227,7 +1247,9 @@ int main(int argc, char** argv) {
                         return;
                     }
                     if (cx == 18 && (cy == 2 || cy == 8 || cy == 10)) {
-                        governor_details = true;
+                        governor_dialog = cy == 2   ? ui::GovernorDialog::Requirements
+                                          : cy == 8 ? ui::GovernorDialog::Salary
+                                                    : ui::GovernorDialog::Donation;
                         return;
                     }
                 }
@@ -1357,7 +1379,7 @@ int main(int argc, char** argv) {
                 if (tab >= 0) {
                     forum_tab = static_cast<viewer::ForumTab>(tab);
                     rating_hint = 0;
-                    governor_details = false;
+                    governor_dialog = ui::GovernorDialog::None;
                     if (forum_tab == viewer::kIndustry) systems::forum::open_industry_report(state);
                     screen = Screen::Forum;
                 }
@@ -1513,6 +1535,10 @@ int main(int argc, char** argv) {
                         }
                         if (save_mode && screen == Screen::EmpireMap) {
                             screen = Screen::Forum;
+                            break;
+                        }
+                        if (save_mode && original_forum_screen() && governor_dialog != ui::GovernorDialog::None) {
+                            close_governor_dialog();  // DS:0x6D4C
                             break;
                         }
                         if (save_mode && original_forum_screen()) {
@@ -1726,7 +1752,7 @@ int main(int argc, char** argv) {
                         : forum_tab == viewer::kRatings
                             ? ui::compose_ratings_screen(state, interface_art, ratings_art, rating_hint)
                         : forum_tab == viewer::kGovernor
-                            ? ui::compose_governor_screen(state, interface_art, governor_picture)
+                            ? ui::compose_governor_dialog(state, interface_art, governor_picture, governor_dialog)
                         : forum_tab == viewer::kLegion
                             ? ui::compose_legion_screen(state, interface_art, province_sprites.units,
                                                         static_cast<int>(sim.ticks))

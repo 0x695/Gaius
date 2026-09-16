@@ -1823,13 +1823,27 @@ Every advisor the Forum picture opens now draws the original's screen. `ui/inter
   - (18, 4) the map (37);
   - (18, 8) and (18, 10) the salary and donation dialogs.
 
-  Gaius opens its own governor page for the requirements, salary and donation.
+  The three dialogs are in section 41.4.
 
 ### 41.3 In Gaius
 
 - **Clicks.** The viewer's screens answer their buttons as the original does. Any other click, or a right-click, goes back to the Forum picture; the original leaves on a right-click only.
 - **Timing.** The ratings advice shows for 90 frames.
 - **Not modeled:**
-  - the governor's three sub-dialogs, the promotion requirements, salary and donation (Gaius's page covers what they set);
   - the pressed frames while a button is held;
   - the sounds.
+
+### 41.4 The governor's three dialogs (2026-09-16)
+
+Each is drawn over the governor's screen, twice (both pages), then waits: every frame it runs the input and page flip, and only a right click (`DS:0x6D4C`) ends it, after which `0x098AB` redraws the governor's screen. `ui::compose_governor_dialog` draws them; `test_governor_dialogs` checks that each draws only inside its panel.
+
+- **The promotion requirements** (`0x0BE7C`, button (18, 2)). A 14 x 5 panel at (0x30, 0x40). In `FONT1` at x 0x42: "demotes to" (y 0x4C), "promotes to" (0x58), "          on" (0x64), "average rating of      %" (0x70), "minimum ratings of     %" (0x7C).
+  - The ranks go at x 0xA2 through `100F:142C`, which copies a given number of characters from an offset into `DS:0x1124` and draws them up to the first NUL. Here that's 16 characters of the rank table `DS:0x7102` from (rank − 1) × 16 and (rank + 1) × 16. Neither end is guarded, so at rank 0 "demotes to" reads the 16 bytes before the table, the province toolbar's " Go to City    " (a NUL ends it), and at rank 20 "promotes to" starts on a NUL and shows nothing.
+  - The figures are `3496:01C6 + rank × 2`, the average and the minimum (`administration::kPromotion`), 4 digits in mode 1 at x 0xDA. They are the current rank's requirements.
+- **The salary** (`0x0C06A`, (18, 8)) and **the donation** (`0x0C17D`, (18, 10)). A 10 x 3 panel at (0x50, 0x50). Each frame:
+  - the buttons, `DS:0x0144` for the salary and `DS:0x0124` for the donation: the up arrow (frame 0x12, pressed 0x1B) at cell (12, 6) and the down arrow (0x13, 0x1C) at (13, 6), momentary. The salary's are `0x0C164`/`0x0C171` (0-9999), the donation's `0x0C2C3`/`0x0C2D1` (0 up to the savings `DS:0x6C2E`), as `forum::adjust` already had them;
+  - the stone under the figure, `0x0D623` 3 x 1 at (0x60, 0x60), with `DS:0x6D8B` = 2 so it repaints every frame;
+  - "Dn" (`DS:0x0C43` / `0x0C46`) at (0x9C, 0x64);
+  - the figure, `DS:0x6C2C` in 5 digits at (0x68, 0x64), or `DS:0x6C28` in 4 digits at (0x64, 0x64), mode 1.
+- **Paying the donation** (`0x0C26E`). When its dialog ends, a donation no larger than the savings leaves them and adds 90% to the treasury (`economy::donate_savings`); a larger one does nothing. The amount stays set for next time.
+- **In Gaius.** Any click that isn't an arrow ends a dialog too, so touch can leave it.

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 
+#include "systems/administration.hpp"
 #include "systems/forum.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
@@ -19,6 +20,14 @@ namespace gaius::ui {
 namespace {
 
 int g(const model::CityState& s, uint16_t ds) { return model::global_word(s, ds); }
+
+// DS:0x7102, the rank titles as 16-character fields.
+constexpr const char* kRanks[] = {
+    "    Plebian     ", "    Citizen     ", "    Equitus     ", " Taberllarius   ", "    Decurian    ",
+    "   Iuridicus    ", "   Procurator   ", "   Magistrate   ", "    Logistas    ", "   Praefectus   ",
+    "    Magister    ", " Cubicularius   ", "     Legate     ", "    Quaestor    ", "    Senator     ",
+    "    Praetor     ", "     Consul     ", "    Proconsul   ", "    Princeps    ", "    Imperator   ",
+    "     Caesar     "};
 
 }  // namespace
 
@@ -341,12 +350,6 @@ formats::IndexedImage compose_governor_screen(const model::CityState& state, con
     draw_text(img, art, Font::Font1, 0x118, 0x68, number_text(g(state, 0x6C2A), 2, 2) + "%");
     draw_text(img, art, Font::Font1, 0xB8, 0x8C, number_text(g(state, 0x6C2C), 5, 2) + " dn");
     // The rank (DS:0x7102) and province (DS:0x70F2), 16-character fields.
-    static constexpr const char* kRanks[] = {
-        "    Plebian     ", "    Citizen     ", "    Equitus     ", " Taberllarius   ", "    Decurian    ",
-        "   Iuridicus    ", "   Procurator   ", "   Magistrate   ", "    Logistas    ", "   Praefectus   ",
-        "    Magister    ", " Cubicularius   ", "     Legate     ", "    Quaestor    ", "    Senator     ",
-        "    Praetor     ", "     Consul     ", "    Proconsul   ", "    Princeps    ", "    Imperator   ",
-        "     Caesar     "};
     const int rank = g(state, 0x6C30);
     if (rank >= 0 && rank <= 20) draw_text(img, art, Font::Font1, 0x94, 0x25, kRanks[rank]);
     static constexpr const char* kProvinces[] = {
@@ -367,6 +370,67 @@ formats::IndexedImage compose_governor_screen(const model::CityState& state, con
     // 0x0BDD3, each frame: the buttons.
     for (int row : {1, 2, 4, 8, 10}) draw_block(img, art.blocks, 29, 18 * 16, row * 16);
     return img;
+}
+
+formats::IndexedImage compose_governor_dialog(const model::CityState& state, const InterfaceArt& art,
+                                              const formats::IndexedImage& picture, GovernorDialog dialog) {
+    formats::IndexedImage img = compose_governor_screen(state, art, picture);
+    const int rank = g(state, 0x6C30);
+    switch (dialog) {
+        case GovernorDialog::None: break;
+        case GovernorDialog::Requirements: {
+            // 0x0BE7C: a 14 x 5 panel at (0x30, 0x40) and the labels at x 0x42.
+            draw_panel(img, art, 0x30, 0x40, 14, 5);
+            draw_text(img, art, Font::Font1, 0x42, 0x4C, "demotes to");
+            draw_text(img, art, Font::Font1, 0x42, 0x58, "promotes to");
+            draw_text(img, art, Font::Font1, 0x42, 0x64, "          on");
+            draw_text(img, art, Font::Font1, 0x42, 0x70, "average rating of      %");
+            draw_text(img, art, Font::Font1, 0x42, 0x7C, "minimum ratings of     %");
+            // 100F:142C copies 16 characters of the rank table from (rank - 1)
+            // and (rank + 1) and draws them up to a NUL. Below the table sit
+            // the province toolbar's last words, so at rank 0 "demotes to"
+            // reads " Go to City"; past it a NUL, so Caesar promotes to nothing.
+            const auto field = [](int r) -> std::string {
+                if (r == -1) return " Go to City    ";
+                if (r < 0 || r > 20) return "";
+                return kRanks[r];
+            };
+            draw_text(img, art, Font::Font1, 0xA2, 0x4C, field(rank - 1));
+            draw_text(img, art, Font::Font1, 0xA2, 0x58, field(rank + 1));
+            // 3496:01C6 + rank * 2: the average and the minimum, 4 digits, mode 1.
+            if (rank >= 0 && rank < static_cast<int>(systems::administration::kPromotion.size())) {
+                const auto& need = systems::administration::kPromotion[static_cast<size_t>(rank)];
+                draw_number(img, art, Font::Font1, 0xDA, 0x70, need.average, 4, 1);
+                draw_number(img, art, Font::Font1, 0xDA, 0x7C, need.each, 4, 1);
+            }
+            break;
+        }
+        case GovernorDialog::Salary:
+        case GovernorDialog::Donation: {
+            // 0x0C06A / 0x0C17D: a 10 x 3 panel at (0x50, 0x50); each frame the
+            // arrows, the stone under the figure (0x0D623, 3 x 1 at (0x60, 0x60)),
+            // "Dn" (DS:0x0C43 / 0x0C46) and the figure.
+            draw_panel(img, art, 0x50, 0x50, 10, 3);
+            draw_block(img, art.blocks, 18, 12 * 16, 6 * 16);
+            draw_block(img, art.blocks, 19, 13 * 16, 6 * 16);
+            draw_stone(img, art, 0x60, 0x60, 3, 1);
+            draw_text(img, art, Font::Font1, 0x9C, 0x64, "Dn");
+            if (dialog == GovernorDialog::Salary)
+                draw_number(img, art, Font::Font1, 0x68, 0x64, g(state, 0x6C2C), 5, 1);
+            else
+                draw_number(img, art, Font::Font1, 0x64, 0x64, g(state, 0x6C28), 4, 1);
+            break;
+        }
+    }
+    return img;
+}
+
+int governor_dialog_arrow(GovernorDialog dialog, int x, int y) {
+    if (dialog != GovernorDialog::Salary && dialog != GovernorDialog::Donation) return 0;
+    if (y < 6 * 16 || y >= 7 * 16) return 0;
+    if (x >= 12 * 16 && x < 13 * 16) return 1;
+    if (x >= 13 * 16 && x < 14 * 16) return -1;
+    return 0;
 }
 
 formats::IndexedImage compose_funds_warning_screen(const InterfaceArt& art) {

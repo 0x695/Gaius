@@ -4036,6 +4036,70 @@ size_t compare_with_capture(const gaius::formats::IndexedImage& img, const Palet
     return bad;
 }
 
+void test_governor_dialogs() {
+    std::printf("test_governor_dialogs (0x0BE7C requirements, 0x0C06A salary, 0x0C17D donation)\n");
+    namespace ui = gaius::ui;
+    // The arrows, cells (12, 6) and (13, 6), in the salary and donation dialogs only.
+    CHECK(ui::governor_dialog_arrow(ui::GovernorDialog::Salary, 12 * 16, 6 * 16) == 1);
+    CHECK(ui::governor_dialog_arrow(ui::GovernorDialog::Donation, 13 * 16 + 15, 6 * 16 + 15) == -1);
+    CHECK(ui::governor_dialog_arrow(ui::GovernorDialog::Salary, 14 * 16, 6 * 16) == 0);
+    CHECK(ui::governor_dialog_arrow(ui::GovernorDialog::Requirements, 12 * 16, 6 * 16) == 0);
+
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    ui::InterfaceArt art;
+    try {
+        art = ui::load_interface_art(dir);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("interface files: ") + e.what());
+        return;
+    }
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    const gaius::formats::IndexedImage picture = ui::blank_canvas();
+    const auto outside = [](const gaius::formats::IndexedImage& a, const gaius::formats::IndexedImage& b, int x0,
+                            int y0, int w, int h) {
+        int n = 0;
+        for (int y = 0; y < static_cast<int>(a.height); ++y)
+            for (int x = 0; x < static_cast<int>(a.width); ++x) {
+                const bool inside = x >= x0 && x < x0 + w && y >= y0 && y < y0 + h;
+                const size_t i = static_cast<size_t>(y) * a.width + static_cast<size_t>(x);
+                if (!inside && a.pixels[i] != b.pixels[i]) ++n;
+            }
+        return n;
+    };
+    const gaius::formats::IndexedImage base = ui::compose_governor_screen(*st, art, picture);
+    CHECK(ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::None).pixels == base.pixels);
+    // Each dialog draws only inside its panel: 14 x 5 at (0x30, 0x40), 10 x 3 at (0x50, 0x50).
+    for (int rank : {0, 1, 20}) {
+        set_global_word(*st, 0x6C30, static_cast<int16_t>(rank));
+        const auto governor = ui::compose_governor_screen(*st, art, picture);
+        const auto req = ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Requirements);
+        CHECK(outside(req, governor, 0x30, 0x40, 14 * 16, 5 * 16) == 0);
+        CHECK(req.pixels != governor.pixels);
+    }
+    set_global_word(*st, 0x6C30, 1);
+    set_global_word(*st, 0x6C2C, 120);
+    const auto salary = ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Salary);
+    CHECK(outside(salary, ui::compose_governor_screen(*st, art, picture), 0x50, 0x50, 10 * 16, 3 * 16) == 0);
+    // Inside the panel, the figure changes only its own place, (0x68, 0x64), 5 characters.
+    set_global_word(*st, 0x6C2C, 9999);
+    const auto salary2 = ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Salary);
+    const auto moved = [&](const gaius::formats::IndexedImage& a, const gaius::formats::IndexedImage& b) {
+        int inside_panel = 0, in_figure = 0;
+        for (int y = 0x50; y < 0x80; ++y)
+            for (int x = 0x50; x < 0xF0; ++x) {
+                const size_t i = static_cast<size_t>(y) * a.width + static_cast<size_t>(x);
+                if (a.pixels[i] == b.pixels[i]) continue;
+                ++inside_panel;
+                if (x >= 0x68 && x < 0x68 + 5 * 8 && y >= 0x64 && y < 0x6C) ++in_figure;
+            }
+        return inside_panel > 0 && inside_panel == in_figure;
+    };
+    CHECK(moved(salary, salary2));
+    const auto donation = ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Donation);
+    CHECK(outside(donation, ui::compose_governor_screen(*st, art, picture), 0x50, 0x50, 10 * 16, 3 * 16) == 0);
+}
+
 void test_forum_screens_art() {
     std::printf("test_forum_screens_art (0x0ACA7 histories, 0x09D22 industry report vs captures)\n");
     std::string dir = test_assets_dir();
@@ -5744,6 +5808,7 @@ int main() {
     test_maps_screen();
     test_name_entry();
     test_forum_screens_art();
+    test_governor_dialogs();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();

@@ -21,12 +21,12 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture, a walker path check; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
 | 6 | Economy & military | **Done** | The Cohort 2 hand-over (optional) |
-| 7 | Forum, advisors, ratings | **Done** | The governor's three sub-dialogs |
+| 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3705 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3719 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
 **Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Next is Phase 9 -- an audio path for the effects and music, packaging, and the platform pass.
 
@@ -283,7 +283,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 - [x] **The Forum's screens in the original's art** (2026-09-16, findings section 41) -- the histories, Treasurer, Legion, Tribune, industry report, ratings, governor and the funds warning (`ui/forum_screens.hpp`); the four with captures match them on every pixel the capture's own city doesn't decide.
 
-**Still open, not blocking:** the governor's requirements, salary and donation dialogs (Gaius's own page covers them).
+- [x] **The governor's three dialogs** (2026-09-16, findings section 41.4) -- the promotion requirements, the salary and the donation, drawn over the governor's screen with their arrows; the donation pays when its dialog ends.
 
 ---
 
