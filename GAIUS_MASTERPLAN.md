@@ -36,14 +36,14 @@ A playable, moddable, open-source Caesar (1992) that:
 1. Loads the original game's assets (VPX/PL8/P32/256 graphics, EMPIRE2 scenarios, `EDATA.CSR`) — **never redistributed**, always supplied by the user's own legal copy.
 2. Reproduces the simulation faithfully: city tile grid, service layers (A2C4/C9D4/54A4/7BB4), housing evolution, the 70-record object/actor system, the empire-map pathfinding/route model.
 3. Can load and save the original `.SAV` format exactly (round-trip byte compatibility as a stretch goal, semantic compatibility as the baseline goal).
-4. **Runs everywhere**: Windows, Linux, macOS, Steam Deck and Android — this is a first-class goal, not a stretch platform, and it shapes early architecture decisions (see section 5a). iOS and Raspberry Pi are out of scope for 1.0 (decided 2026-09-16).
+4. **Runs everywhere**: Windows, Linux, Steam Deck and Android — this is a first-class goal, not a stretch platform, and it shapes early architecture decisions (see section 5a). macOS, iOS and Raspberry Pi are out of scope for 1.0 (decided 2026-09-16).
 5. Ships modern QoL expected of any 2020s remaster/port: arbitrary window sizes, fullscreen/borderless/windowed toggle, resolution-independent UI scaling, remappable input across mouse+keyboard/touch/gamepad, and sensible save/config file locations per platform.
 6. Is legible enough — clean modern data structures, documented systems — that IGDK or IGA contributors can pick up any subsystem without re-deriving it from the disassembly.
 7. Ships simple tooling: a collection of scripts to export the game's assets and inspect, render and check saves.
 
 Non-goals (for now): Caesar II support (different engine entirely — see IGA scope notes), touching Activision-held IP beyond what's needed for interoperability, network multiplayer, or matching 1993 performance constraints (we have vastly more headroom).
 
-Not in 1.0: iOS, Raspberry Pi, and IGDK integration (embedding API, editors, live preview).
+Not in 1.0: macOS, iOS, Raspberry Pi, and IGDK integration (embedding API, editors, live preview).
 
 ---
 
@@ -152,7 +152,7 @@ docs/
 ### Tech stack
 
 - **C++17**, matching the IGDK ecosystem for eventual embedding, plus the fact that a lot of the low-level bit-twiddling (RLE decode, packed structs) is exactly the kind of thing C++ handles cleanly and the Python prototypes (`caesar_vpx.py`, `empire2_tools.py`, `caesar_save_layout.py`) already validate the algorithms.
-- **SDL2** (SDL3 if stable enough by the time Phase 1 starts) for windowing/rendering/input — chosen specifically *because* it already has first-class backends for Windows/Linux/macOS/Android, plus a known-good track record on Steam Deck (via Proton or native Linux build). No upstream engine to embed here (unlike IGDK+Augustus) — Gaius *is* the engine, so it owns its own rendering loop and must own cross-platform concerns directly rather than inheriting them.
+- **SDL2** (SDL3 if stable enough by the time Phase 1 starts) for windowing/rendering/input — chosen specifically *because* it already has first-class backends for Windows/Linux/Android, plus a known-good track record on Steam Deck (via Proton or native Linux build). No upstream engine to embed here (unlike IGDK+Augustus) — Gaius *is* the engine, so it owns its own rendering loop and must own cross-platform concerns directly rather than inheriting them.
 - Rendering target: an internal logical-resolution framebuffer (period-accurate 320×200-style coordinate space for game logic and original sprite alignment) composited to an arbitrary physical window/display size at draw time. This is the single decision that makes resolution/windowed-mode/DPI-scaling/touch-hit-testing all tractable later instead of requiring a rewrite — see section 5a.
 - Python prototypes remain the scratch/validation layer: fastest way to test a new RE hypothesis against real files before porting to C++. Every Python tool in the corpus should eventually have a C++ equivalent in `formats/`, but the Python stays in the repo as a `tools/re/` sandbox — it's cheap to keep and useful for future RE work.
 - Data interchange for tooling: PNG for graphics (matches IGDK's Augustus-compatible PNG+assetlist convention), JSON/XML for map/scenario metadata.
@@ -168,7 +168,6 @@ Cross-platform and QoL are treated as architecture, not polish, because retrofit
 |---|---|---|
 | Windows | mouse+kb, optional gamepad | primary dev target |
 | Linux | mouse+kb, optional gamepad | primary dev target; also the Steam Deck's native OS |
-| macOS | mouse+kb, optional gamepad | incl. Apple Silicon |
 | Steam Deck | gamepad + touch, docked mouse+kb | needs a gamepad-navigable UI, not just "keyboard remapped to buttons"; Steam Input glyph awareness is a nice-to-have, not required at launch |
 | Android | touch, optional gamepad/mouse (DeX-style) | needs a genuinely touch-first control scheme for build/scroll/select, not a mouse emulation layer |
 
@@ -179,7 +178,7 @@ Cross-platform and QoL are treated as architecture, not polish, because retrofit
 3. **UI scaling.** A single scale factor (or a small number of breakpoints: phone / handheld / desktop / tv-distance) that resizes toolbar icons, text, and hit targets together — this is what makes the same UI usable on a 6" phone and a 34" monitor. Original toolbar icon sizes are a floor, not a ceiling, on touch targets.
 4. **Input abstraction.** One internal "command stream" (`select`, `secondary-action`, `drag-path`, `scroll`, `context-menu-equivalent`) that mouse+keyboard, touch, and gamepad all feed into, rather than three parallel UI implementations. The original's command-mode/scroll-mode toggle (right-click) needs an explicit touch equivalent (e.g. two-finger tap or a dedicated mode button) and gamepad equivalent (shoulder button) decided once, here, rather than per-screen later.
 5. **Performance budget for the low end.** Older Android devices are the floor. The original simulation tick operates on 100×100/40×40 byte arrays — trivially cheap by modern standards — so the actual risk is unoptimized rendering (full redraw per frame, uncompressed sprite atlases) rather than simulation logic. Budget: simulation tick negligible; rendering should target smooth performance on low-end phone GPUs via SDL2's GLES backend, with a battery/thermal-friendly capped frame rate option for mobile and Steam Deck.
-6. **Save/config paths.** Per-platform conventions from day one (`%APPDATA%`/`~/.local/share`/`~/Library/Application Support`/Android app-private storage) via `platform/paths.cpp`, so save files and settings don't need a migration story later.
+6. **Save/config paths.** Per-platform conventions from day one (`%APPDATA%`/`~/.local/share`/Android app-private storage) via `platform/paths.cpp`, so save files and settings don't need a migration story later.
 7. **Touch-first affordances**, not just "make touch technically work": drag-to-build (roads/walls/pipes) needs a touch gesture that doesn't fight with map-panning; a persistent zoom/scale control; confirm/cancel replacing the original's left-click-confirm/right-click-cancel convention in a way that's discoverable without a manual.
 
 None of this requires new reverse-engineering — it's purely an engineering/UX layer sitting on top of the Layer 2 model, so it can proceed in parallel with RE-blocked phases (see roadmap Phase 5/6 blockers).

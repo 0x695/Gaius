@@ -26,7 +26,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Tooling scripts | Not started | Everything |
 
-**1.0 scope (2026-09-16):** Windows, Linux, macOS, Steam Deck and Android, with tooling as a collection of scripts. iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
+**1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
 
 **Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3719 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
@@ -326,7 +326,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [ ] **Localization readiness** — externalize UI strings before packaging multiplies the surface.
 - [ ] **Toolbar past 2×** — a logical framebuffer that grows with the display, or a paged toolbar.
 
-**Deliverable:** installable builds for Windows, Linux, macOS, Steam Deck and Android (masterplan 5a), each with settings and no input dead ends.
+**Deliverable:** installable builds for Windows, Linux, Steam Deck and Android (masterplan 5a), each with settings and no input dead ends.
 
 **RE blockers:** none.
 

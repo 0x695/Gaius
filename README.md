@@ -10,7 +10,7 @@ This repo ships **no original game assets**, ever. Every decoder and every test 
 
 ## Building
 
-Requires CMake 3.16+, a C++17 compiler, and SDL2 development libraries (`libsdl2-dev` on Debian/Ubuntu, `sdl2` via Homebrew on macOS, etc. — needed for `gaius_viewer` and the `platform/` layer; the CLI tools and format library have no SDL2 dependency).
+Requires CMake 3.16+, a C++17 compiler, and SDL2 development libraries (`libsdl2-dev` on Debian/Ubuntu, `sdl2` via vcpkg on Windows, etc. — needed for `gaius_viewer` and the `platform/` layer; the CLI tools and format library have no SDL2 dependency).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
