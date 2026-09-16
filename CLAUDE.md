@@ -38,7 +38,7 @@ cmake --build build -j
 GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
 ```
 
-Expect 3690/3690 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
+Expect 3705/3705 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
 
 ### What's implemented
 
@@ -88,6 +88,7 @@ Addenda in `docs/` document genuine reverse-engineering work done as a side effe
 21. **Done (2026-09-16): the original battle screen** (findings section 38). `ui::BattleScreen` draws `WAR2.VPX` with the strength bars, banners (`SPRITE2X.PL8`) and figures, reads the tactic buttons by x, shows each outcome's message, plays `LOSE0001`/`WINS0001.VAS`, and has the retreat dialog; `gaius_viewer` uses it whenever the files are there (`--test-battle`). Section 38.3 corrects which sheet the Forum's panels come from: `P_BLOCKS.PL8`.
 22. **Done (2026-09-16): the original maps screen** (findings section 39). `ui::compose_maps_screen` draws the whole-city map with its six buttons (urbanization, water, administration, roads, land value, trouble areas) and legends; everything around the map matches the DOSBox capture pixel for pixel (`test_maps_screen`). `gaius_viewer`'s Maps tab uses it when the files are there. Note 39.2: the original's "land value" map reads `A2C4` (`CityMap::coverage`) and "trouble areas" reads `54A4` (`CityMap::land_value`).
 23. **Done (2026-09-16): the governor's name** (findings section 40). `ui::NameEntry` is the start screen's name dialog: an up and a down arrow for each of the 12 letters (with the original's down-arrow quirk), keyboard editing through the new `platform::CommandType::TextKey`, and the name saved as `final_state` bytes 12-23 ("  Octavian  " in every save). `gaius_viewer`'s start screen has "Choose name".
+24. **Done (2026-09-16): the Forum's screens in the original's art** (findings section 41). `ui/interface.hpp` (P_BLOCKS panels, POINTERS sprites, FONT1/MINIFONT text, `100F:17E2` numbers) and `ui/forum_screens.hpp` draw the histories, Treasurer, Legion, Tribune, industry report, ratings, governor and funds warning; the histories, Treasurer, Legion and warning match their DOSBox captures pixel for pixel (`test_forum_screens_art`). MINIFONT is always colour 0 (38.4). Naming notes: `DS:0x6C5C` is the Tribune's "Province" row though `systems::plebs` calls it `kConstruction` (41.2), and the maps' "land value" is `A2C4` (39.2).
 
 More saves remain the cheapest validation. The second session (2026-09-14) covered reservoirs, working fountains and housing grades up to `0xD2`; a third set (2026-09-14) of six saves a month or less apart validated the month itself. Some saves are written mid-month -- `CAESARXS` between steps 101 and 102, `CAESARXW` and `CAESARXQ` after houses changed -- and the corpus tests name those cases rather than skipping them.
 

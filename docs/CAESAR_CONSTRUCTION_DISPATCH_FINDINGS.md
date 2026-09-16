@@ -1758,3 +1758,78 @@ The start screen's "Choose name" button (`0x27F84`) calls it with the button rec
 ### 38.4 MINIFONT's colour (2026-09-16)
 
 The text routine `100F:1583` sends a glyph from the sheet at `54E0:C254` (`MINIFONT`) to `1F6F:292B` rather than the sprite blitter. That routine walks the glyph's 16-bit rows and plots each set bit through `2EF9:11A4` with the colour word `2EF9:0039` set to 0, so every MINIFONT text is colour 0 of the palette on screen. That is black in both `SHADE.256` and `WAR2.256`. The battle screen's figures (38.1) are black, not colour 1 as first drawn; the maps screen's legend (section 39) matched its capture this way. DEFINITIVE.
+
+
+## 41. The Forum's screens in the original's art (2026-09-16)
+
+Every advisor the Forum picture opens now draws the original's screen. `ui/interface.hpp` holds the shared primitives and `ui/forum_screens.hpp` the screens. `gaius_viewer` shows them whenever the files are present, and keeps its own pages as the fallback. Four of the screens have DOSBox captures, and all four match on every pixel that doesn't depend on the capture's unknown city or the mouse pointer (`test_forum_screens_art`).
+
+### 41.1 The shared drawing
+
+- **Blocks and sprites.** `303E:0BF0` draws a block whole; `303E:13D6` draws a sprite with colour 0 transparent.
+- **Panels.** `1F6F:1EC1` is the stone panel, `2008` the inset, `2115` plain stone, and `21ED` fills with the inset's middle (frame `0xD`). All use `P_BLOCKS.PL8` (section 38.3), with the stone pattern `3496:0718` restarting at each call.
+- **Text** (`100F:1583`). `FONT1` glyphs go through the sprite routine and advance 8 pixels; `MINIFONT` glyphs are plotted in colour 0 (38.4) and advance 6.
+- **Numbers** (`100F:17E2`: value, digits, buffer, x, y, font, mode). They write the value's last digits into the buffer and draw the whole buffer, so the text around them is the buffer's own ("      dn", "  %", "   )").
+  - Mode 0 pads with zeros.
+  - Modes 1 and 2 pad with spaces, keeping the last digit, so 0 shows as "0". Mode 1 also ends the string after the digits; mode 2 leaves the rest of the buffer.
+  - Characters at x 0x139 and beyond aren't drawn.
+- **Repainting.** A screen's stone under changing numbers (`0x0D623`) is repainted only while `DS:0x6D8B` counts down. Some screens set it every frame (the Legion's wages, the ratings' strip); others only after a click (the Treasurer's and Tribune's rates). At rest the latter's numbers sit on the panel's own stone, and the captures confirm both cases.
+
+### 41.2 The screens
+
+| Figure | Screen | Routines | Checked |
+|---|---|---|---|
+| man in blue | the histories | `0x0ACA7` (sections 36.2) | capture: 0 of 40,440 pixels outside the bars differ, and all 10 of its bars match a height exactly |
+| Treasurer | last year's accounts | `0x0A7C3` once, `0x0E6E3` each frame | capture: 0 of 59,616 outside the funds history; its 8 loss bars each match a width |
+| Military Advisor | the Legion | `0x0B151` once, `0x0E167` each frame | capture: 0 of 63,424 |
+| — | the funds warning | `0x084B1` | capture: 0 of 62,400 |
+| man in green | the industry report | `0x09D22` (36.3) | no capture |
+| Tribune | the plebs | `0x0A57A` once, `0x0E822` each frame | no capture |
+| ratings | the four columns | `0x096ED` once, `0x0CC21` each frame | no capture |
+| governor | his own affairs | `0x098AB` once, `0x0BDD3` each frame | no capture |
+
+- **The Treasurer.** A 20 x 12 panel with a 5 x 10 inset, and the accounts in `FONT1` at x 0x64 with their figures at 0x104.
+  - The funds history (`1F6F:2292`, `table_72`'s 17 records from the newest, rows 8 apart from y 0x1C) draws one-pixel columns 6 high from x 0x50. A loss goes left in colour 8, a column per 40 Dn up to 28; a gain goes right in colour 0, per 80 Dn up to 12.
+  - `0x0D361` labels each row "bc" or "ad" with the year's three digits in `MINIFONT`.
+  - The tax rates go at (0xE4, 0x14) and (0x124, 0x14), with arrows `DS:0x0404` at cells (12-13, 1) and (16-17, 1).
+  - "overall gain of" or "overall loss of" is chosen by `DS:0x6BB6`'s sign; the figure is `|DS:0x6BB4|`.
+- **The Legion.**
+  - **Once:** a 20 x 12 panel with a 16 x 5 inset; "legion" with the province number `DS:0x6CA6`; this year's and last year's regulars, irregulars and auxiliaries; the wages and conscription labels.
+  - **Each frame:** the buttons `DS:0x0094` (next Cohort (18, 2), mobilize (18, 3), previous (18, 4), wages (16-17, 9), conscription (16-17, 10)). Then the areas `1F6F:21ED` clears, and, for the Cohort numbered `DS:0x6C0A` (`0x0E54C`):
+    - "prima cohors" or its number with "cohors", its emblem and state (16-character fields);
+    - unless demobilized, its morale and Centuries in `MINIFONT` mode 0;
+    - its standard from `SPRITE2.PL8` (at `630D:0000`): frame number × 4, plus `(DS:0x6D3A >> 2) & 3` unless demobilized.
+- **The funds warning.** A 20 x 12 panel and six 40-character lines (`DS:0x085F`) in `FONT1` from x 0.
+- **The Tribune.**
+  - **Once:** the plebs and last year's, "Denarii spent on / Pleb welfare", and the duty rows at x 0x10, y 0x44-0xA4.
+  - **Each frame:** welfare at (0x100, 0x34); each duty's plebs at x 0xEA and need at 0x110; the auxiliaries `DS:0x6C5A` / 16 into "   )"; the buttons `DS:0x0494` (welfare (13-14, 3), each duty's up and down at (12-13, 5-9), and a plain block at (16, 1) whose handler just returns).
+  - **The rows' words, by label:**
+    - Construction work `DS:0x6C64` with a fixed "( 50)";
+    - Fire prevention `6C62`/`6C44`;
+    - Building upkeep `6C60`/`6C42`;
+    - Road maintenance `6C5E`/`6C40`;
+    - Province `6C5C`/`6C3E`;
+    - Army `6C5A`;
+    - Unused Plebs `6C58`.
+
+    `systems::plebs` calls `DS:0x6C5C` `kConstruction`, but the original's label for it is "Province", and its "Construction work" row shows `DS:0x6C64`. Recorded here; the code keeps its names.
+- **The ratings.** `TEMPLE.VPX` with `TEMPLE.256`.
+  - For each rating (x 0x18, 0x68, 0xBA, 0x10C), `0x0D069` stacks `TEMPLBIT.PL8` pieces up from y 0x79, 10 apart, one for every 10 points rounded up: the base (frame 2), shafts (1), and the capital (0) as the tenth.
+  - The percentages go at y 0xA0.
+  - Each frame the stone strip `0x0D623` (18 x 1 at (0x10, 0xB4)) is repainted, with the average ("      Average Rating     %", the figure at 0xC6) or the advice (36.4) at y 0xB8.
+- **The governor.** `C_VITAE.VPX` in the interface palette, and a 13 x 12 panel at (0x70, 0). On it: the name (8 px a character from (0xA4, 0x14), `0x0C373`); the rank and province (16-character fields at x 0x94); "of"; the savings into "      dn"; the Imperial favour into "  %"; the salary; the donation labels; and the five buttons `DS:0x0444`:
+  - (18, 1) the name dialog (section 40);
+  - (18, 2) the promotion requirements (`0x0BE7C`: "demotes to", "promotes to", "average rating of", "minimum ratings of");
+  - (18, 4) the map (37);
+  - (18, 8) and (18, 10) the salary and donation dialogs.
+
+  Gaius opens its own governor page for the requirements, salary and donation.
+
+### 41.3 In Gaius
+
+- **Clicks.** The viewer's screens answer their buttons as the original does. Any other click, or a right-click, goes back to the Forum picture; the original leaves on a right-click only.
+- **Timing.** The ratings advice shows for 90 frames.
+- **Not modeled:**
+  - the governor's three sub-dialogs, the promotion requirements, salary and donation (Gaius's page covers what they set);
+  - the pressed frames while a button is held;
+  - the sounds.
