@@ -24,7 +24,9 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | Not started | Everything |
-| 10 | Editor & IGDK integration | Not started | Everything |
+| 10 | Tooling scripts | Not started | Everything |
+
+**1.0 scope (2026-09-16):** Windows, Linux, macOS, Steam Deck and Android, with tooling as a collection of scripts. iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
 
 **Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3719 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
@@ -319,31 +321,33 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 **Open**
 - [ ] **Settings screen** — resolution and window mode, UI scale, input remapping, frame-rate cap, audio.
 - [ ] **Steam Deck** — gamepad-only navigation end to end, Steam Input glyphs if feasible, a Deck control layout.
-- [ ] **Android / iOS** — touch-first onboarding (masterplan 5a point 7), on-screen build and cancel controls, safe areas, store packaging (APK/AAB, IPA), storage permissions for the user's game files.
-- [ ] **Raspberry Pi** — measure frame time on Pi 4/5, confirm the GLES/KMSDRM path, document a minimum model.
+- [ ] **Android** — touch-first onboarding (masterplan 5a point 7), on-screen build and cancel controls, safe areas, packaging (APK/AAB), storage permissions for the user's game files.
 - [ ] **Save and config paths** — confirm each OS's conventions, and no collision with the original's saves.
 - [ ] **Localization readiness** — externalize UI strings before packaging multiplies the surface.
 - [ ] **Toolbar past 2×** — a logical framebuffer that grows with the display, or a paged toolbar.
 
-**Deliverable:** installable builds for every target platform (masterplan 5a), each with settings and no input dead ends.
+**Deliverable:** installable builds for Windows, Linux, macOS, Steam Deck and Android (masterplan 5a), each with settings and no input dead ends.
 
 **RE blockers:** none.
 
 ---
 
-## Phase 10 — Editor tooling & IGDK integration
+## Phase 10 — Tooling scripts
 
 **Status: Not started.**
 
-**Goal:** expose Gaius as an embeddable engine and build the editor tooling IGDK needs.
+**Goal:** simple tooling for players and modders: a collection of scripts over the command-line tools `tools/` already builds, not an editor or an embedding API.
 
 **Open**
-- [ ] **Embedding API** — stable, zero-FFI where possible (as IGDK plans for Augustus).
-- [ ] **Editors** — city/empire map, scenario, save, resource viewer: thin UI over the Layer 2 model, starting from Phase 1's viewer.
-- [ ] **Live preview hook** for IGDK's webview UI.
+- [ ] **A `scripts/` folder** — short, documented scripts, each doing one job over a user's game folder and saves.
+- [ ] **Asset export** — every picture and sprite sheet to PNG (`dump_vpx`, `dump_pl8`), the battle animations (`dump_vas`), the effects to WAV and the music to MIDI (`xmi2mid`).
+- [ ] **Saves** — inspect a save (`save_inspect`), render its city (`render_city`), compare two saves.
+- [ ] **Checks** — run the simulation checks over a folder of saves (`sim_check`, `month_check`), for anyone contributing saves.
 - [ ] **IGA entry** — document Gaius as the Caesar I engine reimplementation.
 
-**Deliverable:** Gaius usable standalone and embedded in IGDK.
+**Deliverable:** the game's files and saves inspectable and exportable from a few scripts.
+
+**Out of scope for 1.0:** IGDK integration -- an embedding API, editors, a live preview hook.
 
 ---
 
@@ -364,7 +368,7 @@ Phase 6  Economy + military                       done
 Phase 7  Forum / ratings / win-loss               done
 Phase 8  Format completeness + save loader        done
 Phase 9  Platform packaging + polish              unblocked; parallel to 6-8
-Phase 10 Editor + IGDK integration                last
+Phase 10 Tooling scripts                          last
 ```
 
 Cross-platform work (masterplan 5a) is spread across Phase 1 (foundations), Phase 5 (input parity in build mode) and Phase 9 (packaging), not saved for the end — by Phase 9, every platform should already have run real, if incomplete, gameplay many times.

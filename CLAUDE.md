@@ -28,6 +28,8 @@ This file exists so a fresh Claude Code session has full context immediately. Re
 - Android NDK toolchain: built and verified end-to-end on an emulator (`android/`, see `android/README.md`) — a real gap in the original handoff's environment, not a permanent blocker; this machine already had Android Studio/SDK installed.
 - `model::CityState` (Phase 2): typed `CityMap`/`Actor[70]`/reused `EmpireMap`; `load()`/`serialize()` round-trip byte-identical against all seventeen real saves. For a city actor's position use `packed_xy`, not `raw_x/raw_y` -- see `model/city_state.hpp`.
 
+**1.0 scope (decided 2026-09-16):** Windows, Linux, macOS, Steam Deck and Android. iOS, Raspberry Pi and IGDK integration (embedding API, editors, live preview) are out of 1.0; its tooling is a collection of scripts over `tools/` (roadmap Phase 10).
+
 Still open: the Android build only targets the `x86_64` emulator ABI, not a real device. (The other long-standing gap -- no real `.SAV` file -- closed on 2026-09-12.)
 
 Build and test to confirm the baseline before starting new work:

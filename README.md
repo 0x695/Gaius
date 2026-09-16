@@ -64,7 +64,7 @@ docs/       FORMATS.md and findings addenda
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
 ```
 
-Future layers (render/, save/ write-back, editor/) land in later roadmap phases — see `GAIUS_ROADMAP.md`.
+Later work (platform packaging, and `scripts/` for tooling) lands in later roadmap phases — see `GAIUS_ROADMAP.md`.
 
 ## Licensing
 
