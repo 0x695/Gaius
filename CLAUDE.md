@@ -38,7 +38,7 @@ cmake --build build -j
 GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
 ```
 
-Expect 3618/3618 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
+Expect 3638/3638 checks passing and 0 skips with `GAIUS_TEST_ASSETS` set (including its `gaius_test_saves/` and `gaius_test_screens/` folders). Without assets the corpus tests skip rather than fail, which is expected. If this doesn't pass cleanly on a fresh clone, something regressed -- investigate before adding new code.
 
 ### What's implemented
 
@@ -85,6 +85,7 @@ Addenda in `docs/` document genuine reverse-engineering work done as a side effe
 18. **Done (2026-09-15): messages, the game speed and the last unnamed words** (findings section 35). `systems::messages` is the original's message board -- one at a time for 80 frames, the executable's texts, every poster (fires, collapses and road wear one in five, barbarians, unrest, tribute, population milestones, salary, construction refusals) and the one-time funds warning; `month::run_frame` is the main loop's frame with the speed gate, so the random draws between steps at slower speeds are exact. `gaius_viewer` shows messages (click to go to the place), the funds warning, and the speed on the governor's page (`--speed`, `--test-message`). Every saved word is now named (35.3).
 19. **Done (2026-09-16): the Forum's other figures** (findings section 36). `systems::forum` transcribes the statue's rank cheat, the histories graph (four panels, the doubling scale), the industry report (its grades, each goods' suitability from `3496:1880`, the average all 17 saves hold in `DS:0x6BE8`) and the ratings screen's 14 advice texts. `gaius_viewer`'s Forum opens them from the picture and has History and Industry tabs and advice buttons on Ratings; `ui::Page` gained bar charts. `--cheats` stands in for the statue's key gate, `--forum-tab 8` opens it.
 20. **Done (2026-09-16): the map of the Empire** (findings section 37). `render::render_empire_map` draws `EMAP2.VPX` with a `POINTERS.PL8` marker on each province given, matching the DOSBox map capture on every pixel above its status line (`test_empire_map_screen`). `gaius_viewer` opens it from the governor's page (`--screen empire`).
+21. **Done (2026-09-16): the original battle screen** (findings section 38). `ui::BattleScreen` draws `WAR2.VPX` with the strength bars, banners (`SPRITE2X.PL8`) and figures, reads the tactic buttons by x, shows each outcome's message, plays `LOSE0001`/`WINS0001.VAS`, and has the retreat dialog; `gaius_viewer` uses it whenever the files are there (`--test-battle`). Section 38.3 corrects which sheet the Forum's panels come from: `P_BLOCKS.PL8`.
 
 More saves remain the cheapest validation. The second session (2026-09-14) covered reservoirs, working fountains and housing grades up to `0xD2`; a third set (2026-09-14) of six saves a month or less apart validated the month itself. Some saves are written mid-month -- `CAESARXS` between steps 101 and 102, `CAESARXW` and `CAESARXQ` after houses changed -- and the corpus tests name those cases rather than skipping them.
 

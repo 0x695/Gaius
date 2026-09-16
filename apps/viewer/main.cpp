@@ -73,6 +73,7 @@
 #include "systems/month.hpp"
 #include "systems/province.hpp"
 #include "ui/panel.hpp"
+#include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
@@ -353,6 +354,8 @@ int main(int argc, char** argv) {
     formats::Palette empire_palette;       // EMAP2.P32
     std::array<formats::screen_data::Marker, 50> empire_markers{};  // EDATA.CSR
     bool have_empire_map = false;
+    ui::BattleArt battle_art;  // WAR2.VPX and the rest of the original battle screen
+    bool have_battle_art = false;
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -382,6 +385,11 @@ int main(int argc, char** argv) {
                     forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
                     forum_clicks = formats::screen_data::load_click_map(asset("CONTFRM.GD8"));
                     have_forum_picture = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    battle_art = ui::load_battle_art(dir);
+                    have_battle_art = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -606,6 +614,8 @@ int main(int argc, char** argv) {
     int hint_cycle = 0;   // DS:0x6D2A
     bool promotion_to_caesar = false;
     viewer::BattleView battle_view;
+    ui::BattleScreen battle_screen;  // the original's screen, when its files are there
+    bool battle_clicked = false;     // a click this frame that wasn't a button (DS:0x6D4C / 0x6D4E)
     int shore_variant = 0;  // DS:0x079C, kept from one generated city to the next
 
     auto install_hooks = [&]() {
@@ -626,6 +636,8 @@ int main(int argc, char** argv) {
             battle_view = viewer::BattleView{};
             battle_view.cohort = cohort;
             battle_view.army = army;
+            if (have_battle_art) battle_screen = ui::begin_battle(state, battle_art, cohort, army);
+            battle_clicked = false;
             screen = Screen::Battle;
             time_running = false;
             std::printf("battle: the Cohort in slot %d meets the army in slot %d\n", cohort, army);
@@ -733,7 +745,8 @@ int main(int argc, char** argv) {
         }
     };
     const auto page_screen = [&]() {
-        return screen == Screen::Forum || screen == Screen::Promotion || screen == Screen::Battle ||
+        return screen == Screen::Forum || screen == Screen::Promotion ||
+               (screen == Screen::Battle && !have_battle_art) ||
                screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files ||
                screen == Screen::Notice;
     };
@@ -1123,6 +1136,22 @@ int main(int argc, char** argv) {
                 screen = Screen::Forum;  // 0x0D174 waits for a click
                 return;
             }
+            if (screen == Screen::Battle && have_battle_art) {
+                // 0x2250F's buttons, or the retreat dialog's; anything else
+                // cuts a message short.
+                if (battle_screen.confirming_retreat) {
+                    ui::answer_retreat(battle_screen, state, battle_art, lx, ly);
+                } else if (const int button = ui::button_at(battle_screen, lx, ly); button == ui::kRetreatButton) {
+                    battle_screen.confirming_retreat = true;
+                } else if (button >= 0) {
+                    ui::play_round(battle_screen, state, battle_art, static_cast<systems::battle::Tactic>(button),
+                                   sim.random);
+                } else {
+                    battle_clicked = true;
+                }
+                city_image_dirty = province_image_dirty = true;
+                return;
+            }
             if (const int tab = strip_hit(lx, ly); tab >= 0) {
                 switch_to(tab);
                 return;
@@ -1291,6 +1320,10 @@ int main(int argc, char** argv) {
                         }
                         if (save_mode && screen == Screen::EmpireMap) {
                             screen = Screen::Forum;
+                            break;
+                        }
+                        if (save_mode && screen == Screen::Battle && have_battle_art) {
+                            battle_clicked = true;
                             break;
                         }
                         if (save_mode && screen == Screen::Province) {
@@ -1475,6 +1508,18 @@ int main(int argc, char** argv) {
                 frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
+            } else if (save_mode && screen == Screen::Battle && have_battle_art) {
+                // 0x2244B, once a frame: the generator draws, then the screen.
+                sim.random.advance();
+                ui::battle_frame(battle_screen, state, battle_art, battle_clicked);
+                battle_clicked = false;
+                if (battle_screen.finished() ||
+                    (battle_screen.ended() && battle_screen.closing == 0 && battle_screen.message_timer == 0)) {
+                    screen = battle_return;
+                    time_running = true;
+                    city_image_dirty = province_image_dirty = true;
+                }
+                ui::compose_battle(battle_screen, state, battle_art, frame);
             } else if (save_mode && screen == Screen::EmpireMap) {
                 // 0x09276 + 0x0D21E: the map of the Empire and the provinces given.
                 formats::IndexedImage empire;

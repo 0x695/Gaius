@@ -51,6 +51,7 @@
 #include "systems/military.hpp"
 #include "systems/month.hpp"
 #include "systems/service.hpp"
+#include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
 #include "ui/game_font.hpp"
 #include "ui/metrics.hpp"
@@ -2490,6 +2491,92 @@ void test_military_year_matches_saves() {
 }
 
 // 0x229A3 and the outcome routines on a made-up Cohort and army.
+void test_battle_screen() {
+    std::printf("test_battle_screen (0x22116 screen: 0x2250F buttons, 0x225EE messages and animations, 0x0934B bars)\n");
+    using namespace gaius::systems;
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    gaius::ui::BattleArt art;
+    try {
+        art = gaius::ui::load_battle_art(dir);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("battle screen files: ") + e.what());
+        return;
+    }
+    CHECK(art.background.width == 320 && art.background.height == 200);
+    CHECK(art.lose.frame_offsets.size() == 21 && art.wins.frame_offsets.size() == 20);
+
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    set_global_word(*st, 0x6CA6, 20);  // the Picts
+    battle::load_race(*st);
+    auto& c = st->objects[0].raw;
+    c[0x06] = 1;
+    c[0x07] = military::kCohortType;
+    c[0x31] = 12;
+    c[0x2A] = 2;  // the Snake
+    c[military::kCohortRegulars] = 2;
+    c[military::kCohortIrregulars] = 1;
+    c[military::kCohortMorale] = 5;
+    set_global_word(*st, military::kRegulars, 2);
+    set_global_word(*st, military::kIrregulars, 1);
+    auto& a = st->objects[1].raw;
+    a[0x06] = 1;
+    a[0x07] = 11;
+    a[battle::kArmySize] = 20;  // taller than the bars go
+
+    gaius::ui::BattleScreen b = gaius::ui::begin_battle(*st, art, 0, 1);
+    CHECK(b.roman_banner == 8 && b.barbarian_banner == 41 && b.start_men == 6 && b.start_army == 20);
+    // The bars: 3 Centuries x 4 = 12 px of colour 12 standing on y 0x62; the
+    // army's 80 px cut at 64.
+    CHECK(b.screen.at(0x10F, 0x61) == 12 && b.screen.at(0x10F, 0x62 - 12) == 12 &&
+          b.screen.at(0x10F, 0x62 - 13) != 12);
+    CHECK(b.screen.at(0x125, 0x62 - 64) == 12 && b.screen.at(0x125, 0x62 - 65) != 12);
+
+    // The buttons by x along the bottom, and nothing between them or above.
+    CHECK(gaius::ui::button_at(b, 0x20, 0xB0) == static_cast<int>(battle::Tactic::Tortoise));
+    CHECK(gaius::ui::button_at(b, 0x50, 0xB0) == static_cast<int>(battle::Tactic::Assault));
+    CHECK(gaius::ui::button_at(b, 0x80, 0xB0) == static_cast<int>(battle::Tactic::Flank));
+    CHECK(gaius::ui::button_at(b, 0xB0, 0xB0) == static_cast<int>(battle::Tactic::Charge));
+    CHECK(gaius::ui::button_at(b, 0xE0, 0xB0) == gaius::ui::kRetreatButton);
+    CHECK(gaius::ui::button_at(b, 0x38, 0xB0) == -1 && gaius::ui::button_at(b, 0x50, 0xA0) == -1 &&
+          gaius::ui::button_at(b, 0xF8, 0xB0) == -1);
+
+    // A round: a message for 130 frames, during which the buttons don't answer.
+    month::Random rnd;
+    gaius::ui::play_round(b, *st, art, battle::Tactic::Assault, rnd);
+    CHECK(b.message_timer == 0x82 || b.message_timer == 0xAA);
+    CHECK(gaius::ui::button_at(b, 0x50, 0xB0) == -1);
+    const bool lost = b.hit_frame == 2 || b.lose_frame == 2;
+    const gaius::formats::IndexedImage before = b.screen;
+    gaius::ui::battle_frame(b, *st, art, false);
+    if (lost) {
+        size_t changed = 0;
+        for (size_t i = 0; i < before.pixels.size(); ++i) changed += before.pixels[i] != b.screen.pixels[i];
+        CHECK(changed > 0);  // the animation's first frame
+    }
+    if (!b.ended()) {
+        // A click cuts the message short: the next frame shows the buttons.
+        gaius::ui::battle_frame(b, *st, art, true);
+        CHECK(b.message_timer == 0 && b.hit_frame == 0 && gaius::ui::button_at(b, 0x50, 0xB0) >= 0);
+        // The retreat dialog: No goes back, Yes retreats and closes after 0x78 frames.
+        b.confirming_retreat = true;
+        CHECK(gaius::ui::answer_retreat(b, *st, art, 12 * 16 + 4, 7 * 16 + 4) && !b.confirming_retreat);
+        b.confirming_retreat = true;
+        const int morale = c[military::kCohortMorale];
+        CHECK(gaius::ui::answer_retreat(b, *st, art, 12 * 16 + 4, 6 * 16 + 4));
+        CHECK(b.retreated && b.closing == 0x78 && c[military::kCohortMorale] == morale - 2);
+        int frames = 0;
+        while (!b.finished() && frames < 1000) {
+            gaius::ui::battle_frame(b, *st, art, false);
+            ++frames;
+        }
+        CHECK(frames == 0x77);
+    }
+    std::vector<uint8_t> rgb;
+    gaius::ui::compose_battle(b, *st, art, rgb);
+    CHECK(rgb.size() == 320 * 200 * 3);
+}
+
 void test_battle_rounds() {
     std::printf("test_battle_rounds (0x229A3 rounds, 0x22D5D victory, 0x22EDB defeat, 0x230BE retreat)\n");
     using namespace gaius::systems;
@@ -5302,6 +5389,7 @@ int main() {
     test_military_recruitment();
     test_military_year_matches_saves();
     test_battle_rounds();
+    test_battle_screen();
     test_battle_race_matches_saves();
     test_province_movement();
     test_province_armies();

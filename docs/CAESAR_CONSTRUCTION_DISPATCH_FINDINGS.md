@@ -1401,7 +1401,7 @@ A promotion (`0x0FB34`) runs step 5 in the same order. That settles section 31.4
 
 ### 34.1 `.VAS`: the battle screen's animations
 
-- **Where they play.** Three players (`0x23A06`, `0x23ACA`, `0x23B8A`) run while the counters `DS:0x5802`, `0x5806` and `0x5804` are 2 or more. The battle routines start them: a round (`0x23087`, `0x231D4`), the victory (`0x22D56`) and the defeat (`0x22ED4`). Each loads its file into `494C:0000` when its counter is 2: `LOSE0001.VAS` for `0x5802` and `0x5806`, `WINS0001.VAS` for `0x5804`.
+- **Where they play** (triggers corrected in section 38.2). Three players (`0x23A06`, `0x23ACA`, `0x23B8A`) run while the counters `DS:0x5802`, `0x5806` and `0x5804` are 2 or more. The battle routines start them: a round (`0x23087`, `0x231D4`), the victory (`0x22D56`) and the defeat (`0x22ED4`). Each loads its file into `494C:0000` when its counter is 2: `LOSE0001.VAS` for `0x5802` and `0x5806`, `WINS0001.VAS` for `0x5804`.
 - **Frames.** The counter runs from 2 up to the file's word at +2 (`0x5806` stops at 14), so a file has one frame fewer than that word: `LOSE0001.VAS` 21, `WINS0001.VAS` 20. Frame n - 1's 32-bit offset is at +0x10 + 4(n - 1), so the table starts at +0x14.
 - **Drawing.** `100F:0851` selects each VGA plane in turn (sequencer map mask 1, 2, 4, 8 with read map 0-3) and calls `2EF9:111F` on that plane's block, stepping on by the block's length. It is called twice with a page flip between, so both display pages carry the frame.
 - **The block, from `2EF9:111F`.** A u16 length, a u16 plane size (16000), 4 bytes skipped, then u16 runs until their counts reach the plane size. A run with bit 15 set XORs the next (w & 0x7FFF) + 1 bytes onto the plane; one without skips that many.
@@ -1527,7 +1527,7 @@ Four panels (`1F6F:2008`) of bars (`1F6F:236C`), one per yearly history buffer (
 | `3496:02A4`, `DS:0x6B30` | `DS:0x6C10` | 0x120 | 0xAC | 25 | 68 | 0 - 6000 / 12000 / 18000 | population |
 
 - **The graph routine.** It walks 14 records back from the newest (wrapping at 15). If any value / scale (signed) is taller than the maximum, it doubles the scale and starts again, counting the passes. Each bar is value / scale capped at the maximum, drawn only when positive, 8 pixels left of the one before. The pass count (1-3) picks the caption at (0x14 or 0xB4, 0x24 or 0x64) in `MINIFONT`; four or more passes show none. The captions don't match the scales (36 x 25 is 900, not 750) -- transcribed as they are.
-- **The art.** The bars are `POINTERS.PL8` frames 0x36/0x37 (8x76; 0x37 where x is a multiple of 16), cut to the bar's height by `303E:15B7`; which rows of the frame show is INFERENCE. The panels come from the same sheet: `1F6F:1EC1` tiles frames 0-8 as a nine-slice frame, with the interior drawing `0x13` + the 50-byte pattern `3496:0718`, and `1F6F:2008` draws frames 9-17 as an inset. The industry report's goods icons are frames 0x38-0x3F (16x11).
+- **The art.** The bars are `POINTERS.PL8` frames 0x36/0x37 (8x76; 0x37 where x is a multiple of 16), cut to the bar's height by `303E:15B7`; which rows of the frame show is INFERENCE. The panels come from `P_BLOCKS.PL8` (corrected in section 38.3): `1F6F:1EC1` tiles frames 0-8 as a nine-slice frame, with the interior drawing `0x13` + the 50-byte pattern `3496:0718`, and `1F6F:2008` draws frames 9-17 as an inset. The industry report's goods icons are frames 0x38-0x3F (16x11).
 - **The caption years** (`0x0B04C`). "A.D.     -" or "B.C.     -" by the sign of year - 15, then |year - 15| at x 0x8A and |year - 1| at 0xB8. In year 14 that reads "B.C. 1 - 13".
 
 ### 36.3 The industry report (region 8, `0x09D22`)
@@ -1564,7 +1564,107 @@ Where the game shows it:
 
 | Routine | When | What |
 |---|---|---|
-| `0x0D174` | the governor's screen (`0x0BDD3`), its third button | the map, until a click. The governor's buttons are the 16-byte records at `DS:0x0444` -- cell x, cell y, `POINTERS.PL8` frame and pressed frame, handler far pointer, timer, mode (read by `0x0D521`/`0x0D41D`) -- at cells (18, 1), (18, 2), (18, 4), (18, 8), (18, 10); the map is (18, 4) -> `0x0C060` |
+| `0x0D174` | the governor's screen (`0x0BDD3`), its third button | the map, until a click. The governor's buttons are the 16-byte records at `DS:0x0444` -- cell x, cell y, `P_BLOCKS.PL8` frame and pressed frame (section 38.3), handler far pointer, timer, mode (read by `0x0D521`/`0x0D41D`) -- at cells (18, 1), (18, 2), (18, 4), (18, 8), (18, 10); the map is (18, 4) -> `0x0C060` |
 | `0x0D1D3` | a new game or a new province (`0x0F79D`, `0x0FB34`), before the terrain (`0x06F05`) | the map with "generating scrubland" in `FONT1` at (0x4E, 0xBB), drawn to both pages. After the terrain the map is redrawn without it, then the province file is loaded (`0x0FF1C`) and the province starts (`0x05730`), with no wait for a click |
 
 Gaius's terrain generation takes no visible time, so the viewer doesn't show the second screen.
+
+
+## 38. The battle screen's art (2026-09-16)
+
+Section 27 transcribed the rounds; this section reads the screen `0x22116` draws them on. `ui::BattleScreen` implements it, and `gaius_viewer` shows it when the files are present (otherwise the plain page of section 32).
+
+### 38.1 The frame
+
+**The start.** The screen:
+
+- loads `FONT2.PL8` over `FONT1` at `54E0:C648` and `SPRITE2X.PL8` at `630D:0000`;
+- sets the race (section 27.1);
+- keeps the starting figures:
+  - `DS:0x57F0` the Cohort's standard = its number × 4;
+  - `DS:0x57F2` the race's banner (40-43);
+  - `DS:0x57FE` the army's size;
+  - `DS:0x57FC` the Centuries × 2;
+  - `DS:0x57F8`/`F6`/`F4` the regulars, irregulars and auxiliaries.
+
+With `cohort.exe` present it first offers the Cohort 2 hand-over on `WARMESS.VPX` (`0x09611`: "Left click here for Cohort. Click / elsewhere or right-click to continue."). Gaius has no Cohort 2 and skips it.
+
+**The background** (`0x0934B`):
+
+- `WAR2.VPX` with `WAR2.256`. The tactic buttons are part of the picture.
+- `100F:0EF9` (x, y, w, h, colour) clears each bar's starting height + 2 in black: 16 wide at x 0x10E and 0x124.
+- It then fills colour 12, 14 wide, standing on y 0x62: the Romans' Centuries × 4 at 0x10F and the army's size × 4 at 0x125, each at most 64.
+
+**Every frame** (`0x2244B`), in this order:
+
+1. A random draw (`2EF9:1425`).
+2. `0x225EE`: the message and animations (38.2). While no message shows, it draws the Cohort's emblem (`DS:0x45BE`, 12-character fields as stored) at (8, 0xA2) and the race (`DS:0x2BAD`, 16) at (0x7E, 0xA2), both in `FONT2`.
+3. `0x226BC`: the figures in `MINIFONT`:
+   - "Men" at (0x118, 0x68), with the Romans' Centuries at (0x110, 0x70) and the army at (0x128, 0x70);
+   - "Morale" at (0x110, 0x8C), its value at (0x11E, 0x96);
+   - "r   -", "i   -", "a   -" at x 0x10C, y 0xA0 / 0xAA / 0xB4, with the current count at x 0x118 and the starting count at 0x128;
+   - then `0x23878` draws the standard at (0x10E, 0x12) and the banner at (0x124, 0x10) from `SPRITE2X.PL8`.
+4. `0x2250F`: the buttons.
+5. The closing count `DS:0x5800` goes down by one. The screen closes when it reaches 1.
+
+**The buttons** (`0x2250F`). They answer only with no message and no closing count, and only at y 0xA8 and below. By x:
+
+| x | Button |
+|---|---|
+| 0x10-0x2F | Tortoise |
+| 0x40-0x5F | Assault |
+| 0x70-0x8F | Flank |
+| 0xA0-0xBF | Charge |
+| 0xD0-0xF0 | Retreat |
+
+The gaps between them do nothing.
+
+### 38.2 Messages and animations
+
+**Showing a message.** `0x0954F` redraws the background, grabs the stone at (4, 0xB8) (`1F6F:1E73`) and tiles it over x 8-247 from y 0xAA, hiding the buttons. The message's two lines go at (8, 0xAA) and (8, 0xBC) in `FONT2`, and `DS:0x57FA` counts the frames it stays.
+
+| Outcome | Lines | Frames | Closing | Animation |
+|---|---|---|---|---|
+| even | "It is a tough battle and" / "still could go either way." | 0x82 | | |
+| Romans stronger | "The battle goes well and" / "the enemy is weakening." | 0x82 | | |
+| barbarians stronger | "Your soldiers are faltering." / "You should try a new tactic." | 0x82 | | `LOSE0001.VAS` to counter 14 (`DS:0x5806`) |
+| victory | "Victory is yours. The enemy" / "scatters in disarray." | 0xAA | 0xA9 | `WINS0001.VAS` to 21 (`DS:0x5804`) |
+| defeat | "Defeat and dishonor as the" / "barbarians sweep over you." | 0xAA | 0xA9 | `LOSE0001.VAS` to 22 (`DS:0x5802`) |
+| retreat | "The barbarians press on ." / "Your troops are demoralized." | 0x82 | 0x78 | `LOSE0001.VAS` to 14 (`DS:0x5806`) |
+
+This corrects section 34.1, which had the victory and defeat animations the wrong way round and called `0x23087` a round's.
+
+**While a message shows** (`0x225EE`):
+
+- A click stops all three animations. It then drops the closing count to 2, or, with no closing count, ends the message next frame.
+- The timer counts down. At certain counts it plays sounds 5 and 7 (`0x22497`).
+- Each running animation plays a frame (`0x239E1`): counter n draws file frame n - 2, and the animation stops past its limit.
+- At 0 the background is redrawn.
+
+**The retreat dialog** (`0x23708`). It reloads `FONT1`, switches the whole screen to the palette saved at `68F6:B6A8`, clears both pages (`100F:00EF` calls `2EF9:0C50` on each, STRONG INFERENCE), and draws a 14 × 5 panel at (0x30, 0x40). The text is "Retreat ?" at (0x5A, 0x4A) and "     Yes" / "      No" at (0x32, 0x62) / (0x32, 0x72), and the buttons are `DS:0x132C`: cells (12, 6) Yes -> `0x236EE` and (12, 7) No -> `0x236FB`. Afterwards it puts `WAR2`'s palette back. That the saved palette is `SHADE.256` is INFERENCE; the panel's stone only looks right through it.
+
+### 38.3 Which sheet the interface routines draw from (correcting 36.2 and 37)
+
+`1F6F:1831` (sprites), `1F6F:1EC1`/`2008` (panels) and `0x0D521` (buttons) all point `303E:0016` at `A000:8000`. The first calls `2EF9:0298` first, the others `2EF9:0290`.
+
+- **`POINTERS.PL8` through `0298`:**
+  - the map markers (frames 48/49), proven pixel-exact in section 37;
+  - the histories' bars (54/55, 8 × 76);
+  - the goods icons (56-63, 16 × 11).
+- **`P_BLOCKS.PL8` through `0290`:**
+  - the panels: frames 0-8 corners, edges and middle, 9-17 the inset, `0x14`-`0x19` the stone variants the pattern picks;
+  - the buttons (29/30).
+
+`POINTERS.PL8`'s frames 0-8 are icons, so section 36.2's panels and section 37's governor buttons are `P_BLOCKS.PL8`. That the two calls select the two sheets loaded as slots 1 and 2 (renderer findings) is STRONG INFERENCE from what the frames show.
+
+**Checked** by `test_battle_screen`:
+
+- the starting words;
+- both bars, including the 64-pixel cap;
+- every button's range and the gaps;
+- a round's message locking the buttons, and the animation changing the picture;
+- a click cutting the message short;
+- the dialog's No and Yes;
+- the 0x78-frame close after a retreat.
+
+No DOSBox capture of this screen exists to compare pixels against.

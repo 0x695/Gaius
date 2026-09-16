@@ -20,9 +20,9 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
-| 6 | Economy & military | **Done** | The original battle screen's art |
+| 6 | Economy & military | **Done** | The Cohort 2 hand-over |
 | 7 | Forum, advisors, ratings | **Done** | The original screens' art; the Trouble overlay |
-| 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture; empire map and battle screens' original art |
+| 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
@@ -256,7 +256,9 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 **Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **Met.**
 
-**Still open, not blocking:** the original battle screen's art, the messages, and the Cohort 2 hand-over.
+- [x] **The original battle screen** (2026-09-16, findings section 38) -- `WAR2.VPX`, the bars, banners and figures, the tactic buttons, the round messages, the `.VAS` animations and the retreat dialog, in `ui::BattleScreen`.
+
+**Still open, not blocking:** the Cohort 2 hand-over.
 
 ---
 
@@ -277,13 +279,13 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 **Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 
-**Still open, not blocking:** the original Forum art and layout (the panels are `POINTERS.PL8` frames, section 36.2), the Trouble overlay.
+**Still open, not blocking:** the original Forum art and layout (the panels are `P_BLOCKS.PL8` frames, section 38.3), the Trouble overlay.
 
 ---
 
 ## Phase 8 — Format completeness & save write-back
 
-**Status: Done** (2026-09-15). The city renderer, city terrain, saving, the loader, a new game, and every remaining file format -- animations, screen data, sound effects and music -- are done. Left open, none blocking: the province view has no capture to check against, and the empire map and battle screens aren't drawn with their original art.
+**Status: Done** (2026-09-15). The city renderer, city terrain, saving, the loader, a new game, and every remaining file format -- animations, screen data, sound effects and music -- are done. Left open, not blocking: the province view has no capture to check against. The empire map and battle screens have their original art since 2026-09-16 (findings sections 37-38).
 
 **Goal:** write valid EMPIRE2 and `.SAV` files the original engine could read, close the remaining format gaps, and support "New Game".
 
@@ -292,7 +294,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 **Open**
 - [x] **Save loader RE and save writing** (2026-09-15, findings section 33.1) — the loader `0x04537` reads the 175 records the writer `0x033C8` writes, same addresses, sizes and order: DEFINITIVE. `formats::save::write`; every real save written back reads byte-identical. The difficulty `DS:0x6CB8` turned out to be saved. The viewer's Forum saves and loads eight slots.
-- [x] **Remaining formats** (2026-09-15, findings section 34) — `.VAS` is the battle screen's animations, XOR deltas over a picture's planes (`formats::vas`, `tools/dump_vas`; every frame of both files, drawn over `WAR2.VPX`); `CONTFRM.GD8` is the Forum picture's click map, one region per advisor (`formats::screen_data`, and the viewer's Forum hall uses it); `EDATA.CSR` holds the empire map's 50 province markers; `TEMPLBIT.PL8` is the ratings' column pieces; `P_BLOCKS.PL8` already decoded (renderer findings). Still open: the empire map and battle screens drawn with their original art.
+- [x] **Remaining formats** (2026-09-15, findings section 34) — `.VAS` is the battle screen's animations, XOR deltas over a picture's planes (`formats::vas`, `tools/dump_vas`; every frame of both files, drawn over `WAR2.VPX`); `CONTFRM.GD8` is the Forum picture's click map, one region per advisor (`formats::screen_data`, and the viewer's Forum hall uses it); `EDATA.CSR` holds the empire map's 50 province markers; `TEMPLBIT.PL8` is the ratings' column pieces; `P_BLOCKS.PL8` already decoded (renderer findings). Both screens were drawn with their original art on 2026-09-16 (findings sections 37-38).
 - [x] **Sound effects and music as formats** (2026-09-15, findings section 34.5) — all 23 `.VOC` effects decode (`formats::voc`); all 28 `.XMI`/`.XM2` cues convert to Standard MIDI (`formats::xmi`, `tools/xmi2mid`), their timing checked against the international `.MDI` files — which turned out to be re-orchestrations, not conversions. Playing them is Phase 9's audio path.
 - [ ] **Overlay map modes and the province view** in the renderer — the province view is drawn (2026-09-15, findings section 32.3, frame = tile by STRONG INFERENCE with no capture to check it), and the maps panel tints the city from the modeled layers; the original overlays' own art isn't read.
 - [x] **The start screen and a new game** (2026-09-15, findings section 33.2) — the main loop's new game read end to end: funding levels (`3496:1718`, Trivial 8000 Dn to Impossible 250 Dn), difficulty, the first province drawn, terrain before the map and the reset (which settles section 31.4). `campaign::begin_new_game`; `gaius_viewer <game folder>` opens the start screen. Still open: typing the governor's name.
