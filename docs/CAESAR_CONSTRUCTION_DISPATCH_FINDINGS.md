@@ -1923,3 +1923,19 @@ The key handler `0x2EC40` also has: Alt-X leaving (`0x0ED2C`), "p" / "P" flippin
   - Pause stops time until a click or T. Restart goes to the start screen. Exit to DOS closes the viewer.
   - The statue opens after "c" then "B".
 - **Stored but without effect yet:** the scroll speed, the sound switches (Gaius plays no sound yet), and the position indicator and icon name, which belong to the original's control panel.
+
+## 43. The scenario file's two first bytes (2026-09-17)
+
+Every `EMPIRE2.0xx` starts with two bytes before its 40 x 40 cells, `14 14` in all 50 files. The main RE document left them UNRESOLVED and warned against reading them as a width and height. The executable settles it: **the engine never uses them.**
+
+- **Where the map lives.** The scenario is read into `3496:2752` (`0x0FF1C`: `100F:0A1E` on "empire2.0NN", the province number written into the name), so the two bytes sit at `3496:2752`-`2753` and the cells start at `3496:2754`. The save writer (`0x041E6`) and loader (`0x05350`) move all 1602 bytes as one block; `0x11F57` and `0x1200A` copy the same 1602 bytes to and from `A000:C000` around province construction.
+- **Nothing reads them as a field.** Those six places are the only references to `3496:2752` as an address, and there is none to `3496:2753` except indexed reads. Every cell read is `es:[index + base]` with the index row × 40 + column:
+  - base `0x2754` (148 reads): the cell itself;
+  - base `0x2753` (75): the cell to the left, or, in the province construction handlers from `0x1A2A6`, the cell under the pointer taken as (x + 8) / 16 − 1;
+  - base `0x272C`, `0x272B`, `0x272D` (82): the cells above.
+
+  These reach the two bytes only off the grid's top-left corner. That happens only when the pointer or a neighbour is outside the map, and none of those reads compares with `0x14`.
+- **Not dimensions.** The map's size is the constant 40 (`0x28`) in every one of those index calculations, and the province view's scroll limits (`0x066FE`) are the constants 20 and 29, not the file's bytes.
+- **The saves agree.** All 17 saves carry `14 14` at the start of their embedded map (save offset 55076), unchanged from the scenario they started with.
+
+So the bytes are most likely left over from whatever tool wrote the scenarios (what they meant there isn't recoverable from the game). Gaius keeps them verbatim (`formats::empire2::EmpireMap::prefix`), and any scenario it writes should keep `14 14`.

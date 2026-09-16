@@ -5,9 +5,14 @@
 // CAESAR_EMPIRE2_RE.md / CAESAR_REVERSE_ENGINEERING_COMPLETE.md section 14:
 //
 //   struct Empire2File {
-//       uint8_t prefix[2];   // always 14 14 in supplied files; semantics
-//                            // UNRESOLVED — do not treat as width/height,
-//                            // per Appendix B of the main RE doc.
+//       uint8_t prefix[2];   // 14 14 in all 50 files and all 17 saves.
+//                            // The engine never reads it as a field: it
+//                            // is loaded and saved with the map at
+//                            // 3496:2752 and only reached by grid reads
+//                            // that run off the top-left corner
+//                            // (dispatch findings section 43). Not a
+//                            // width or height -- the engine's 40s are
+//                            // constants.
 //       uint8_t cell[40][40];
 //   };  // exactly 1602 bytes
 //
@@ -31,7 +36,7 @@ constexpr int kMapH = 40;
 constexpr size_t kFileSize = 2 + kMapW * kMapH;  // 1602
 
 struct EmpireMap {
-    std::array<uint8_t, 2> prefix{};              // unresolved semantics — preserved verbatim
+    std::array<uint8_t, 2> prefix{};              // unused by the engine (findings section 43) — preserved verbatim
     std::array<uint8_t, kMapW * kMapH> cells{};    // row * 40 + column
 
     uint8_t at(int row, int col) const { return cells[static_cast<size_t>(row) * kMapW + col]; }

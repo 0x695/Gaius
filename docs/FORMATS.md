@@ -47,7 +47,7 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 
 ## `EMPIRE2.0xx` — strategic map (`formats/empire2/`)
 
-- Exactly 1602 bytes: 2-byte prefix (semantics unresolved — never treat as width/height) + 1600-byte 40×40 cell array.
+- Exactly 1602 bytes: a 2-byte prefix + the 1600-byte 40×40 cell array. The prefix is `14 14` in all 50 files and in every save's embedded copy, and the engine never reads it as a field (dispatch findings section 43): it is loaded and saved along with the map, nothing more. It is not a width or height.
 - **Status: DEFINITIVE, tested against the full corpus.** All 50 supplied `EMPIRE2.000`-`EMPIRE2.049` files round-trip load→save byte-identical.
 
 ## `CAESARxx.SAV` — save file (`formats/save/`)

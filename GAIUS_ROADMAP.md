@@ -45,7 +45,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 - [x] **`formats/vpx`** — ported from `caesar_vpx.py`. `EMAP2.VPX` matches `EMAP2_decoded.png`: 0/64000 pixels differ (golden-image test).
 - [x] **`formats/p32`, `formats/pal256`** — palettes. `.P32` checked through the VPX golden test; `.256` against all eight real files, their `.P32` pairs, and `CSR.EXE`, which sends the bytes straight to the VGA DAC (2026-09-13).
 - [x] **`formats/pl8`** — sprite sheets. Checked against the documented `HOUSES.PL8` example; found which header word is the frame count and the trailing placeholder frames.
-- [x] **`formats/empire2`** — all 50 `EMPIRE2.0xx` files round-trip byte-identical.
+- [x] **`formats/empire2`** — all 50 `EMPIRE2.0xx` files round-trip byte-identical. The 2-byte prefix (`14 14`) is settled (2026-09-17, dispatch findings section 43): the engine never reads it; it only travels with the map.
 - [x] **`formats/save`** — block table, contiguous and size-correct. Validated against real saves since 2026-09-12 (`test_save_corpus_real`); skips cleanly without them.
 - [x] **CLI tools** — `dump_vpx`, `dump_pl8`, `empire_view`, `save_inspect`, smoke-tested against real files.
 - [x] **`bindiff_exe`** — run against both `CSR.EXE` builds. Along the way: the EXEPACK decompressor reverse engineered from its stub and checked byte-exact on both builds, plus new game text (the 21-rank promotion ladder, ~60 province names, cohort status words, the workshop goods list). See `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md`.
