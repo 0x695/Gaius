@@ -1391,7 +1391,7 @@ A promotion (`0x0FB34`) runs step 5 in the same order. That settles section 31.4
 
 ### 33.4 Open
 
-- Typing the governor's name (the start screen shows the default).
+- Typing the governor's name (the start screen shows the default) -- done in section 40.
 - Whether a Gaius-written save of a Gaius-played city runs in the original: the format is proven, but a city Gaius built isn't checked in DOSBox.
 
 
@@ -1718,3 +1718,39 @@ Pixel (0x16 + x, 0x26 + y) is cell (x, y). The layers are read through bases tha
 **A naming question this raises.** The layer the original calls "land value" is the one `model::CityMap` names `coverage` (`A2C4`). What `CityMap::land_value` holds (`54A4`) is what the original maps as "trouble areas" on houses -- the value whose limit collapses a house (section 21). The code keeps its names; this is recorded here rather than renamed.
 
 **Not compared:** the map's own pixels -- the capture's city isn't one of the saves -- and the frames `0x0DC18` loops over while the map draws in (`DS:0x6D24` counts three passes).
+
+
+## 40. The governor's name (2026-09-16)
+
+`ui::NameEntry` implements the name and its dialog. `gaius_viewer`'s start screen has a "Choose name" button and shows the name.
+
+### 40.1 Where the name lives
+
+- **In memory.** 12 characters at `DS:0x0DD0`, "  Octavian  " to begin with, reached through the far pointer `DS:0x5858` (set by `0x0F6FF`). It survives a new game.
+- **In a save.** The writer copies it to the 12 bytes at `DS:0x6B9E` (`0x0434E`) and saves them as `final_state` bytes 12-23; the loader copies them back (`0x054CA`). All 17 saves hold "  Octavian  ".
+- **On screen.** The governor's screen draws it in `FONT1` at (0x40 + 16i, 0x3C) (`0x0C328`), with the button at `DS:0x0444`'s first record (`0x0BE58`) opening the same dialog there.
+
+### 40.2 The dialog (`0x0C41D`)
+
+The start screen's "Choose name" button (`0x27F84`) calls it with the button records `DS:0x0164` (24 of them).
+
+- **Drawing.** A 14 x 5 panel at (0x30, 0x40), drawn to both pages. Each frame: the records' buttons (`0x0D521`), the plain stone under the name (`0x0D623`), the 12 characters at (0x44 + 16i, 0x64) (`0x0C2DD`), and a '-' under the cursor `DS:0x6D32` at (0x44 + 16 × cursor, 0x69).
+- **The arrows.** The records are an up arrow over each letter, cells (4-15, 5), `P_BLOCKS.PL8` frames 18/27, and a down arrow under it, cells (4-15, 7), frames 19/28. The handlers `0x0C902`-`0x0CB4E` pass the letter's index (`DS:0x6D30` - `DS:0x6D2E` + i, both 12, so i).
+  - **Up** (`0x0CB68`): 'Z' becomes 'a'; anything below '@' becomes '@'; otherwise the next character, capped at 'z'. So a blank steps to '@' (which `FONT1` draws as nothing), then 'A'.
+  - **Down** (`0x0CBD3`): the previous character, at least '@'. It means to turn 'a' back into 'Z', but it tests the name's first character plus the index against 'a' instead of the letter itself (`mov al, es:[bx]` before `bx` is indexed). Transcribed as it is.
+- **A click on the name** (`0x0C859`, x 0x40-0x100, y 0x60-0x70) puts the cursor on that character.
+- **The keyboard** (`100F:0F79` = `0x11069`, with both limits 12). It reads the typed character `2EF9:002F` and the scan code `2EF9:0033`:
+  - Escape returns 1 and Enter 2, and either ends the dialog.
+  - Backspace moves the cursor back and blanks that character.
+  - Left and Right move the cursor. The arrow keys also move the mouse pointer 8 pixels.
+  - Delete blanks the character under the cursor, and on the last character also steps back.
+  - '_', digits and letters overwrite the character under the cursor and advance. The insert path (`0x11305`, which shifts the rest right) needs the cursor at the length and the length below the limit, which never holds here.
+  - Anything else, space included, does nothing. The cursor stops on the last character.
+- **Ending the dialog.** A right click (`DS:0x6D4C`) also ends it. The name is edited in place, so every way out keeps it.
+
+### 40.3 In Gaius
+
+- The platform layer gained `CommandType::TextKey` and `set_text_entry`: SDL's text input while a field is open. On a phone that brings up the on-screen keyboard, though the arrows make it unnecessary.
+- The viewer keeps the name like `DS:0x0DD0`: across new games, written into each new game's state, and read back from a loaded game.
+- **Checked** by `test_name_entry`: both arrows including the down arrow's quirk, every key, the clicks, and the name in all 17 saves.
+- **Not modeled:** the governor's screen's own button (the viewer's governor page doesn't show the name).

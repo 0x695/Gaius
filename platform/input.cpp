@@ -10,14 +10,54 @@ namespace gaius::platform {
 namespace {
 constexpr float kStickDeadzone = 0.20f;
 constexpr float kTriggerDeadzone = 0.10f;
+bool g_text_entry = false;
+
+std::optional<Command> text_key(TextKey key) {
+    Command c{CommandType::TextKey};
+    c.text_key = key;
+    return c;
+}
 }  // namespace
+
+void set_text_entry(bool on) {
+    if (on == g_text_entry) return;
+    g_text_entry = on;
+    if (on) {
+        SDL_StartTextInput();
+    } else {
+        SDL_StopTextInput();
+    }
+}
+
+bool text_entry() { return g_text_entry; }
 
 std::optional<Command> translate_event(const SDL_Event& event, int physical_w, int physical_h) {
     switch (event.type) {
         case SDL_QUIT:
             return Command{CommandType::Quit};
 
+        case SDL_TEXTINPUT: {
+            if (!g_text_entry) return std::nullopt;
+            const unsigned char first = static_cast<unsigned char>(event.text.text[0]);
+            if (first < 0x20 || first > 0x7E) return std::nullopt;
+            Command c{CommandType::TextKey};
+            c.ch = static_cast<char>(first);
+            return c;
+        }
+
         case SDL_KEYDOWN:
+            if (g_text_entry) {
+                switch (event.key.keysym.sym) {
+                    case SDLK_ESCAPE: return text_key(TextKey::Escape);
+                    case SDLK_RETURN:
+                    case SDLK_KP_ENTER: return text_key(TextKey::Enter);
+                    case SDLK_BACKSPACE: return text_key(TextKey::Backspace);
+                    case SDLK_LEFT: return text_key(TextKey::Left);
+                    case SDLK_RIGHT: return text_key(TextKey::Right);
+                    case SDLK_DELETE: return text_key(TextKey::Delete);
+                    default: return std::nullopt;
+                }
+            }
             if (event.key.keysym.sym == SDLK_ESCAPE) return Command{CommandType::Quit};
             if (event.key.keysym.sym == SDLK_F11) return Command{CommandType::ToggleWindowMode};
             if (event.key.keysym.sym == SDLK_TAB) return Command{CommandType::CycleTool};

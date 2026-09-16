@@ -54,6 +54,7 @@
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
 #include "ui/maps_screen.hpp"
+#include "ui/name_entry.hpp"
 #include "ui/game_font.hpp"
 #include "ui/metrics.hpp"
 #include "ui/toolbar.hpp"
@@ -3930,6 +3931,81 @@ void test_xmi_matches_mdi() {
                                              "CZARJINB=CZARJINB.MDI"}));
 }
 
+void test_name_entry() {
+    std::printf("test_name_entry (0x0C41D name dialog: 0x0CB68/0x0CBD3 arrows, 0x11069 keys, DS:0x6B9E in saves)\n");
+    using gaius::ui::NameKey;
+    gaius::ui::NameEntry e = gaius::ui::begin_name_entry("  Octavian  ");
+    CHECK(e.cursor == 0 && gaius::ui::name_text(e) == "  Octavian  ");
+
+    // The arrows: space -> '@' -> 'A', 'Z' -> 'a', and 'z' stays.
+    gaius::ui::name_letter_up(e, 0);
+    CHECK(e.name[0] == '@');
+    gaius::ui::name_letter_up(e, 0);
+    CHECK(e.name[0] == 'A');
+    e.name[1] = 'Z';
+    gaius::ui::name_letter_up(e, 1);
+    CHECK(e.name[1] == 'a');
+    e.name[1] = 'z';
+    gaius::ui::name_letter_up(e, 1);
+    CHECK(e.name[1] == 'z');
+    gaius::ui::name_letter_down(e, 0);
+    CHECK(e.name[0] == '@');
+    gaius::ui::name_letter_down(e, 0);
+    CHECK(e.name[0] == '@');  // not below '@'
+    // The down arrow's wrap tests the first character plus the index: with
+    // name[0] = '`' (0x60), index 1 wraps whatever letter is there.
+    e.name[0] = '`';
+    e.name[1] = 'q';
+    gaius::ui::name_letter_down(e, 1);
+    CHECK(e.name[1] == 'Z');
+    e.name[0] = 'A';
+    e.name[1] = 'a';
+    gaius::ui::name_letter_down(e, 1);
+    CHECK(e.name[1] == '`');  // a real 'a' just steps down
+
+    // Keys: overwrite and advance, stop on the last; backspace, delete.
+    e = gaius::ui::begin_name_entry("            ");
+    for (char c : std::string("Marcus")) gaius::ui::name_key(e, NameKey::Character, c);
+    CHECK(gaius::ui::name_text(e) == "Marcus      " && e.cursor == 6);
+    gaius::ui::name_key(e, NameKey::Character, ' ');  // spaces aren't accepted
+    gaius::ui::name_key(e, NameKey::Character, '!');
+    CHECK(e.cursor == 6);
+    gaius::ui::name_key(e, NameKey::Backspace);
+    CHECK(gaius::ui::name_text(e) == "Marcu       " && e.cursor == 5);
+    gaius::ui::name_key(e, NameKey::Left);
+    gaius::ui::name_key(e, NameKey::Delete);
+    CHECK(gaius::ui::name_text(e) == "Marc        " && e.cursor == 4);
+    for (int i = 0; i < 20; ++i) gaius::ui::name_key(e, NameKey::Character, '_');
+    CHECK(e.cursor == 11 && gaius::ui::name_text(e) == "Marc________");
+    gaius::ui::name_key(e, NameKey::Delete);
+    CHECK(e.cursor == 10 && e.name[11] == ' ');
+    CHECK(gaius::ui::name_key(e, NameKey::Escape) == 1 && gaius::ui::name_key(e, NameKey::Enter) == 2);
+
+    // Clicks: the arrows by cell, the name by column.
+    e = gaius::ui::begin_name_entry("            ");
+    CHECK(gaius::ui::name_click(e, 4 * 16 + 3, 5 * 16 + 3) && e.name[0] == '@');
+    CHECK(gaius::ui::name_click(e, 15 * 16 + 3, 7 * 16 + 3) && e.name[11] == '@');
+    CHECK(gaius::ui::name_click(e, 0x40 + 3 * 16 + 5, 0x68) && e.cursor == 3);
+    CHECK(!gaius::ui::name_click(e, 2 * 16, 5 * 16));
+
+    // The saved name.
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    CHECK(gaius::ui::governor_name(*st) == "  Octavian  ");
+    gaius::ui::set_governor_name(*st, "Marcus");
+    CHECK(gaius::ui::governor_name(*st) == "Marcus      ");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    for (const char* name : kRealSaves) {
+        fs::path path = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(path)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto save = std::make_unique<CityState>(load(gaius::formats::save::load(path.string())));
+        CHECK(gaius::ui::governor_name(*save) == "  Octavian  ");
+    }
+}
+
 // The maps screen against the DOSBox capture of it (road layout, the city
 // shown): everything but the map itself, whose city isn't one of the saves,
 // and the mouse pointer.
@@ -5490,6 +5566,7 @@ int main() {
     test_screen_data();
     test_empire_map_screen();
     test_maps_screen();
+    test_name_entry();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();

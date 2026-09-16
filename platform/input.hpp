@@ -60,14 +60,29 @@ enum class CommandType {
                   // is also down, so it never collides with a plain right-click's own
                   // meaning (Secondary, the viewer's map-layer cycle) -- those two states
                   // are mutually exclusive by construction.
+    TextKey,      // a key while text entry is on (set_text_entry): a typed character or
+                  // an editing key. Keyboard enrichment for fields that can also be
+                  // edited by pointer (the name dialog's letter arrows), so no screen
+                  // depends on it; with text entry on, keys lose their other meanings.
 };
+
+// What a TextKey command carries.
+enum class TextKey { Character, Escape, Enter, Backspace, Left, Right, Delete };
 
 struct Command {
     CommandType type;
     int x = 0, y = 0;        // physical window coordinates, where relevant (Select/Secondary/Pan*)
     int dx = 0, dy = 0;      // relative motion, for PanMove
     float zoom_delta = 0.0f;  // positive = zoom in, for Zoom
+    TextKey text_key = TextKey::Character;  // for TextKey
+    char ch = 0;                            // for TextKey::Character: printable ASCII
 };
+
+// Turns text entry on or off (SDL_StartTextInput / SDL_StopTextInput, which on
+// a phone brings up the on-screen keyboard). While on, key presses become
+// TextKey commands instead of their usual commands.
+void set_text_entry(bool on);
+bool text_entry();
 
 // Translates a raw SDL event into zero or one unified Command. Returns
 // std::nullopt for events this layer doesn't care about (window focus

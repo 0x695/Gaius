@@ -91,7 +91,7 @@ inline constexpr int kActionOpenSave = 405, kActionOpenLoad = 406;
 inline constexpr int kActionSpeedDown = 407, kActionSpeedUp = 408;
 inline constexpr int kActionEmpireMap = 409;
 inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDifficultyDown = 702,
-                     kActionDifficultyUp = 703, kActionBegin = 704;
+                     kActionDifficultyUp = 703, kActionBegin = 704, kActionChooseName = 705;
 inline constexpr int kActionSlot = 710;  // + slot
 inline constexpr int kActionBack = 720;
 inline constexpr int kSaveSlots = 8;
@@ -344,11 +344,18 @@ inline ui::Page promotion_page(const model::CityState& s, bool to_caesar) {
 // The start screen (0x27DDF): the funding level and the difficulty, each with
 // its arrows (0x27F54/0x27F60, 0x27F6C/0x27F78), and the governor's name, which
 // the engine keeps at DS:0x5858 ("Octavian" until the player types one).
-inline ui::Page start_page(int funding_level, int difficulty) {
+inline std::string trimmed(const std::string& t) {
+    const size_t a = t.find_first_not_of(' ');
+    if (a == std::string::npos) return std::string();
+    return t.substr(a, t.find_last_not_of(' ') - a + 1);
+}
+
+// The start screen (0x27DDF). `name` is the governor's 12-character name.
+inline ui::Page start_page(int funding_level, int difficulty, const std::string& name = "  Octavian  ") {
     namespace campaign = systems::campaign;
     ui::Page page;
     page.title = "A new career";
-    page.rows.push_back({"Governor", "Octavian"});
+    page.rows.push_back({"Governor", trimmed(name)});
     const size_t level = static_cast<size_t>(std::clamp(funding_level, 0, 9));
     page.rows.push_back({"Funding", std::string(campaign::kFundingNames[level]) + ", " +
                                         std::to_string(campaign::kStartingFunding[level]) + " Dn",
@@ -356,6 +363,7 @@ inline ui::Page start_page(int funding_level, int difficulty) {
     page.rows.push_back({"Difficulty", campaign::kDifficultyNames[static_cast<size_t>(std::clamp(difficulty, 0, 2))],
                          kActionDifficultyDown, kActionDifficultyUp});
     page.buttons.push_back({"Begin", kActionBegin});
+    page.buttons.push_back({"Choose name", kActionChooseName});
     page.buttons.push_back({"Load a game", kActionOpenLoad});
     return page;
 }

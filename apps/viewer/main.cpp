@@ -76,6 +76,7 @@
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
 #include "ui/maps_screen.hpp"
+#include "ui/name_entry.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
@@ -359,6 +360,8 @@ int main(int argc, char** argv) {
     bool have_battle_art = false;
     ui::MapsArt maps_art;  // the original maps screen
     bool have_maps_art = false;
+    ui::NameArt name_art;  // the name dialog
+    bool have_name_art = false;
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -388,6 +391,11 @@ int main(int argc, char** argv) {
                     forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
                     forum_clicks = formats::screen_data::load_click_map(asset("CONTFRM.GD8"));
                     have_forum_picture = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    name_art = ui::load_name_art(dir);
+                    have_name_art = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -592,7 +600,11 @@ int main(int argc, char** argv) {
     // ---- The screens: the city, the province, the Forum, a promotion offer and
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
-    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap };
+    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap,
+                        NameEntry };
+    // DS:0x0DD0: the governor's name, kept across new games and saved with each.
+    std::string governor_name = ui::governor_name(state);
+    ui::NameEntry name_entry;
     Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
@@ -737,6 +749,7 @@ int main(int argc, char** argv) {
         sim.random = random;
         install_hooks();
         city_image_dirty = province_image_dirty = true;
+        governor_name = ui::governor_name(state);  // 0x054CA: the loader copies it back
     };
 
     auto current_page = [&]() -> ui::Page {
@@ -749,7 +762,8 @@ int main(int argc, char** argv) {
             case Screen::Promotion: return viewer::promotion_page(state, promotion_to_caesar);
             case Screen::Battle: return viewer::battle_page(state, battle_view);
             case Screen::Ending: return viewer::ending_page(state, ending_caesar);
-            case Screen::Start: return viewer::start_page(funding_level, start_difficulty);
+            case Screen::Start:
+            case Screen::NameEntry: return viewer::start_page(funding_level, start_difficulty, governor_name);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons);
             default: return ui::Page{};
         }
@@ -813,11 +827,19 @@ int main(int argc, char** argv) {
             if (action == viewer::kActionFundingUp && funding_level < 9) ++funding_level;
             if (action == viewer::kActionDifficultyDown && start_difficulty > 0) --start_difficulty;
             if (action == viewer::kActionDifficultyUp && start_difficulty < 2) ++start_difficulty;
+            if (action == viewer::kActionChooseName && have_name_art) {
+                // 0x27F84: the name dialog.
+                name_entry = ui::begin_name_entry(governor_name);
+                screen = Screen::NameEntry;
+                platform::set_text_entry(true);
+                return;
+            }
             if (action == viewer::kActionBegin) {
                 state = model::blank_state();
                 sim.difficulty = start_difficulty;
                 const int province =
                     systems::campaign::begin_new_game(state, sim.random, funding_level, start_difficulty);
+                ui::set_governor_name(state, governor_name);
                 if (province >= 0 && start_new_province()) {
                     // 0x0F7D3 / 0x0F7DA: the first message, shown 78 frames.
                     sim.messages.post(systems::messages::plain(systems::messages::Id::NoCity));
@@ -1146,6 +1168,10 @@ int main(int argc, char** argv) {
                 screen = Screen::Forum;  // 0x0D174 waits for a click
                 return;
             }
+            if (screen == Screen::NameEntry) {
+                ui::name_click(name_entry, lx, ly);
+                return;
+            }
             if (screen == Screen::Battle && have_battle_art) {
                 // 0x2250F's buttons, or the retreat dialog's; anything else
                 // cuts a message short.
@@ -1312,6 +1338,17 @@ int main(int argc, char** argv) {
                 if (!cmd) continue;
 
                 switch (cmd->type) {
+                    case platform::CommandType::TextKey:
+                        if (save_mode && screen == Screen::NameEntry) {
+                            const ui::NameKey key = static_cast<ui::NameKey>(static_cast<int>(cmd->text_key));
+                            if (ui::name_key(name_entry, key, cmd->ch) != 0) {
+                                // Escape or Enter: the dialog edits in place, so both keep it.
+                                governor_name = ui::name_text(name_entry);
+                                screen = Screen::Start;
+                                platform::set_text_entry(false);
+                            }
+                        }
+                        break;
                     case platform::CommandType::Quit:
                         running = false;
                         break;
@@ -1345,6 +1382,13 @@ int main(int argc, char** argv) {
                         }
                         if (save_mode && screen == Screen::EmpireMap) {
                             screen = Screen::Forum;
+                            break;
+                        }
+                        if (save_mode && screen == Screen::NameEntry) {
+                            // 0x0C544: a right-click ends the dialog, keeping the name.
+                            governor_name = ui::name_text(name_entry);
+                            screen = Screen::Start;
+                            platform::set_text_entry(false);
                             break;
                         }
                         if (save_mode && screen == Screen::Battle && have_battle_art) {
@@ -1528,11 +1572,12 @@ int main(int argc, char** argv) {
                 save_mode ? "Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn"
                           : std::string();
             const ui::GameFont* font = have_font ? &game_font : nullptr;
-            if (save_mode && page_screen()) {
+            if (save_mode && (page_screen() || screen == Screen::NameEntry)) {
                 const ui::Page page = current_page();
                 frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
+                if (screen == Screen::NameEntry) ui::compose_name_entry(name_entry, name_art, frame);
             } else if (save_mode && screen == Screen::Battle && have_battle_art) {
                 // 0x2244B, once a frame: the generator draws, then the screen.
                 sim.random.advance();
