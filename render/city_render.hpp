@@ -48,6 +48,7 @@
 #include "formats/common/types.hpp"
 #include "model/city_state.hpp"
 #include "systems/construction.hpp"
+#include "systems/sounds.hpp"
 
 namespace gaius::render {
 
@@ -110,5 +111,14 @@ struct RenderPhase {
 void render_city(const model::CityMap& city, const CitySprites& sprites, int col0, int row0, int cols, int rows,
                  formats::IndexedImage& out, const RenderPhase& phase = {},
                  const std::array<model::Actor, model::kActorCount>* actors = nullptr);
+
+// The city-sound flags the engine's draw sets for the cells it draws
+// (systems::sounds::CitySoundFlags): every cell in the view's columns and
+// rows, and every active city walker whose position (x / 16, (y + 8) / 16)
+// falls in them. The engine sets them while drawing the view's cells and
+// walkers; which cells of a building at the view's edge count isn't traced
+// (INFERENCE: any cell in view).
+systems::sounds::CitySoundFlags city_sound_flags(const model::CityState& state, int col0, int row0, int cols,
+                                                 int rows);
 
 }  // namespace gaius::render

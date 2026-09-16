@@ -21,6 +21,11 @@
 #include <vector>
 
 #include "apps/viewer/save_view.hpp"
+#include "audio/ail_xmidi.hpp"
+#include "audio/game_audio.hpp"
+#include "formats/gtl/gtl.hpp"
+#include "systems/messages.hpp"
+#include "systems/sounds.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/exepack/exepack.hpp"
 #include "formats/p32/p32.hpp"
@@ -2680,6 +2685,366 @@ void test_battle_rounds() {
     battle::retreat(*st, 0);
     CHECK(st->objects[0].raw[military::kCohortMorale] == 3 && st->objects[0].raw[0x31] == 10 &&
           st->objects[0].raw[0x12] == 21 && st->objects[0].raw[0x13] == 23);
+}
+
+// ---------------------------------------------------------------------
+// Audio (Phase 9, findings section 45)
+// ---------------------------------------------------------------------
+
+namespace {
+
+struct RegLog {
+    std::vector<std::pair<int, int>> writes;
+    gaius::audio::AilXmidi::RegisterWrite fn() {
+        return [this](uint8_t r, uint8_t v) { writes.push_back({r, v}); };
+    }
+};
+
+// A 14-byte .BNK timbre: FM (connection 0), carrier TL 0 with KSL 0x40.
+const std::vector<uint8_t> kTestTimbre = {14, 0, 0, 0x21, 0x10, 0xF2, 0x74, 0x01, 0x06, 0x31, 0x40, 0xF3, 0x75, 0x02};
+
+void put_be32(std::vector<uint8_t>& d, uint32_t v) {
+    for (int s = 24; s >= 0; s -= 8) d.push_back(static_cast<uint8_t>((v >> s) & 0xFF));
+}
+
+void put_chunk(std::vector<uint8_t>& d, const char* id, const std::vector<uint8_t>& body) {
+    d.insert(d.end(), id, id + 4);
+    put_be32(d, static_cast<uint32_t>(body.size()));
+    d.insert(d.end(), body.begin(), body.end());
+}
+
+// FORM XDIR { INFO 1 } CAT XMID { FORM XMID { TIMB EVNT } }, as the game's files.
+std::vector<uint8_t> make_xmi(const std::vector<std::pair<uint8_t, uint8_t>>& timb, const std::vector<uint8_t>& events) {
+    std::vector<uint8_t> xdir = {'X', 'D', 'I', 'R'};
+    put_chunk(xdir, "INFO", {1, 0});
+    std::vector<uint8_t> form = {'X', 'M', 'I', 'D'};
+    std::vector<uint8_t> tb = {static_cast<uint8_t>(timb.size()), 0};
+    for (const auto& [patch, bank] : timb) {
+        tb.push_back(patch);
+        tb.push_back(bank);
+    }
+    put_chunk(form, "TIMB", tb);
+    put_chunk(form, "EVNT", events);
+    std::vector<uint8_t> cat = {'X', 'M', 'I', 'D'};
+    put_chunk(cat, "FORM", form);
+    std::vector<uint8_t> out;
+    put_chunk(out, "FORM", xdir);
+    put_chunk(out, "CAT ", cat);
+    return out;
+}
+
+int key_ons(const RegLog& log) {
+    int n = 0;
+    for (const auto& [r, v] : log.writes)
+        if (r >= 0xB0 && r <= 0xB8 && (v & 0x20)) ++n;
+    return n;
+}
+
+bool wrote(const RegLog& log, int reg, int value) {
+    return std::find(log.writes.begin(), log.writes.end(), std::make_pair(reg, value)) != log.writes.end();
+}
+
+}  // namespace
+
+void test_gtl_library() {
+    std::printf("test_gtl_library (SAMPLE.AD: 162 timbres; every tune's TIMB list is in it)\n");
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    const std::vector<gtl::Timbre> lib = gtl::load((fs::path(assets) / "SAMPLE.AD").string());
+    CHECK(lib.size() == 162);
+    CHECK(std::all_of(lib.begin(), lib.end(), [](const gtl::Timbre& t) { return t.data.size() == 14 && t.data[0] == 14; }));
+    int tunes = 0, started = 0;
+    for (const auto& entry : fs::directory_iterator(assets)) {
+        std::string ext = entry.path().extension().string();
+        for (char& c : ext) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (ext != ".XMI") continue;
+        ++tunes;
+        RegLog log;
+        gaius::audio::AilXmidi driver(log.fn());
+        driver.init();
+        if (!driver.register_sequence(gaius::formats::xmi::read_file(entry.path().string()))) continue;
+        bool complete = true;
+        for (int r = driver.request(); r != -1 && complete; r = driver.request()) {
+            const auto it = std::find_if(lib.begin(), lib.end(), [&](const gtl::Timbre& t) {
+                return t.bank == (r >> 8) && t.patch == (r & 0xFF);
+            });
+            if (it == lib.end()) {
+                complete = false;
+            } else {
+                driver.install_timbre(it->bank, it->patch, it->data);
+            }
+        }
+        if (complete) ++started;
+    }
+    CHECK(tunes == 14 && started == 14);
+}
+
+void test_ail_driver_registers() {
+    std::printf("test_ail_driver_registers (YAMAHA.INC: reset, a note's registers, pitch, level, voice robbing)\n");
+    using gaius::audio::AilXmidi;
+    RegLog log;
+    AilXmidi d(log.fn());
+    d.init();
+    // reset_synth writes 0x01-0xF5 first.
+    CHECK(log.writes.size() >= 0xF5 && log.writes[0] == std::make_pair(0x01, 0x20) &&
+          log.writes[3] == std::make_pair(0x04, 0x60));
+    CHECK(wrote(log, 0xBD, 0xC0) && wrote(log, 0x43, 63) && wrote(log, 0x63, 255));
+
+    d.install_timbre(0, 5, kTestTimbre);
+    d.send(0xC1, 5, 0);
+    log.writes.clear();
+    d.send(0x91, 60, 127);
+    // update_voice with every register flagged, on voice 0. Volume 127 x
+    // expression 127: (16129 x 2) >> 8 = 126, rounded up to 127; with velocity
+    // 127 (vel_graph[15]) 127 again, so the carrier keeps its level: 63 x 127 /
+    // 127, attenuation 0, with KSL 0x40. The modulator of an FM timbre isn't
+    // scaled.
+    const std::vector<std::pair<int, int>> expect = {
+        {0x20, 0x21}, {0x23, 0x31}, {0x40, 0x10}, {0x43, 0x40}, {0x60, 0xF2}, {0x63, 0xF3}, {0x80, 0x74},
+        {0x83, 0x75}, {0xE3, 0x02}, {0xE0, 0x01}, {0xC0, 0x06}, {0xA0, 0xB2}, {0xB0, 0x2E}};
+    CHECK(log.writes == expect);  // middle C: F-number 0x2B2, block 3, key on
+    log.writes.clear();
+    d.send(0x81, 60, 0);
+    CHECK(log.writes.size() == 1 && log.writes[0] == std::make_pair(0xB0, 0x0E));
+
+    // A bend of 0x555 above centre: >> 5 = 0x2A, x 12 = 0x1F8 sixteenths.
+    // (48 << 8) + 0x1F8 + 8 = 0x3200 >> 4 = 800: note 50 (D), 0x306, block 3.
+    // The rover gives the next note voice 1.
+    d.send(0xE1, 0x55, 0x4A);
+    log.writes.clear();
+    d.send(0x91, 60, 127);
+    CHECK(log.writes.size() >= 2 && log.writes[log.writes.size() - 2] == std::make_pair(0xA1, 0x06) &&
+          log.writes.back() == std::make_pair(0xB1, 0x2F));
+    d.send(0xE1, 0x00, 0x40);
+    d.send(0x81, 60, 0);
+
+    // Velocity 1 -> vel_graph[0] = 82: 127 x 82 -> 81, rounded up to 82;
+    // 63 x 82 / 127 = 40, so
+    // attenuation 23 on voice 2's carrier (register 0x45).
+    log.writes.clear();
+    d.send(0x91, 64, 1);
+    CHECK(wrote(log, 0x45, 0x40 | 23));
+    d.send(0x81, 64, 0);
+
+    // Nine voices: the tenth note robs the lowest-priority voiced slot -- all
+    // equal, so the last one found, the ninth note's -- and that note ends.
+    RegLog vlog;
+    AilXmidi v(vlog.fn());
+    v.init();
+    v.install_timbre(0, 5, kTestTimbre);
+    v.send(0xC1, 5, 0);
+    for (int k = 0; k < 9; ++k) v.send(0x91, static_cast<uint8_t>(60 + k), 100);
+    bool nine = true;
+    for (int s = 0; s < 9; ++s) nine = nine && !v.slot_free(s) && v.slot_voice(s) == s;
+    CHECK(nine);
+    v.send(0x91, 69, 100);
+    CHECK(v.slot_free(8) && !v.slot_free(9) && v.slot_voice(9) == 8 && v.slot_voice(0) == 0);
+
+    // Channels 1 and 11-16 play nothing; channel 10 needs bank 127, patch = key,
+    // and plays the timbre's note.
+    RegLog quiet;
+    AilXmidi q(quiet.fn());
+    q.init();
+    q.install_timbre(0, 5, kTestTimbre);
+    q.send(0xC0, 5, 0);
+    q.send(0xCA, 5, 0);
+    quiet.writes.clear();
+    q.send(0x90, 60, 127);
+    q.send(0x9A, 60, 127);
+    q.send(0x99, 36, 127);
+    CHECK(key_ons(quiet) == 0);
+    std::vector<uint8_t> drum = kTestTimbre;
+    drum[2] = 50;
+    q.install_timbre(127, 36, drum);
+    q.send(0x99, 36, 127);
+    CHECK(key_ons(quiet) == 1 && quiet.writes.size() >= 2 &&
+          quiet.writes[quiet.writes.size() - 2] == std::make_pair(0xA0, 0x06));
+}
+
+void test_ail_sequencer() {
+    std::printf("test_ail_sequencer (XMIDI.ASM: requests, intervals, note durations, FOR/NEXT, the end)\n");
+    using gaius::audio::AilXmidi;
+    RegLog log;
+    AilXmidi d(log.fn());
+    d.init();
+    // Program 5, middle C for 5 intervals, 10 intervals, the end.
+    const std::vector<uint8_t> xmi = make_xmi({{5, 0}}, {0xC1, 5, 0x91, 60, 127, 5, 10, 0xFF, 0x2F, 0x00});
+    CHECK(d.register_sequence(xmi));
+    CHECK(d.request() == 5);
+    d.install_timbre(0, 5, kTestTimbre);
+    CHECK(d.request() == -1);
+    d.start();
+    log.writes.clear();
+    d.serve();  // the first interval plays the program and the note
+    CHECK(key_ons(log) == 1 && d.queued_notes() == 1);
+    int off_at = 0, done_at = 0;
+    for (int i = 2; i <= 20; ++i) {
+        log.writes.clear();
+        d.serve();
+        for (const auto& [r, val] : log.writes)
+            if (r == 0xB0 && !(val & 0x20) && off_at == 0) off_at = i;
+        if (d.status() == AilXmidi::kDone && done_at == 0) done_at = i;
+    }
+    CHECK(off_at == 6);    // a duration of 5 intervals
+    CHECK(done_at == 11);  // the end, 10 intervals after the delay byte
+    CHECK(d.queued_notes() == 0);
+
+    // FOR 2 ... NEXT: the body plays twice.
+    RegLog loop_log;
+    AilXmidi l(loop_log.fn());
+    l.init();
+    l.install_timbre(0, 5, kTestTimbre);
+    CHECK(l.register_sequence(
+        make_xmi({{5, 0}}, {0xC1, 5, 0xB1, 116, 2, 0x91, 60, 127, 1, 2, 0xB1, 117, 127, 0xFF, 0x2F, 0})));
+    l.start();
+    for (int i = 0; i < 20; ++i) l.serve();
+    CHECK(key_ons(loop_log) == 2 && l.status() == AilXmidi::kDone);
+
+    // Stopping ends the queued notes.
+    RegLog stop_log;
+    AilXmidi s(stop_log.fn());
+    s.init();
+    s.install_timbre(0, 5, kTestTimbre);
+    CHECK(s.register_sequence(make_xmi({{5, 0}}, {0xC1, 5, 0x91, 60, 127, 100, 50, 0xFF, 0x2F, 0})));
+    s.start();
+    s.serve();
+    stop_log.writes.clear();
+    s.stop();
+    CHECK(s.status() == AilXmidi::kStopped && s.queued_notes() == 0 && stop_log.writes.size() == 1 &&
+          stop_log.writes[0] == std::make_pair(0xB0, 0x0E));
+    CHECK(!s.register_sequence({'F', 'O', 'R', 'M', 0, 0, 0, 4, 'X', 'D', 'I', 'R'}));
+}
+
+void test_game_audio_rules() {
+    std::printf("test_game_audio_rules (31E0: the halving, the city sounds, one sound at a time, the options)\n");
+    namespace audio = gaius::audio;
+    CHECK(audio::halve_sample(0) == 64 && audio::halve_sample(128) == 128 && audio::halve_sample(255) == 191 &&
+          audio::halve_sample(100) == 114 && audio::halve_sample(200) == 164);
+    namespace sounds = gaius::systems::sounds;
+    sounds::CitySoundFlags f;
+    CHECK(sounds::city_sound_effect(0, f) == -1);
+    f.theatre = f.forum = f.market = f.workshop = f.fountain = f.romans = f.barbarians = f.coliseum = f.hippodrome = true;
+    CHECK(sounds::city_sound_effect(0x000, f) == 8 && sounds::city_sound_effect(0x040, f) == 9 &&
+          sounds::city_sound_effect(0x080, f) == 10 && sounds::city_sound_effect(0x0C0, f) == 14 &&
+          sounds::city_sound_effect(0x100, f) == 19 && sounds::city_sound_effect(0x140, f) == 14 &&
+          sounds::city_sound_effect(0x170, f) == 11 && sounds::city_sound_effect(0x1A0, f) == 12 &&
+          sounds::city_sound_effect(0x1D0, f) == 13 && sounds::city_sound_effect(0x001, f) == -1);
+    // The renderer's flags: what is in view.
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    st->city.tile[10][10] = 0xF0;
+    st->city.tile[40][40] = 0xBB;
+    auto& walker = st->objects[3].raw;
+    walker[0x06] = 1;
+    walker[0x07] = 6;
+    walker[0x02] = 15 * 16;
+    walker[0x04] = 12 * 16 - 8;
+    const sounds::CitySoundFlags view = gaius::render::city_sound_flags(*st, 0, 0, 20, 15);
+    CHECK(view.theatre && !view.fountain && view.barbarians && !view.romans);
+    const sounds::CitySoundFlags other = gaius::render::city_sound_flags(*st, 30, 30, 20, 15);
+    CHECK(!other.theatre && other.fountain && !other.barbarians);
+
+    const char* assets = std::getenv("GAIUS_TEST_ASSETS");
+    if (!assets) {
+        skip("GAIUS_TEST_ASSETS not set");
+        return;
+    }
+    audio::GameAudio a;
+    CHECK(a.load(assets));
+    a.play_music("czarjin8.xmi", false);
+    CHECK(!a.music_playing());  // tunes off
+    a.play_music("czarjin8.xmi", true);
+    CHECK(a.music_playing() && a.music_name() == "czarjin8.xmi");
+    std::vector<int16_t> buf(4410);
+    double energy = 0;
+    for (int i = 0; i < 10; ++i) {
+        a.render(buf.data(), buf.size(), 44100);
+        for (int16_t s : buf) energy += static_cast<double>(s) * s;
+    }
+    CHECK(energy > 0);
+    a.play_effect(0, false);
+    CHECK(a.music_playing() && !a.effect_playing());  // effects off
+    a.play_effect(0, true);
+    CHECK(!a.music_playing() && a.effect_playing());  // an effect stops the music
+    a.play_music("czarjin8.xmi", true);
+    CHECK(a.music_playing() && !a.effect_playing());  // and the music the effect
+    a.play_music("nosuch.xmi", true);
+    CHECK(!a.music_playing());  // stopped before the file is looked for
+    // RESPONSE.VOC: 636 samples at 8 kHz, about 3506 samples at 44.1 kHz.
+    a.play_effect(0, true);
+    a.render(buf.data(), 3000, 44100);
+    CHECK(a.effect_playing());
+    a.render(buf.data(), 1000, 44100);
+    CHECK(!a.effect_playing());
+
+    // A tune plays once: CZARJIN8 is 9.6 s of events.
+    a.play_music("CZARJIN8.XMI", true);
+    std::vector<int16_t> sec(8000);
+    int seconds = 0;
+    while (a.music_playing() && seconds < 30) {
+        a.render(sec.data(), sec.size(), 8000);
+        ++seconds;
+    }
+    CHECK(seconds == 10);
+}
+
+void test_simulation_sounds() {
+    std::printf("test_simulation_sounds (the effects the simulation asks for, at the original's call sites)\n");
+    namespace sounds = gaius::systems::sounds;
+    namespace month = gaius::systems::month;
+    sounds::take();
+    auto f = fresh();
+    for (auto& row : f->city.tile) row.fill(0x1D);
+    f->city.tile[50][50] = 0xB9;
+    apply_water(f->city);
+    CHECK(sounds::take() == std::vector<int>{sounds::kWater});
+    apply_water(f->city);  // already dry: nothing
+    CHECK(sounds::take().empty());
+
+    month::Random random;
+    f->city.tile[20][20] = 0xCA;
+    burn(f->city, random, 20, 20);
+    CHECK(sounds::take() == std::vector<int>{sounds::kFire});
+    f->city.tile[21][21] = 0xA8;
+    CHECK(clear_area(f->city, random, 21, 21));
+    CHECK(sounds::take() == std::vector<int>{sounds::kPutOut});
+    f->city.tile[21][21] = 0xAA;  // rubble, not burning
+    CHECK(clear_area(f->city, random, 21, 21));
+    CHECK(sounds::take().empty());
+    f->city.tile[30][30] = 0xCA;
+    demolish(f->city, random, 30, 30);
+    CHECK(sounds::take() == std::vector<int>{sounds::kDemolish});
+
+    // The message's first frame and the year 0 banner.
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    set_global_word(*st, 0x6C78, 1);
+    set_global_word(*st, 0x6CA2, 5000);
+    month::SimState sim;
+    sim.speed = 0;
+    sim.messages.post(gaius::systems::messages::plain(gaius::systems::messages::Id::SalaryStopped));
+    month::run_frame(*st, sim);
+    std::vector<int> got = sounds::take();
+    CHECK(std::count(got.begin(), got.end(), sounds::kFanfare) == 1);
+    month::run_frame(*st, sim);
+    got = sounds::take();
+    CHECK(std::count(got.begin(), got.end(), sounds::kFanfare) == 0);
+    sim.year = 0;
+    sim.year_banner = 80;
+    month::run_frame(*st, sim);
+    got = sounds::take();
+    CHECK(std::count(got.begin(), got.end(), sounds::kFanfare) == 1 && sim.year_banner == 79);
+
+    // The battle's message: a sword at 0x73, a war cry at 0x32.
+    gaius::ui::BattleScreen b;
+    gaius::ui::BattleArt art;
+    b.message_timer = 0x74;
+    gaius::ui::battle_frame(b, *st, art, false);
+    CHECK(sounds::take() == std::vector<int>{sounds::kSword});
+    b.message_timer = 0x33;
+    gaius::ui::battle_frame(b, *st, art, false);
+    CHECK(sounds::take() == std::vector<int>{sounds::kWarCry});
 }
 
 void test_cohort2_handover() {
@@ -6046,6 +6411,11 @@ int main() {
     test_battle_screen();
     test_battle_race_matches_saves();
     test_cohort2_handover();
+    test_gtl_library();
+    test_ail_driver_registers();
+    test_ail_sequencer();
+    test_game_audio_rules();
+    test_simulation_sounds();
     test_province_movement();
     test_province_armies();
     test_province_towns();

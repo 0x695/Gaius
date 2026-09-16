@@ -6,6 +6,7 @@
 
 #include "systems/month.hpp"
 #include "systems/service.hpp"
+#include "systems/sounds.hpp"
 
 namespace gaius::systems::construction {
 
@@ -511,6 +512,10 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y) {
     if (!in_grid(x, y)) return false;
     uint8_t& t = city.tile[y][x];
     uint8_t& flags = city.operational_state[y][x];
+    // 0x12B79: a burning cell (0xA8-0xA9, 0xAB-0xAC, 0xAE-0xAF, 0xB1-0xB2)
+    // plays PUTOUT.VOC first.
+    if ((t >= 0xA8 && t <= 0xA9) || (t >= 0xAB && t <= 0xAC) || (t >= 0xAE && t <= 0xAF) || (t >= 0xB1 && t <= 0xB2))
+        sounds::request(sounds::kPutOut);
     if (t == 0x82 || t == 0x8A) {
         t = 0x4A;
     } else if (t == 0x5E || t == 0x72) {
@@ -526,6 +531,7 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y) {
     } else if (t >= 0x92 && t <= 0xC9) {
         t = 0x1D;
     } else if (t >= 0xCA) {
+        sounds::request(sounds::kDemolish);  // 0x124F8
         wreck_cells(city, random, x, y, 0xA7);
     } else {
         return false;
@@ -673,7 +679,10 @@ bool clear_area(model::CityState& state, month::Random& random, int x, int y) {
     return clear_area(state.city, random, x, y);
 }
 
+// 0x124F8 and 0x126BA end with their sound (effects 2 and 3), whatever they
+// wrecked; the in_grid checks below are Gaius's.
 void demolish(model::CityState& state, month::Random& random, int x, int y, int direction) {
+    sounds::request(sounds::kDemolish);
     step_toward(direction, &x, &y);
     if (!in_grid(x, y)) return;
     remove_record(state, x, y);
@@ -681,11 +690,13 @@ void demolish(model::CityState& state, month::Random& random, int x, int y, int 
 }
 
 void demolish(model::CityMap& city, month::Random& random, int x, int y, int direction) {
+    sounds::request(sounds::kDemolish);
     step_toward(direction, &x, &y);
     if (in_grid(x, y)) wreck_cells(city, random, x, y, 0xA7);
 }
 
 void burn(model::CityState& state, month::Random& random, int x, int y, int direction) {
+    sounds::request(sounds::kFire);
     step_toward(direction, &x, &y);
     if (!in_grid(x, y)) return;
     remove_record(state, x, y);
@@ -693,6 +704,7 @@ void burn(model::CityState& state, month::Random& random, int x, int y, int dire
 }
 
 void burn(model::CityMap& city, month::Random& random, int x, int y, int direction) {
+    sounds::request(sounds::kFire);
     step_toward(direction, &x, &y);
     if (in_grid(x, y)) wreck_cells(city, random, x, y, 0xA8);
 }

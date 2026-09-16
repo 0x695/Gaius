@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "systems/sounds.hpp"
+
 namespace gaius::systems::service {
 
 namespace {
@@ -433,8 +435,10 @@ void apply_water(model::CityMap& city) {
                     else if (t == 0xBD) t = 0xBB;
                 } else if (t == 0xB9) {
                     t = 0xBA;
+                    sounds::request(sounds::kWater);  // 0x2CA77
                 } else if (t == 0xBB || t == 0xBC) {
                     t = 0xBD;
+                    sounds::request(sounds::kWater);
                 }
             }
         }

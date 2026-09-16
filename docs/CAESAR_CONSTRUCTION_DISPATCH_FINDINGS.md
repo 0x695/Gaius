@@ -1438,7 +1438,7 @@ Three 32 × 10 frames: a column's capital, shaft and base. The ratings advisor d
 - **`.VOC`** is Creative Labs' published Creative Voice File. All 23 effects are 8-bit unsigned mono PCM in sound blocks, and `formats::voc` decodes them all. Four are named for the battle tactics (`TORTOISE`, `ATTACK`, `FLANK`, `CHARGE`). Which events play which sound isn't traced.
 - **`.XMI`/`.XM2`** is Miles Extended MIDI, also published. `formats::xmi` converts all 28 files to Standard MIDI at 120 ticks a second.
 - **The international build's `.MDI` files** are not those files converted (correcting `docs/CAESAR_GOG_BUILD_FINDINGS.md` section 7's "same music, different container"). They are re-orchestrated for General MIDI: drums moved from channel 9 to other channels and pitches, channels renumbered, velocities changed. Some are also renamed: the US `CZARJIN1` is the international `CZARJIN2`. What survives is the note count and the timing. Every note onset of the US `CZARJIN1`, `6`, `A` and `B` lands within 0.017 quarter notes of the matching `.MDI`'s, which confirms the 120-ticks-a-second conversion (`test_xmi_matches_mdi`).
-- **Playing either** needs an audio path Gaius doesn't have yet (Phase 9).
+- **Playing either** came with section 45: which routine plays which effect and tune, and the game's own music driver.
 
 
 ## 35. Messages, the game speed, and the last unnamed words (2026-09-15)
@@ -1470,7 +1470,7 @@ Three 32 × 10 frames: a column's capital, shaft and base. The ratings advisor d
 - **The funds warning.** `0x0FAD3`, every frame: with the funds at or below 1000 and `DS:0x6BE6` clear, it sets the flag and shows the full-screen warning `0x084B1` (six lines at `DS:0x085F`), waiting for a click. It comes once a game.
 - **The texts** are loaded as far pointers by `0x277xx` into `DS:0x6E2A`-`0x6EFE`. There are more of them -- the file dialogs, the Cohort disk prompts, the industry report -- used by screens Gaius draws its own way. `DS:0x6ECE` "You have insufficient funds for construction work" is stored but never posted.
 - **Checked** by `test_messages_and_speed`: the board's rules, one in five, the milestones, the sighted substitution, the tribute count and the funds warning.
-- **Not modeled:** the sounds.
+- **The sounds** came with section 45: FANFARE.VOC on a message's first frame.
 
 ### 35.2 The game speed
 
@@ -1829,7 +1829,7 @@ Every advisor the Forum picture opens now draws the original's screen. `ui/inter
 
 - **Clicks.** The viewer's screens answer their buttons as the original does. Any other click, or a right-click, goes back to the Forum picture; the original leaves on a right-click only.
 - **Timing.** The ratings advice shows for 90 frames.
-- **Not modeled:** the sounds. (The pressed frames came with section 42.1.)
+- **The sounds** are each figure's tune (section 34.2), played since section 45. (The pressed frames came with section 42.1.)
 
 ### 41.4 The governor's three dialogs (2026-09-16)
 
@@ -1922,7 +1922,7 @@ The key handler `0x2EC40` also has: Alt-X leaving (`0x0ED2C`), "p" / "P" flippin
   - Load and Save open Gaius's slot page in place of the original's file dialog.
   - Pause stops time until a click or T. Restart goes to the start screen. Exit to DOS closes the viewer.
   - The statue opens after "c" then "B".
-- **Stored but without effect yet:** the scroll speed, the sound switches (Gaius plays no sound yet), and the position indicator and icon name, which belong to the original's control panel.
+- **Stored but without effect yet:** the scroll speed, and the position indicator and icon name, which belong to the original's control panel. The sound switches work since section 45.
 
 ## 43. The scenario file's two first bytes (2026-09-17)
 
@@ -2007,3 +2007,144 @@ What Cohort 2 writes isn't in these files: `cohort.exe` isn't in either build. T
 
   The batch file's "errorlevel 2 ends the game" isn't copied: Gaius goes back to the province either way.
 - **Checked** by `test_cohort2_handover`: the words written, the take-back as a defeat and as a victory with Centuries lost, the file's 14 bytes, and the offer's clicks. The whole exchange also ran end to end in the viewer, with a stand-in script in place of `cohort.exe`.
+
+## 45. Sound: the driver, the effects and the tunes (2026-09-17)
+
+Segment `31E0` is the game's sound layer. Under it sit the Miles Audio Interface Library's loadable drivers, which turned out to be off-the-shelf.
+
+### 45.1 The drivers are AIL 2.14's, and its source is public
+
+- **The files.** `SBFM.ADV` (14,825 bytes), `ADLIB.ADV` (14,775) and `SBDIG.ADV` (4,667) are byte-identical to the drivers in the AIL 2.14 release of 14-Nov-92. John Miles released that package's source as freeware in 2000 ("usable by anyone for any purpose"); a copy is at `github.com/Tronix286/AIL2`. DEFINITIVE. `PCSPKR.ADV` differs (8,434 bytes against 8,377), an earlier or later version.
+- **What that gives.** `SBFM.ADV` is `XMIDI.ASM` with `YAMAHA.INC` assembled for `SBSTD`: one YM3812 (OPL2), no stereo. Everything the music does, from the note queue to the F-numbers, is in that source rather than in the disassembly. `audio::AilXmidi` transcribes it.
+- **The device.** `DS:0x6DE5` picks the driver: 2 Ad Lib (`adlib.adv` for music, `adlib.com` for digital), 3 Sound Blaster (`sbfm.adv`, `sbdig.adv`), 4 PC speaker (`pcspkr.adv`, and every tune's name gets the extension `.xm2`, `0x323BB`). So the `.XM2` files are the speaker's arrangements. Gaius emulates device 3.
+
+### 45.2 The tunes (`31E0:0430`, `0x32230`)
+
+- **The gates.** A music driver must be loaded (`DS:0x49D8`), "Allow tunes" (`DS:0x5298`) must be on, and the device must be above 1.
+- **Starting one.** The tune playing is stopped and released (`0x3219D`) and so is the effect (`0x32200`), so starting music silences an effect. Then:
+  1. The whole file is loaded (at most 0x4E20 bytes).
+  2. `SAMPLE.AD` is opened and sequence 0 registered.
+  3. While the driver requests a timbre, `0x31E03` looks for it in the library's directory and installs it. A timbre the library doesn't have ends the routine without starting the tune.
+  4. Then the sequence starts.
+
+  Every timbre the 14 `.XMI` files list is in `SAMPLE.AD` (`test_gtl_library`).
+- **Nothing loops.** No tune has the loop controllers (116/117); each plays once. The main loop's `31E0:05FC` (`0x323FC`) releases a finished sequence (status 2).
+- **Which tune when** (the callers of `0x430`):
+
+| Tune | Where | When |
+|---|---|---|
+| `czartit.xmi` | `0x0F6DC` | the title, at start-up without an argument |
+| `starter.xmi` | `0x0F7F9` | entering the main loop after the start screen |
+| `czarjin8.xmi` | `0x0A475` | drawing the Forum picture: opening the Forum, and returning to it from any advisor |
+| `czarjin5`, `czarjina`, `czarjinb`, `czarjin6`, `czarjin4`, `czarjin9`, `czarjin7.xmi` | `0x0E0A6`-`0x0E7F6` | each advisor as he opens (section 34.2) |
+| `czarjin5.xmi` | `0x0ECA3` | the Options screen |
+| `czarjin1.xmi` | `0x291C3` | the promotion screen |
+| `emptune.xmi` | `0x290DF` | the last promotion, to Caesar |
+| `czarjin2.xmi` | `0x29310` | the arrest, when the dismissal count `DS:0x6D6A` runs out (`0x0F83F`) |
+
+- **Unused.** `CZAR102.XMI` is named nowhere in the US executable (INFERENCE: unused), and there is no `CZARJIN3`.
+- **Turning tunes off.** `0x0F420` flips the switch; turned off, the music stops (`0x3219D`); turned on, nothing restarts.
+
+### 45.3 The effects (`31E0:0634`, `0x32434`)
+
+- **The gate.** "Allow effects" (`DS:0x5296`). Effect n is loaded from a 20-entry `if` chain. `0x3252F` then:
+  1. needs the digital driver (`DS:0x49D6`);
+  2. loads the `.VOC` (at most 0x2B5C bytes);
+  3. stops the music and the effect playing;
+  4. on a Sound Blaster, halves every sample's distance from 128 (`0x325D1`, over the first block, which is the whole of every file);
+  5. plays it.
+- **One sound at a time.** DEFINITIVE: an effect stops the tune, and a tune stops the effect. A building tool chosen during the Forum's tune ends the tune.
+- **The table and the callers:**
+
+| n | File | Played by |
+|---|---|---|
+| 0 | `RESPONSE.VOC` | `0x0FFA5` (`0334:CC65`), from 35 construction-command handlers as a command is chosen (on the speaker, a click instead) |
+| 1 | `RESPONSE.VOC` | `0x0FFC9`, never called |
+| 2 | `DEMOL.VOC` | the end of `0x124F8`, the demolition: Clear Area on a building, collapse, invaders |
+| 3 | `FIRE.VOC` | the end of `0x126BA`, a building catching fire, including spread |
+| 4 | `WATER.VOC` | `0x2CA77`, a fountain running dry (`0xB9` to `0xBA`, `0xBB`/`0xBC` to `0xBD`) |
+| 5 | `WAR_CRY.VOC` | `0x2D8ED`, each invader entering the city; `0x2DC30`, a rioter from a collapsed house; the battle message's timer at 0x32 and 2 (`0x22497`) |
+| 6 | `FANFARE.VOC` | `0x279C7`, a message's first frame (its timer at 80, so not the two messages posted with 79 and 78); `0x278C0`, the new year's banner's first frame in the year 0 |
+| 7 | `SWORD.VOC` | the battle message's timer at 0x73, 0x5A, 0x4B, 0x1E and 0x0F (`0x22497`) |
+| 8-14, 19 | city sounds | section 45.4 |
+| 15 | `PUTOUT.VOC` | `0x12D3F`, Clear Area on a burning cell (`0xA8`-`0xA9`, `0xAB`-`0xAC`, `0xAE`-`0xAF`, `0xB1`-`0xB2`) |
+| 16 | `BARBHORN.VOC` | `0x2513D`, a Cohort reaching the army it attacks, just before the battle screen |
+| 17 | `WALLCOLL.VOC` | `0x2E169`, with "The provinces need more workers for maintenance" |
+| 18 | `WINCHEER.VOC` | `0x22ECE` victory and `0x23081` defeat |
+
+- **Not played.** `ATTACK`, `CHARGE`, `FLANK` and `TORTOISE.VOC` are named nowhere in the US executable (INFERENCE: unused, perhaps for Cohort 2).
+- **The effects' rates.** Every `.VOC` is one 8-bit block, at 8 kHz or 4 kHz.
+
+### 45.4 The city sounds (`0x0FFD4`)
+
+- **The flags.** While the city view draws, the renderer sets a flag for each kind of source it draws:
+
+| Flag | Source | Set at |
+|---|---|---|
+| `DS:0x6CF6` | tile `0xF0` (theatre) | `0x202D6` |
+| `DS:0x6CF4` | `0xF1` (coliseum) | `0x2054A` |
+| `DS:0x6CF2` | `0xF2` (hippodrome) | `0x202E2` |
+| `DS:0x6CF0` | `0xE0`-`0xE7` (forum) | `0x202F4` |
+| `DS:0x6CEE` | `0xF5`/`0xF6` (workshops) | `0x20613`/`0x2080E` |
+| `DS:0x6CEC` | `0xF4` (market) | `0x205C9` |
+| `DS:0x6CEA` | `0xB9`/`0xBB` (working fountains) | `0x20025` |
+| `DS:0x6CE8` | a walker of type 3-4 | `0x06B15` |
+| `DS:0x6CE6` | a walker of type 5-7 (invaders) | `0x06B3D` |
+
+- **The rotation.** On a frame that runs a step (`0x0FA4E`), with the city sounds on (`DS:0x529E` = 0), the 512-step counter `DS:0x6D36` picks the source:
+
+| Count | Flag | Effect |
+|---|---|---|
+| 0 | theatre | 8 `MKT_THEA` |
+| 0x40 | coliseum | 9 `COLISEUM` |
+| 0x80 | hippodrome | 10 `HORSES` |
+| 0xC0 | forum | 14 `HUBBUB` |
+| 0x100 | workshop | 19 `WORKSHOP` |
+| 0x140 | market | 14 `HUBBUB` |
+| 0x170 | fountain | 11 `FOUNTAIN` |
+| 0x1A0 | romans | 12 `MARCHROM` |
+| 0x1D0 | barbarians | 13 `MARCHBAR` |
+
+  An effect plays if its flag is set; then every flag is cleared. At full speed a source is heard at most once in 512 steps.
+- **Gaius.** `render::city_sound_flags` sets the flags from the cells and walkers in the view. Which cells of a building cut by the view's edge the engine counts isn't traced; Gaius counts any cell in view (INFERENCE).
+
+### 45.5 The driver, transcribed
+
+`audio::AilXmidi` (`audio/ail_xmidi.hpp`) is the parts of `XMIDI.ASM` and `YAMAHA.INC` a Caesar tune reaches.
+
+**The sequencer.** It is serviced 120 times a second. First it counts the note queue down: 32 notes, a full queue overwriting entry 0, and a note ending when its count goes below zero. Then, when the interval count runs out, it plays events up to the next delay byte.
+
+**The synthesizer:**
+- **Slots.** 16 slots share the 9 voices. A new slot takes the next free voice after the last one given. With none free, `update_priority` robs the voiced slot of lowest priority (32767 less its channel's voices, the last of equals); the robbed note ends.
+- **Channels.** Only MIDI channels 2-10 play. Channel 10 is the rhythm channel: bank 127, patch = key, and the timbre's transpose byte is the note.
+- **Level.** The carrier's level is scaled by (volume × expression × 2) >> 8, then by velocity through the 16-step `vel_graph`, each product rounded up unless 0. The modulator is scaled too for additive timbres.
+- **Pitch.** 1/16 semitones plus the bend at ±12 semitones, through a 192-entry F-number table.
+
+`test_ail_driver_registers` and `test_ail_sequencer` check the register writes and timing against values worked from the source.
+
+**Not transcribed**, because no Caesar tune or call reaches them:
+- channel locking and protection;
+- indirect controllers, callbacks and branches;
+- the tempo and volume ramps, and the beat and bar counts;
+- OPL3 and TVFX timbres;
+- the cache's least-recently-used eviction. `SAMPLE.AD`'s 162 × 14 bytes fit the 192 timbres and 3584 bytes, so it can't happen.
+
+**Kept, though odd:**
+- An end-of-track leaves queued notes sounding.
+- Releasing sustain passes the note rather than the key, so sustained drums don't release.
+
+### 45.6 In Gaius
+
+- **`formats::gtl`** reads `SAMPLE.AD` (section 45.2).
+- **`audio::GameAudio`** is segment `31E0` on an emulated Sound Blaster:
+  - the driver's register writes go to ymfm's YM3812 (vendored, BSD-3-Clause), at 3579545 / 72 Hz;
+  - effects are halved and played at their rate;
+  - the mix is resampled to the output rate (linear, a Gaius choice, as is the mix level of the two).
+- **`systems::sounds`** is the simulation's side. The transcriptions request effects where the original calls `0x32434`: demolition, fire, dry fountains, invaders, rioters, the battle horn, worn roads, messages, the year 0 banner, the battle screen. The application takes and plays them. It also has the city-sound rotation.
+- **`gaius_viewer`** opens an SDL audio device when it has the game's folder (`--mute` for silence; screenshots are always silent). It plays:
+  - each screen's tune as it opens (45.2);
+  - RESPONSE.VOC when a construction or province command is chosen;
+  - the requested effects and the city sounds, following the options screen's switches.
+- **`tools/render_audio`** writes a tune or an effect, as played, to a WAV file.
+- **Checked** by `test_gtl_library`, `test_ail_driver_registers`, `test_ail_sequencer`, `test_game_audio_rules` and `test_simulation_sounds`: the timbre library, the register writes of a note, pitch bend, velocity, voice robbing, the rhythm channel, note durations, loops, stopping, the halving, one sound at a time, the switches, a tune's length, the city-sound table and view, and each call site's request.
+- **Not checked against the original's output.** There is no DOSBox capture of the OPL registers or the sound; one would check the transcription write for write.

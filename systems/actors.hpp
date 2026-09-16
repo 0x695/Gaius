@@ -56,7 +56,7 @@
 // (10), 0x6C12 type 13 (10). Cell layer 7BB4 bit 0x40 marks a cell a walker
 // stands on.
 //
-// Not modeled: the sounds (0x32434) the spawns trigger. Their messages (0x27A54)
+// The rioter's sound (0x32434) is requested through systems::sounds. The messages (0x27A54)
 // are posted by systems::month (systems/messages.hpp).
 
 #pragma once

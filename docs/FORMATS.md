@@ -97,9 +97,13 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 
 - **Status: DEFINITIVE.** Creative Labs' published Creative Voice File; all 23 effects are 8-bit unsigned mono PCM and decode.
 
+## `SAMPLE.AD` — FM timbres (`formats/gtl/`)
+
+- **Status: DEFINITIVE.** The Miles Audio Interface Library's Global Timbre Library (its source is public, dispatch findings section 45.1): 6-byte directory entries (patch, bank, u32 offset) ending at bank 0xFF, each timbre a u16 length and, for the YM3812, 12 bytes: transpose, then modulator AVEKM / KSLTL / AD / SR / WS, feedback-connection, carrier AVEKM / KSLTL / AD / SR / WS. 162 timbres, all 14 bytes; bank 127 is the rhythm channel's, one timbre per key. Every tune's timbres are in it (`test_gtl_library`).
+
 ## `.XMI` / `.XM2` — music (`formats/xmi/`)
 
-- **Status: DEFINITIVE.** Miles Extended MIDI (IFF `FORM XDIR` / `CAT XMID`; summed delay bytes, no running status, note-ons with durations), converted to Standard MIDI at 120 ticks a second. All 28 cues convert (`tools/xmi2mid`); the timing is confirmed against the international build's `.MDI` files, which are re-orchestrations rather than conversions. Section 34.5.
+- **Status: DEFINITIVE.** Miles Extended MIDI (IFF `FORM XDIR` / `CAT XMID`; summed delay bytes, no running status, note-ons with durations), converted to Standard MIDI at 120 ticks a second. All 28 cues convert (`tools/xmi2mid`); the timing is confirmed against the international build's `.MDI` files, which are re-orchestrations rather than conversions. Section 34.5. The `.XM2` files are the PC speaker's arrangements (section 45.1). The game plays the `.XMI` files through its own driver, transcribed in `audio/` (section 45).
 
 ---
 
@@ -119,6 +123,7 @@ All in `tools/`, all built and smoke-tested against real files:
 - `dump_pl8 <in.pl8> <out.png> [palette]` — decode all frames to a contact-sheet PNG.
 - `dump_vas <in.vas> <base.vpx> <palette> <prefix>` — play an animation over a picture, one PNG a frame.
 - `xmi2mid <in.xmi> <out.mid> [sequence]` — convert a music cue to Standard MIDI.
+- `render_audio <game folder> <NAME.XMI | effect 0-19> <out.wav> [rate]` — play a tune or an effect as the game does (its driver on an emulated YM3812) into a WAV file.
 - `empire_view <in> --ascii|--png|--summary` — render or inspect an EMPIRE2 scenario.
 - `save_inspect <in.sav>` — print the block table and decode the global-words section.
 - `bindiff_exe <a.exe> <b.exe> [--strings]` — decompress and diff two EXEPACK'd executables (byte-level runs + embedded-string set differences). Already run against both known `CSR.EXE` builds — see `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md` for what it found.

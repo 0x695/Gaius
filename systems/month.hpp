@@ -128,6 +128,9 @@ struct SimState {
     // 0x0F204/0x0F217), and DS:0x6DE3, the frame's phase in the speed gate.
     int speed = 100;
     int speed_phase = 0;
+    // DS:0x6C7C: the new year's banner, set to 80 frames when the year turns
+    // (0x29498) and counted down by run_frame (0x278A8). Not saved.
+    int year_banner = 0;
     Random random;
     service::ServiceState service;
 };

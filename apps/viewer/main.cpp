@@ -62,6 +62,7 @@
 #include <vector>
 
 #include "apps/viewer/save_view.hpp"
+#include "audio/game_audio.hpp"
 #include "apps/viewer/screens.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
@@ -74,6 +75,7 @@
 #include "systems/campaign.hpp"
 #include "systems/month.hpp"
 #include "systems/province.hpp"
+#include "systems/sounds.hpp"
 #include "ui/panel.hpp"
 #include "ui/battle_screen.hpp"
 #include "ui/buttons.hpp"
@@ -241,6 +243,7 @@ int main(int argc, char** argv) {
     std::string assets_dir;
     int run_months = 0;
     bool start_paused = false;
+    bool mute = false;  // --mute: no audio device (headless runs are always mute)
     std::string start_screen;       // --screen city|province|forum
     int start_forum_tab = 0;        // --forum-tab 0..6, or 8 for the statue
     bool cheats = false;            // --cheats: the statue opens (the original's key gate, 0x0DF9B)
@@ -255,6 +258,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--paused") == 0) start_paused = true;
+        if (std::strcmp(argv[i], "--mute") == 0) mute = true;
         if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) start_screen = argv[++i];
         if (std::strcmp(argv[i], "--forum-tab") == 0 && i + 1 < argc) start_forum_tab = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-action") == 0 && i + 1 < argc) test_actions.push_back(std::atoi(argv[++i]));
@@ -533,11 +537,11 @@ int main(int argc, char** argv) {
     // not every frame runs a step, but every frame draws and counts the message.
     auto advance_step = [&]() {
         const int month_before = sim.month;
-        if (systems::month::run_frame(state, sim)) {
-            city_image_dirty = true;
-            province_image_dirty = true;
-            if (sim.month != month_before) report_month();
-        }
+        if (!systems::month::run_frame(state, sim)) return false;
+        city_image_dirty = true;
+        province_image_dirty = true;
+        if (sim.month != month_before) report_month();
+        return true;
     };
 
     // One placement for the click handler and --test-build: the drag-built
@@ -1215,6 +1219,90 @@ int main(int argc, char** argv) {
         // The message box, and whether it shows on this screen (the city,
         // province and maps views; the messages option DS:0x6C78 on).
         static constexpr ui::Rect kMessageBox{12, 16, 240, 28};
+        // Sound (Phase 9, findings section 45): the game's own driver and files
+        // on an emulated Sound Blaster, mixed on SDL's audio thread. Without
+        // the game's files, a device or with --mute / --screenshot, silence.
+        audio::GameAudio game_audio;
+        SDL_AudioDeviceID audio_device = 0;
+        constexpr int kAudioRate = 44100;
+        if (!mute && screenshot_path.empty() && !game_dir.empty() && SDL_InitSubSystem(SDL_INIT_AUDIO) == 0) {
+            if (!game_audio.load(game_dir)) std::printf("audio: no SAMPLE.AD in %s, effects only\n", game_dir.c_str());
+            SDL_AudioSpec want{};
+            want.freq = kAudioRate;
+            want.format = AUDIO_S16SYS;
+            want.channels = 1;
+            want.samples = 1024;
+            want.userdata = &game_audio;
+            want.callback = [](void* user, Uint8* stream, int len) {
+                static_cast<audio::GameAudio*>(user)->render(reinterpret_cast<int16_t*>(stream),
+                                                            static_cast<size_t>(len) / 2, 44100);
+            };
+            audio_device = SDL_OpenAudioDevice(nullptr, 0, &want, nullptr, 0);
+            if (audio_device == 0) std::printf("audio: %s\n", SDL_GetError());
+            else SDL_PauseAudioDevice(audio_device, 0);
+        }
+        const auto play_effect = [&](int effect) {
+            if (audio_device == 0) return;
+            SDL_LockAudioDevice(audio_device);
+            game_audio.play_effect(effect, game_options.effects());
+            SDL_UnlockAudioDevice(audio_device);
+        };
+        const auto play_music = [&](const char* name) {
+            if (audio_device == 0) return;
+            SDL_LockAudioDevice(audio_device);
+            game_audio.play_music(name, game_options.tunes());
+            const bool started = game_audio.music_playing();
+            SDL_UnlockAudioDevice(audio_device);
+            if (started) std::printf("music: %s\n", name);
+        };
+        // The tune each screen starts as it opens: the title (0x0F6DC), the
+        // game's start (0x0F7F9), the Forum (0x0A475), each advisor (findings
+        // section 34.2), the options (0x0ECA3), promotion (0x291C3), Caesar's
+        // offer (0x290DF) and dismissal (0x29310).
+        const auto advisor_tune = [](viewer::ForumTab tab) -> const char* {
+            switch (tab) {
+                case viewer::kTreasurer: return "czarjin9.xmi";
+                case viewer::kTribune: return "czarjin7.xmi";
+                case viewer::kLegion: return "czarjin6.xmi";
+                case viewer::kRatings: return "czarjinb.xmi";
+                case viewer::kGovernor: return "czarjina.xmi";
+                case viewer::kIndustry: return "czarjin5.xmi";
+                case viewer::kHistory: return "czarjin4.xmi";
+                default: return nullptr;
+            }
+        };
+        Screen tune_screen = screen;
+        viewer::ForumTab tune_tab = forum_tab;
+        if (screen == Screen::Start) play_music("czartit.xmi");
+        const auto screen_tunes = [&]() {
+            if (screen == tune_screen && forum_tab == tune_tab) return;
+            const Screen from = tune_screen;
+            tune_screen = screen;
+            const bool tab_changed = forum_tab != tune_tab;
+            tune_tab = forum_tab;
+            switch (screen) {
+                case Screen::City:
+                case Screen::Province:
+                    if (from == Screen::Start) play_music("starter.xmi");
+                    break;
+                case Screen::ForumHall: play_music("czarjin8.xmi"); break;
+                case Screen::Forum:
+                    if (tab_changed || from == Screen::ForumHall || from == Screen::City || from == Screen::Province ||
+                        from == Screen::Maps) {
+                        if (const char* tune = advisor_tune(forum_tab)) play_music(tune);
+                    }
+                    break;
+                case Screen::Options:
+                    if (from != Screen::Options) play_music("czarjin5.xmi");
+                    break;
+                case Screen::Promotion: play_music(promotion_to_caesar ? "emptune.xmi" : "czarjin1.xmi"); break;
+                case Screen::Ending:
+                    if (!ending_caesar) play_music("czarjin2.xmi");
+                    break;
+                default: break;
+            }
+        };
+
         const auto message_visible = [&]() {
             return (screen == Screen::City || screen == Screen::Province || screen == Screen::Maps) &&
                    sim.messages.showing() && model::global_word(state, 0x6C78) != 0;
@@ -1261,6 +1349,11 @@ int main(int argc, char** argv) {
         };
         const auto options_changed = [&]() {
             sim.speed = std::clamp(game_options.speed() / 10 * 10, 0, 100);
+            if (!game_options.tunes() && audio_device != 0) {  // 0x0F420
+                SDL_LockAudioDevice(audio_device);
+                game_audio.stop_music();
+                SDL_UnlockAudioDevice(audio_device);
+            }
             if (!options_path.empty() && !ui::save_options(options_path, game_options))
                 std::printf("options: can't write %s\n", options_path.c_str());
         };
@@ -1560,6 +1653,7 @@ int main(int argc, char** argv) {
                         province_command = static_cast<int>(i);
                         order_cohort = patrol_x = patrol_y = -1;
                         std::printf("province command: %s\n", kProvinceCommands[i].label);
+                        play_effect(0);  // 0x0FFA5
                         return;
                     }
                 }
@@ -1573,6 +1667,7 @@ int main(int argc, char** argv) {
                 if (hit == tool_index && cycle_variant()) return;  // tapping the selected button again
                 tool_index = hit;
                 std::printf("tool: %s\n", systems::construction::command_name(kBuildTools[tool_index]));
+                play_effect(0);  // 0x0FFA5
                 return;
             }
             if (toolbar.contains(lx, ly)) return;  // panel background, not a button
@@ -1776,10 +1871,12 @@ int main(int argc, char** argv) {
                             province_command = (province_command + 1) % kProvinceCommandCount;
                             order_cohort = patrol_x = patrol_y = -1;
                             std::printf("province command: %s\n", kProvinceCommands[province_command].label);
+                            play_effect(0);
                         } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + 1) % kBuildToolCount;
                             std::printf("build tool: %s\n",
                                         systems::construction::command_name(kBuildTools[tool_index]));
+                            play_effect(0);
                         }
                         break;
                     case platform::CommandType::Select: {
@@ -1917,8 +2014,18 @@ int main(int argc, char** argv) {
                 const Uint32 now = SDL_GetTicks();
                 // A battle or a promotion offer stops time mid-step.
                 for (int budget = 8; budget > 0 && time_running && now - last_step_ms >= kStepMs; --budget) {
-                    advance_step();
+                    const bool stepped = advance_step();
                     last_step_ms += kStepMs;
+                    // 0x0FFD4: the city sounds, from what the city view drew.
+                    if (stepped && screen == Screen::City && !game_options.city_sounds_off()) {
+                        const int col0 = static_cast<int>(cam.x) / city_cell_px;
+                        const int row0 = static_cast<int>(cam.y) / city_cell_px;
+                        const int cols = static_cast<int>(kLogicalW / cam.zoom) / city_cell_px + 1;
+                        const int rows = static_cast<int>(cam.visible_h / cam.zoom) / city_cell_px + 1;
+                        const int effect = systems::sounds::city_sound_effect(
+                            sim.ticks % 512, render::city_sound_flags(state, col0, row0, cols, rows));
+                        if (effect >= 0) systems::sounds::request(effect);
+                    }
                     if (sim.funds_warning) {
                         // 0x0FAD3: the one full-screen warning, which waits for a click.
                         sim.funds_warning = false;
@@ -1936,6 +2043,10 @@ int main(int argc, char** argv) {
                 }
                 if (now - last_step_ms >= kStepMs) last_step_ms = now;  // behind: drop the backlog
             }
+            // The effects this frame asked for, in order: one sound at a time,
+            // so the last is the one heard.
+            for (const int effect : systems::sounds::take()) play_effect(effect);
+            screen_tunes();
 
             const std::string tool_text = save_mode ? tool_label() : std::string();
             const std::string funds_text =

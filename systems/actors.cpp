@@ -6,6 +6,7 @@
 #include "systems/construction.hpp"
 #include "systems/housing.hpp"
 #include "systems/province.hpp"
+#include "systems/sounds.hpp"
 
 namespace gaius::systems::actors {
 
@@ -773,6 +774,7 @@ int spawn_rioter(CityState& state, int x, int y) {
     a.setb(kFacing, 4);
     set_gw(state, 0x6C3C, std::max(0, gw(state, 0x6C3C) - 2));
     set_gw(state, 0x6C84, 2);
+    sounds::request(sounds::kWarCry);  // 0x2DC30
     return slot;
 }
 

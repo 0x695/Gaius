@@ -23,14 +23,14 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 6 | Economy & military | **Done** | — |
 | 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
-| 9 | Packaging & polish | Not started | Everything |
+| 9 | Packaging & polish | In progress | Settings, Steam Deck, Android packaging, paths, localization, toolbar past 2× |
 | 10 | Tooling scripts | Not started | Everything |
 
 **1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
 
 **Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3719 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
-**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Next is Phase 9 -- an audio path for the effects and music, packaging, and the platform pass.
+**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Next is the rest of Phase 9 -- packaging and the platform pass; its sound is done (2026-09-17).
 
 ---
 
@@ -293,7 +293,7 @@ Every Phase 6 item is done.
 - [x] **The buttons** (2026-09-17, findings section 42.1) -- `0x0D41D` / `0x0D521` transcribed (`ui/buttons.hpp`): pressed frames, held arrows repeating, toggles, radio buttons and act-on-release.
 - [x] **The statue's key gate** (2026-09-17, findings section 42.4) -- "c" then "B"; `2EF9:0031` is the key before the last.
 
-Every Phase 7 item is done. Without effect until later phases: the scroll speed and the sound switches (Phase 9's audio), and the position indicator and icon name options (the original control panel, Phase 8).
+Every Phase 7 item is done. Without effect until later phases: the scroll speed, and the position indicator and icon name options (the original control panel, Phase 8). The sound switches work since Phase 9's sound (2026-09-17).
 
 ---
 
@@ -322,12 +322,15 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed 
 
 ## Phase 9 — Platform packaging & polish
 
-**Status: Not started.** Pure engineering; can run alongside Phases 6-8.
+**Status: In progress.** Sound is done (2026-09-17). The rest is pure engineering.
 
 **Goal:** turn "runs on the platform" into "ships on the platform" — packaging, input polish and settings, not new architecture.
 
+**Done**
+- [x] **Sound** (2026-09-17, findings section 45) — the game's music driver is AIL 2.14's `SBFM.ADV`, byte for byte, and its source is public, so `audio::AilXmidi` transcribes it; its register writes play on ymfm's YM3812. `audio::GameAudio` is the game's sound layer: the tunes each screen starts, the 20 effects and who plays them, one sound at a time, the Sound Blaster's halving, the city sounds, and the options screen's switches. `gaius_viewer` plays them all; `tools/render_audio` writes them to WAV.
+
 **Open**
-- [ ] **Settings screen** — resolution and window mode, UI scale, input remapping, frame-rate cap, audio.
+- [ ] **Settings screen** — resolution and window mode, UI scale, input remapping, frame-rate cap, audio volume.
 - [ ] **Steam Deck** — gamepad-only navigation end to end, Steam Input glyphs if feasible, a Deck control layout.
 - [ ] **Android** — touch-first onboarding (masterplan 5a point 7), on-screen build and cancel controls, safe areas, packaging (APK/AAB), storage permissions for the user's game files.
 - [ ] **Save and config paths** — confirm each OS's conventions, and no collision with the original's saves.
@@ -348,7 +351,7 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed 
 
 **Open**
 - [ ] **A `scripts/` folder** — short, documented scripts, each doing one job over a user's game folder and saves.
-- [ ] **Asset export** — every picture and sprite sheet to PNG (`dump_vpx`, `dump_pl8`), the battle animations (`dump_vas`), the effects to WAV and the music to MIDI (`xmi2mid`).
+- [ ] **Asset export** — every picture and sprite sheet to PNG (`dump_vpx`, `dump_pl8`), the battle animations (`dump_vas`), the effects and tunes to WAV (`render_audio`) and the music to MIDI (`xmi2mid`).
 - [ ] **Saves** — inspect a save (`save_inspect`), render its city (`render_city`), compare two saves.
 - [ ] **Checks** — run the simulation checks over a folder of saves (`sim_check`, `month_check`), for anyone contributing saves.
 - [ ] **IGA entry** — document Gaius as the Caesar I engine reimplementation.

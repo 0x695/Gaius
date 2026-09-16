@@ -2,6 +2,7 @@
 #include "systems/province.hpp"
 
 #include "systems/actors.hpp"
+#include "systems/sounds.hpp"
 
 namespace gaius::systems::province {
 
@@ -304,7 +305,8 @@ void run_state(CityState& s, month::Random& random, int slot, Rec& a, const Hook
             a.setb(kDestY, t.w(kY) >> 4);
             walk(s, slot, kLandClass);
             if ((a.b(kStatus) & kCentre) && touching_army(s, a) >= 0 && hooks && hooks->battle) {
-                hooks->battle(s, slot, army);  // sound 0x10, then 0x22116
+                sounds::request(sounds::kBarbarianHorn);  // 0x2513D, then the battle 0x22116
+                hooks->battle(s, slot, army);
             }
             break;
         }
@@ -473,7 +475,8 @@ int invade_city(CityState& s, int direction_index) {
         a.setb(kDestX, tx);
         a.setb(kDestY, ty);
         a.setb(kState, 3);
-        return slot;  // sound 5, message 0x6E92 at the entry
+        sounds::request(sounds::kWarCry);  // 0x2D8ED; the message 0x6E92 is the caller's
+        return slot;
     }
     return -1;
 }

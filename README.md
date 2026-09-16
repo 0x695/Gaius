@@ -61,7 +61,9 @@ android/    Android target — see android/README.md
 tools/      CLI utilities built on formats/ and model/
 tests/      dependency-free test harness (see above)
 docs/       FORMATS.md and findings addenda
+audio/      the game's sound driver (AIL 2.14, transcribed) and sound layer, no SDL dependency
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
+third_party/ymfm/  vendored ymfm, the YM3812 emulator the music plays on (BSD-3-Clause)
 ```
 
 Later work (platform packaging, and `scripts/` for tooling) lands in later roadmap phases — see `GAIUS_ROADMAP.md`.
@@ -87,7 +89,7 @@ intent while making the findings cleanly quotable back into the wider preservati
 corpus.
 
 **Third-party components** keep their own licences and are not covered by the above:
-`third_party/stb/` is public domain, and the vendored SDL2 Android glue under
+`third_party/stb/` is public domain, `third_party/ymfm/` is BSD-3-Clause (see its `LICENSE`), and the vendored SDL2 Android glue under
 `android/` is zlib-licensed — see [`android/README.md`](android/README.md) for the
 attribution detail.
 

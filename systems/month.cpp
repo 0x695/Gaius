@@ -15,6 +15,7 @@
 #include "systems/military.hpp"
 #include "systems/plebs.hpp"
 #include "systems/province.hpp"
+#include "systems/sounds.hpp"
 
 namespace gaius::systems::month {
 
@@ -93,6 +94,7 @@ void finish_scans(SimState& sim, model::CityState* state) {
             // 0x2E15E: the message, then its timer set to 79 frames either way.
             sim.messages.post(messages::plain(messages::Id::ProvinceWorkers));
             sim.messages.timer = 0x4F;
+            sounds::request(sounds::kWallCollapse);
         }
         const int construction_need = plebs::set_needs(*state, sim.difficulty);
         plebs::pay_welfare(*state);
@@ -216,6 +218,7 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
         if (++sim.month >= 12) {
             sim.month = 0;
             ++sim.year;
+            sim.year_banner = 80;
         }
         if (++sim.month_counter_18 >= 18) {
             sim.month_counter_18 = 0;
@@ -401,7 +404,17 @@ bool run_frame(model::CityState& state, SimState& sim) {
     } else {
         sim.random.advance();
     }
-    if (model::global_word(state, 0x6C78) != 0) sim.messages.tick();
+    // 0x278A8, the new year's banner: FANFARE.VOC on its first frame in the
+    // year 0. Then 0x279AC, the message: FANFARE.VOC on its first frame (a
+    // message posted with a shorter timer never plays it).
+    if (sim.year_banner != 0) {
+        if (sim.year_banner == 80 && sim.year == 0) sounds::request(sounds::kFanfare);
+        --sim.year_banner;
+    }
+    if (model::global_word(state, 0x6C78) != 0) {
+        if (sim.messages.timer == 80) sounds::request(sounds::kFanfare);
+        sim.messages.tick();
+    }
     if (messages::funds_warning(state)) sim.funds_warning = true;
     return step;
 }

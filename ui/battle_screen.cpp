@@ -9,6 +9,7 @@
 #include "formats/pl8/pl8.hpp"
 #include "formats/vpx/vpx.hpp"
 #include "systems/military.hpp"
+#include "systems/sounds.hpp"
 
 namespace gaius::ui {
 
@@ -197,10 +198,12 @@ void play_round(BattleScreen& b, model::CityState& state, const BattleArt& art, 
         b.closing = 0xA9;
         show_message(b, state, art, "Victory is yours. The enemy", "scatters in disarray.", 0xAA);
         b.wins_frame = 2;
+        systems::sounds::request(systems::sounds::kCheer);  // 0x22ECA
     } else if (b.last.defeat) {
         b.closing = 0xA9;
         show_message(b, state, art, "Defeat and dishonor as the", "barbarians sweep over you.", 0xAA);
         b.lose_frame = 2;
+        systems::sounds::request(systems::sounds::kCheer);  // 0x2307D: the barbarians cheer
     } else if (b.last.outcome == battle::Outcome::Even) {
         show_message(b, state, art, "It is a tough battle and", "still could go either way.", 0x82);
     } else if (b.last.outcome == battle::Outcome::RomansWon) {
@@ -263,6 +266,17 @@ void battle_frame(BattleScreen& b, const model::CityState& state, const BattleAr
             }
         }
         --b.message_timer;
+        // 0x22497: swords and war cries at fixed counts of the message's timer.
+        switch (b.message_timer) {
+            case 0x73:
+            case 0x5A:
+            case 0x4B:
+            case 0x1E:
+            case 0x0F: systems::sounds::request(systems::sounds::kSword); break;
+            case 0x32:
+            case 0x02: systems::sounds::request(systems::sounds::kWarCry); break;
+            default: break;
+        }
         play(art.lose, b.lose_frame, 22, b.screen);
         play(art.wins, b.wins_frame, 21, b.screen);
         play(art.lose, b.hit_frame, 14, b.screen);

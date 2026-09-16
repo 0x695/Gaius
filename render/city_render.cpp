@@ -237,4 +237,31 @@ void render_city(const model::CityMap& city, const CitySprites& sprites, int col
     draw_actors_in_row(row0 + rows);
 }
 
+systems::sounds::CitySoundFlags city_sound_flags(const model::CityState& state, int col0, int row0, int cols,
+                                                 int rows) {
+    systems::sounds::CitySoundFlags f;
+    const int x1 = std::min(col0 + cols, model::kCityW), y1 = std::min(row0 + rows, model::kCityH);
+    for (int y = std::max(row0, 0); y < y1; ++y) {
+        for (int x = std::max(col0, 0); x < x1; ++x) {
+            const uint8_t t = state.city.tile[y][x];
+            if (t == 0xF0) f.theatre = true;
+            if (t == 0xF1) f.coliseum = true;
+            if (t == 0xF2) f.hippodrome = true;
+            if (t >= 0xE0 && t <= 0xE7) f.forum = true;
+            if (t == 0xF5 || t == 0xF6) f.workshop = true;
+            if (t == 0xF4) f.market = true;
+            if (t == 0xB9 || t == 0xBB) f.fountain = true;
+        }
+    }
+    for (const model::Actor& a : state.objects) {
+        const int type = static_cast<int8_t>(a.type());
+        if (a.active() == 0 || type < 0 || type > 10) continue;
+        const int x = a.screen_x() / 16, y = (a.screen_y() + 8) / 16;
+        if (x < col0 || x >= col0 + cols || y < row0 || y >= row0 + rows) continue;
+        if (type >= 3 && type <= 4) f.romans = true;
+        if (type >= 5 && type <= 7) f.barbarians = true;
+    }
+    return f;
+}
+
 }  // namespace gaius::render

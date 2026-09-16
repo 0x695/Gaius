@@ -309,8 +309,8 @@ void dispatch_tile(model::CityMap& city, ServiceState& service, int x, int y);
 // (tile 0xA4) set C9D4.01 within radius 3 and wells (0xB8) within radius 1.
 // Each fountain (0xB9-0xBD) asks fountain_supply(); if supplied it sets
 // C9D4.01 within radius 6 and a dry 0xBA becomes 0xB9, 0xBD becomes 0xBB; if
-// not, 0xB9 becomes 0xBA and 0xBB/0xBC become 0xBD (the engine also plays a
-// sound). Cells are visited in row order, so a fountain sees the levels its
+// not, 0xB9 becomes 0xBA and 0xBB/0xBC become 0xBD, and WATER.VOC plays
+// (systems::sounds). Cells are visited in row order, so a fountain sees the levels its
 // earlier neighbours were just given. Reproduces the saved C9D4.01, fountain
 // tiles and fountain levels (7BB4) of eleven real saves cell for cell; seven of
 // them have reservoirs and working fountains.

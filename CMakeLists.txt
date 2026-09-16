@@ -47,6 +47,7 @@ add_library(gaius_formats STATIC
   formats/vas/vas.cpp
   formats/voc/voc.cpp
   formats/xmi/xmi.cpp
+  formats/gtl/gtl.cpp
   formats/screen_data/screen_data.cpp
 )
 target_include_directories(gaius_formats PUBLIC ${CMAKE_SOURCE_DIR})
@@ -104,6 +105,7 @@ add_library(gaius_systems STATIC
   systems/campaign.cpp
   systems/forum.cpp
   systems/messages.cpp
+  systems/sounds.cpp
 )
 target_link_libraries(gaius_systems PUBLIC gaius_model)
 
@@ -138,6 +140,30 @@ target_link_libraries(gaius_render PUBLIC gaius_systems)
 add_executable(render_city tools/render_city.cpp)
 target_link_libraries(render_city PRIVATE gaius_render stb_image_write)
 
+# --- vendored ymfm (BSD-3-Clause): the YM3812 the music plays on -----------
+add_library(ymfm STATIC
+  third_party/ymfm/ymfm_opl.cpp
+  third_party/ymfm/ymfm_adpcm.cpp
+  third_party/ymfm/ymfm_pcm.cpp
+)
+target_include_directories(ymfm PUBLIC third_party/ymfm)
+if(MSVC)
+  target_compile_options(ymfm PRIVATE /W0)
+else()
+  target_compile_options(ymfm PRIVATE -w)
+endif()
+
+# --- audio library (Phase 9): the game's sound driver and sound layer --------
+# Pure, like gaius_ui: produces samples, no SDL.
+add_library(gaius_audio STATIC
+  audio/ail_xmidi.cpp
+  audio/game_audio.cpp
+)
+target_link_libraries(gaius_audio PUBLIC gaius_formats ymfm)
+
+add_executable(render_audio tools/render_audio.cpp)
+target_link_libraries(render_audio PRIVATE gaius_audio)
+
 # --- platform layer (Phase 1: window/input/paths) --------------------------
 add_library(gaius_platform STATIC
   platform/window.cpp
@@ -150,10 +176,10 @@ target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
-target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_platform stb_image_write)
+target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform stb_image_write)
 
 # --- tests -----------------------------------------------------------------
 enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
-target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render stb_image)
+target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)
