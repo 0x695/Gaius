@@ -53,6 +53,8 @@
 #include "systems/service.hpp"
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
+#include "ui/forum_screens.hpp"
+#include "ui/interface.hpp"
 #include "ui/maps_screen.hpp"
 #include "ui/name_entry.hpp"
 #include "ui/game_font.hpp"
@@ -4006,6 +4008,97 @@ void test_name_entry() {
     }
 }
 
+// Compares a composed interface screen with a capture at 6-bit DAC level,
+// skipping the rectangles `skip` lists; prints and returns the differences.
+size_t compare_with_capture(const gaius::formats::IndexedImage& img, const Palette& pal, const fs::path& shot_path,
+                            const std::vector<std::array<int, 4>>& skip) {
+    int sw, sh, sc;
+    unsigned char* shot = stbi_load(shot_path.string().c_str(), &sw, &sh, &sc, 3);
+    CHECK(shot != nullptr && sw == 320 && sh == 200);
+    if (!shot) return SIZE_MAX;
+    size_t bad = 0, total = 0;
+    for (int y = 0; y < 200; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            bool skipped = false;
+            for (const auto& r : skip) skipped = skipped || (x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3]);
+            if (skipped) continue;
+            const RGB c = pal.colors[img.pixels[static_cast<size_t>(y) * 320 + x]];
+            const unsigned char* q = shot + (y * 320 + x) * 3;
+            ++total;
+            if ((c.r >> 2) != (q[0] >> 2) || (c.g >> 2) != (q[1] >> 2) || (c.b >> 2) != (q[2] >> 2)) {
+                ++bad;
+                if (std::getenv("GAIUS_CAPTURE_DEBUG")) std::printf("    diff %d,%d\n", x, y);
+            }
+        }
+    }
+    stbi_image_free(shot);
+    std::printf("  %s: %zu / %zu pixels differ\n", shot_path.filename().string().c_str(), bad, total);
+    return bad;
+}
+
+void test_forum_screens_art() {
+    std::printf("test_forum_screens_art (0x0ACA7 histories, 0x09D22 industry report vs captures)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    gaius::ui::InterfaceArt art;
+    try {
+        art = gaius::ui::load_interface_art(dir);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("interface files: ") + e.what());
+        return;
+    }
+    CHECK(gaius::ui::number_text(5, 2, 1) == " 5" && gaius::ui::number_text(0, 3, 1) == "  0" &&
+          gaius::ui::number_text(7, 3, 0) == "007" && gaius::ui::number_text(12345, 2, 1) == "45");
+
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    set_global_word(*st, 0x6C32, -9);  // the capture's "B.C. 24 - 10"
+    const gaius::formats::IndexedImage history = gaius::ui::compose_history_screen(*st, art);
+    const fs::path screens = fs::path(dir) / "gaius_test_screens";
+    if (fs::exists(screens / "7907835-caesar-dos-city-stats.png")) {
+        // The bars (the capture's city isn't one of the saves) and the pointer.
+        std::vector<std::array<int, 4>> skip;
+        for (const auto& graph : gaius::systems::forum::kHistoryGraphs)
+            skip.push_back({graph.right_x - 13 * 8, graph.base_y - graph.max_height + 1, 14 * 8, graph.max_height});
+        skip.push_back({72, 160, 24, 24});
+        CHECK(compare_with_capture(history, art.palette, screens / "7907835-caesar-dos-city-stats.png", skip) == 0);
+
+        // The bars: for each of the 56 slots, the height whose bar
+        // (1F6F:236C's frame 0x36 or 0x37, its top rows standing on the base)
+        // matches the capture exactly -- there must be one.
+        int sw, sh, sc;
+        unsigned char* shot =
+            stbi_load((screens / "7907835-caesar-dos-city-stats.png").string().c_str(), &sw, &sh, &sc, 3);
+        CHECK(shot != nullptr);
+        if (shot) {
+            int unmatched = 0, drawn = 0;
+            for (const auto& graph : gaius::systems::forum::kHistoryGraphs) {
+                for (int k = 0; k < 14; ++k) {
+                    const int x = graph.right_x - 8 * k;
+                    int best = -1;
+                    for (int h = 0; h <= graph.max_height && best < 0; ++h) {
+                        gaius::formats::IndexedImage patch = history;
+                        if (h > 0) gaius::ui::draw_sprite_rows(patch, art.pointers, (x & 0xF) ? 0x36 : 0x37, x, graph.base_y, h);
+                        bool same = true;
+                        for (int yy = graph.base_y - graph.max_height + 1; yy <= graph.base_y && same; ++yy)
+                            for (int xx = x; xx < x + 8 && same; ++xx) {
+                                if (xx >= 72 && xx < 96 && yy >= 160 && yy < 184) continue;  // the pointer
+                                const RGB c = art.palette.colors[patch.pixels[static_cast<size_t>(yy) * 320 + xx]];
+                                const unsigned char* q = shot + (yy * 320 + xx) * 3;
+                                same = (c.r >> 2) == (q[0] >> 2) && (c.g >> 2) == (q[1] >> 2) && (c.b >> 2) == (q[2] >> 2);
+                            }
+                        if (same) best = h;
+                    }
+                    if (best < 0) ++unmatched;
+                    if (best > 0) ++drawn;
+                }
+            }
+            stbi_image_free(shot);
+            std::printf("  history bars: %d of 56 slots hold a bar, %d match no height\n", drawn, unmatched);
+            CHECK(unmatched == 0 && drawn > 0);
+        }
+    }
+}
+
 // The maps screen against the DOSBox capture of it (road layout, the city
 // shown): everything but the map itself, whose city isn't one of the saves,
 // and the mouse pointer.
@@ -5567,6 +5660,7 @@ int main() {
     test_empire_map_screen();
     test_maps_screen();
     test_name_entry();
+    test_forum_screens_art();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();

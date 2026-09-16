@@ -117,6 +117,8 @@ add_library(gaius_ui STATIC
   ui/battle_screen.cpp
   ui/maps_screen.cpp
   ui/name_entry.cpp
+  ui/interface.cpp
+  ui/forum_screens.cpp
   ui/toolbar.cpp
   ui/panel.cpp
 )

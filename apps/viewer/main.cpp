@@ -75,6 +75,8 @@
 #include "ui/panel.hpp"
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
+#include "ui/forum_screens.hpp"
+#include "ui/interface.hpp"
 #include "ui/maps_screen.hpp"
 #include "ui/name_entry.hpp"
 #include "ui/game_font.hpp"
@@ -362,6 +364,8 @@ int main(int argc, char** argv) {
     bool have_maps_art = false;
     ui::NameArt name_art;  // the name dialog
     bool have_name_art = false;
+    ui::InterfaceArt interface_art;  // the original's advisor screens
+    bool have_interface_art = false;
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -391,6 +395,11 @@ int main(int argc, char** argv) {
                     forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
                     forum_clicks = formats::screen_data::load_click_map(asset("CONTFRM.GD8"));
                     have_forum_picture = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    interface_art = ui::load_interface_art(dir);
+                    have_interface_art = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -1158,6 +1167,13 @@ int main(int argc, char** argv) {
             province_drag_x = province_drag_y = -1;
             drag_undo.clear();
             drag_refund = 0;
+            if (screen == Screen::Forum && have_interface_art &&
+                (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry)) {
+                // The original's advisor screen waits for a click, then the
+                // Forum picture again.
+                screen = have_forum_picture ? Screen::ForumHall : Screen::City;
+                return;
+            }
             if (page_screen()) {
                 const ui::Page page = current_page();
                 const int action = ui::hit_test(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), lx, ly);
@@ -1578,6 +1594,14 @@ int main(int argc, char** argv) {
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
                 if (screen == Screen::NameEntry) ui::compose_name_entry(name_entry, name_art, frame);
+                if (screen == Screen::Forum && have_interface_art &&
+                    (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry)) {
+                    // 0x0ACA7 / 0x09D22 in the original's art.
+                    const formats::IndexedImage advisor = forum_tab == viewer::kHistory
+                                                              ? ui::compose_history_screen(state, interface_art)
+                                                              : ui::compose_industry_screen(state, interface_art);
+                    ui::canvas_to_rgb(advisor, interface_art.palette, frame);
+                }
             } else if (save_mode && screen == Screen::Battle && have_battle_art) {
                 // 0x2244B, once a frame: the generator draws, then the screen.
                 sim.random.advance();
