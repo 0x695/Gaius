@@ -3368,6 +3368,91 @@ void test_campaign_terrain_matches_saves() {
 }
 
 // 0x05730 and friends on a city in the middle of a game.
+void test_forum_figures() {
+    std::printf("test_forum_figures (0x0DF9B statue, 0x09D22 industry report, 0x0ACA7 histories, 0x0CF12 advice)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+
+    // The statue: rank 1-19, and difficulty 0 <-> 1 around rank 1.
+    set_global_word(*st, forum::kRank, 1);
+    set_global_word(*st, forum::kDifficulty, 0);
+    forum::lower_rank(*st);
+    CHECK(global_word(*st, forum::kRank) == 1 && global_word(*st, forum::kDifficulty) == 0);
+    forum::raise_rank(*st);
+    CHECK(global_word(*st, forum::kRank) == 2 && global_word(*st, forum::kDifficulty) == 1);
+    forum::lower_rank(*st);
+    CHECK(global_word(*st, forum::kRank) == 1 && global_word(*st, forum::kDifficulty) == 0);
+    set_global_word(*st, forum::kDifficulty, 3);
+    set_global_word(*st, forum::kRank, 19);
+    forum::raise_rank(*st);
+    CHECK(global_word(*st, forum::kRank) == 19 && global_word(*st, forum::kDifficulty) == 3);
+
+    // Histories: the scale doubles until every bar fits.
+    std::vector<uint8_t> table(60, 0);
+    const auto put = [&](int i, int v) {
+        table[static_cast<size_t>(i) * 4 + 2] = static_cast<uint8_t>(v & 0xFF);
+        table[static_cast<size_t>(i) * 4 + 3] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    };
+    for (int i = 0; i < 15; ++i) put(i, 100);
+    put(3, 1000);  // 1000 / 25 = 40 > 36, so one doubling
+    put(4, -50);
+    auto bars = forum::history_bars(table, 4, 25, 36);
+    CHECK(bars.doublings == 1 && bars.height[0] == -1 && bars.height[1] == 20 && bars.height[2] == 2);
+    put(2, 3000);  // 3000 / 100 = 30 fits after two doublings
+    bars = forum::history_bars(table, 4, 25, 36);
+    CHECK(bars.doublings == 2 && bars.height[2] == 30);
+    // Record 4 is the newest, so bar 13 is record 6 and record 5 isn't shown.
+    put(5, 9999);
+    CHECK(forum::history_bars(table, 4, 25, 36).doublings == 2);
+    CHECK(forum::history_years(14) == "B.C. 1 - 13" && forum::history_years(20) == "A.D. 5 - 19" &&
+          forum::history_years(-5) == "B.C. 20 - 6");
+
+    // Advice by column, rating and cycle.
+    set_global_word(*st, administration::kPeace, 40);
+    set_global_word(*st, 0x6C84, 2);
+    CHECK(forum::rating_hint(*st, 40, 0, 0, 0) == 3 && forum::rating_hint(*st, 40, 1, 0, 0) == 2);
+    CHECK(forum::rating_hint(*st, 80, 1, 0, 0) == 14);  // the boundary
+    set_global_word(*st, administration::kCulture, 50);
+    set_global_word(*st, 0x6C80, 40);
+    CHECK(forum::rating_hint(*st, 120, 0, 0, 49) == 6 && forum::rating_hint(*st, 120, 0, 0, 50) == 7);
+    set_global_word(*st, administration::kProsperity, 99);
+    set_global_word(*st, 0x6C10, 1199);
+    CHECK(forum::rating_hint(*st, 200, 0, 0, 0) == 8 && forum::rating_hint(*st, 200, 1, 0, 0) == 10);
+    set_global_word(*st, administration::kEmpire, 100);
+    CHECK(forum::rating_hint(*st, 280, 0, 0, 0) == 14);
+    set_global_word(*st, administration::kEmpire, 10);
+    set_global_word(*st, 0x6C8C, 1);
+    CHECK(forum::rating_hint(*st, 280, 1, 3, 0) == 12 && forum::rating_hint(*st, 280, 1, 4, 0) == 13);
+    CHECK(forum::next_hint_cycle(0) == 1 && forum::next_hint_cycle(2) == 0);
+
+    // The industry report on the real saves: suitability from 3496:1880, the
+    // factories DS:0x5816, and the average the yearly accounts saved.
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    int matched = 0, loaded = 0;
+    for (const char* name : kRealSaves) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        const auto save = std::make_unique<CityState>(load(save::load(p.string())));
+        const forum::IndustryReport r = forum::industry_report(*save);
+        ++loaded;
+        if (r.average_level == global_word(*save, 0x6BE8)) ++matched;
+        int factories = 0;
+        for (const auto& row : r.rows) {
+            factories += row.factories;
+            CHECK(row.grade == -1 || std::string(forum::kGradeNames[static_cast<size_t>(row.grade)]).size() > 0);
+        }
+        std::printf("  %s: province %d, average %d (saved %d), overall %s, prospects %s, factories %d\n", name,
+                    r.province, r.average_level, global_word(*save, 0x6BE8), forum::kGradeNames[static_cast<size_t>(r.overall)],
+                    forum::kGradeNames[static_cast<size_t>(r.prospects)], factories);
+    }
+    std::printf("  average matches the saved DS:0x6BE8 in %d of %d saves\n", matched, loaded);
+    CHECK(matched == loaded);
+}
+
 void test_forum_controls() {
     std::printf("test_forum_controls (0xE637-0xEB2C arrows, 0xEB45-0xEC8D duties, 0xE54C-0xE60E Cohorts)\n");
     using namespace gaius::systems;
@@ -5182,6 +5267,7 @@ int main() {
     test_campaign_terrain_matches_saves();
     test_campaign_start_province();
     test_forum_controls();
+    test_forum_figures();
     test_messages_and_speed();
     test_save_write_round_trip();
     test_vas_animations();

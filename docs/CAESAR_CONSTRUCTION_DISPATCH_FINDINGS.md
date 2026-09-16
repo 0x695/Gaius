@@ -955,7 +955,7 @@ When the calendar turns the year it:
 2. **`0334:6CB1` (flat `0x9FF1`)**: `DS:0x6BE8` = the active workshops' average production level (+0x10 & 7), 0 with none;
 3. **`0x282A1`, population tax**:
    - each housing cell (`0xC8`-`0xD7`) whose C9D4 has bit `0x20` adds its tax units, `3496:008E`[tile - `0xC8`] (1, 2, 4, 6, 7, 10, 14, 9, 13, 15, 16, 17, 18, 20, 22, 25 -- the 16 bytes after the population table);
-   - a house without the bit sets `DS:0x6C7E`, which the advisor text picker (`0xD007`) reads;
+   - a house without the bit sets `DS:0x6C7E`, which the ratings advice picker (`0x0CF12`, section 36.4) reads;
    - `DS:0x6BC6` = units x average rate / 20;
    - tax per head: x = `DS:0x6BC6` x 100 / (`DS:0x6C0E` + 1), `DS:0x6BCA` = x / 100 and `DS:0x6BC8` = x % 100, in denarii and hundredths.
 
@@ -1503,3 +1503,51 @@ The speed `DS:0x5292` moves in tens between 0 and 100 on the options screen (`0x
 | `DS:0x6C6C`, `0x6C6E` (not saved), `0x6C70`, `0x6C72` | 35.1 | the message's place |
 | `DS:0x6BE6` | `0x0FAD3` | the funds warning given |
 | `DS:0x6BDC` | nothing | unused |
+
+## 36. The Forum's other figures and the ratings advice (2026-09-16)
+
+Three of the Forum picture's eight figures (`CONTFRM.GD8` regions, section 34.2) had no page in Gaius; the ratings screen's advice texts had been located (`0xD007`) but not read. `systems::forum` now transcribes all four, and `gaius_viewer`'s Forum opens them.
+
+### 36.1 The statue (region 1, `0x0DF9B`) -- a rank cheat
+
+- **The gate.** The page opens only when the keyboard handler's words `2EF9:0031` = `0x63` and `2EF9:002F` = `0x42`. `2EF9:002F` is the last typed character -- the text entry at `0x11093`-`0x112AF` compares it with Escape, Enter, backspace, digits and letters -- so the second key is "B". That `2EF9:0031` keeps the character before it ("c") is INFERENCE. Leaving clears `2EF9:002F`.
+- **The page.** The rank title (the 16-character table `DS:0x7102`) at (0x68, 0x40), with two arrows.
+- **The arrows.** Up (`0x0E066`): the rank `DS:0x6C30` + 1, at most 19; then, above rank 1, difficulty `DS:0x6CB8` 0 becomes 1. Down (`0x0E086`): the rank - 1, at least 1; then, at rank 1, difficulty 1 becomes 0.
+- `gaius_viewer` stands in `--cheats` for the key gate.
+
+### 36.2 The histories (region 4, `0x0ACA7`)
+
+Four panels (`1F6F:2008`) of bars (`1F6F:236C`), one per yearly history buffer (section 22; 15 records of year and value):
+
+| Buffer | Value | Newest bar at | Base row | Scale | Max height | Captions (after 0, 1, 2 doublings) | Label |
+|---|---|---|---|---|---|---|---|
+| `3496:01F0`, index `DS:0x6B36` | `DS:0x6BC6` | x 0x80 | 0x4C | 25 | 36 | 0 - 750 / 1500 / 2250 dn | population tax |
+| `3496:022C`, `DS:0x6B34` | `DS:0x6BC4` | 0x120 | 0x4C | 25 | 36 | the same | industry tax |
+| `3496:0268`, `DS:0x6B32` | `DS:0x6CA2` | 0x80 | 0xAC | 200 | 68 | 0 - 12500 / 25000 / 37500 dn | city funds |
+| `3496:02A4`, `DS:0x6B30` | `DS:0x6C10` | 0x120 | 0xAC | 25 | 68 | 0 - 6000 / 12000 / 18000 | population |
+
+- **The graph routine.** It walks 14 records back from the newest (wrapping at 15). If any value / scale (signed) is taller than the maximum, it doubles the scale and starts again, counting the passes. Each bar is value / scale capped at the maximum, drawn only when positive, 8 pixels left of the one before. The pass count (1-3) picks the caption at (0x14 or 0xB4, 0x24 or 0x64) in `MINIFONT`; four or more passes show none. The captions don't match the scales (36 x 25 is 900, not 750) -- transcribed as they are.
+- **The art.** The bars are `POINTERS.PL8` frames 0x36/0x37 (8x76; 0x37 where x is a multiple of 16), cut to the bar's height by `303E:15B7`; which rows of the frame show is INFERENCE. The panels come from the same sheet: `1F6F:1EC1` tiles frames 0-8 as a nine-slice frame, with the interior drawing `0x13` + the 50-byte pattern `3496:0718`, and `1F6F:2008` draws frames 9-17 as an inset. The industry report's goods icons are frames 0x38-0x3F (16x11).
+- **The caption years** (`0x0B04C`). "A.D.     -" or "B.C.     -" by the sign of year - 15, then |year - 15| at x 0x8A and |year - 1| at 0xB8. In year 14 that reads "B.C. 1 - 13".
+
+### 36.3 The industry report (region 8, `0x09D22`)
+
+- **The header.** "Industry Report on" plus the province's 16-character name (`DS:0x70F2`, index `DS:0x6CA6`).
+- **Overall Industry Rating -.** `0x09FF1` averages `level & 7` (+0x10) over the workshop records whose +0x08 is set, and stores it in `DS:0x6BE8` -- the same word the yearly accounts compute, and all 17 saves hold exactly this average. The grade: 1 or less Terrible, 3 or less Poor, 5 or less Average, 6 Good, 7 Excellent.
+- **Prospects for Expansion -.** `DS:0x6BF4` graded: -2 or less, 0 or less, 2 or less, 4 or less, 5 and up.
+- **A row per goods** (`0x0A04E`, y = 12i + 0x28). The name (`DS:0x46F1`: Glass, Tin, Pottery, Copper, Wine, Ivory, Wheat, Spices), the icon 0x38 + i, then the suitability `3496:1880`[province × 8 + i] -- the base of a workshop's level (section 20) -- named -3 Terrible, -2 Poor, 0 Average, 1 Good, 2 Excellent, while -1 shows nothing. Last, the factories `DS:0x5816`[i].
+
+### 36.4 The ratings advice (`0x0CC21`, picker `0x0CF12`)
+
+A click with the pointer's y in 0x78-0xB3 advances `DS:0x6D2A` (0, 1, 2, 0...) and picks one of 14 texts (`DS:0x7142`...`0x712E`), shown for 90 frames in place of "Average Rating %":
+
+| x | Rating below 100 | Cycle 0 | Cycle 1 | Otherwise |
+|---|---|---|---|---|
+| 1-79 | Peace | `DS:0x6C84` = 1: "Stop barbarians from reaching city" | `0x6C84` = 2: "Building temples helps prevent riots" | "Reduce taxes, keep everyone happy !!" |
+| 81-159 | Culture | `DS:0x6C80` < 36: "Prehaps you need a grand spectacle" | `DS:0x6C82` < 36: "Is everyone served by religion ?" | random walk `2EF9:0286` < 50: "Increase your population", else "Are people healthy and educated ?" |
+| 161-239 | Prosperity | `DS:0x6C10` < 1200: "Increase the population" | `DS:0x6C7E`: "Check everyone is paying you tax !" | "Upgrade slums to high grade housing" |
+| 241-319 | Empire | `DS:0x6C8C` = 0: "Build an Imperial highway to Rome" | `DS:0x6C92` < 4: "Develop links with local villages" | "Straighten those roads !" |
+
+Anything else -- a rating of 100, or x on 0, 80, 160 or 240 -- gives "you need no help here". `DS:0x6C84` is set to 1 by an army reaching the city (`0x24C01`) and to 2 by a collapse's rioter (`0x2DC56`). Earlier sections' "`0xD007` advisor text picker" is this routine's middle.
+
+**Checked** by `test_forum_figures`: the statue's limits, the doubling scale, the caption years, every hint branch, and the industry average against all 17 saves.

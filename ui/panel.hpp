@@ -16,6 +16,7 @@
 //   a row of tabs (optional)       -- e.g. the Forum's advisors
 //   a title
 //   rows: label, value, and optionally a down and an up arrow
+//   bar charts, two to a line (optional) -- e.g. the Forum's histories
 //   a row of buttons (wrapping)    -- e.g. Accept / Wait 9 years
 // Every clickable element carries an action id the caller chooses.
 
@@ -45,11 +46,21 @@ struct PanelButton {
     bool enabled = true;
 };
 
+// A bar chart: bars left to right, each 0..max (taller ones are cut at max,
+// 0 or less draws nothing), a label above and a caption below.
+struct PanelChart {
+    std::string label;
+    std::string caption;
+    std::vector<int> bars;
+    int max = 1;
+};
+
 struct Page {
     std::vector<PanelButton> tabs;
     int selected_tab = -1;
     std::string title;
     std::vector<PanelRow> rows;
+    std::vector<PanelChart> charts;
     std::vector<PanelButton> buttons;
 };
 
@@ -61,6 +72,7 @@ struct PanelLayout {
     std::vector<Rect> rows;
     std::vector<Rect> down;  // empty rect where the row has no arrow
     std::vector<Rect> up;
+    std::vector<Rect> charts;  // the whole chart, label and caption included
     std::vector<Rect> buttons;
 };
 

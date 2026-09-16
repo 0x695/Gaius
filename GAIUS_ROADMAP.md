@@ -21,7 +21,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
 | 6 | Economy & military | **Done** | The original battle screen's art |
-| 7 | Forum, advisors, ratings | **Done** | The original screens' art and advisor texts; the Trouble overlay |
+| 7 | Forum, advisors, ratings | **Done** | The original screens' art; the Trouble overlay |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture; empire map and battle screens' original art |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
@@ -271,11 +271,12 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **`systems::administration`** (2026-09-14, findings section 30) — Peace, Culture, Prosperity and Empire, their population caps and average; promotion's requirements, the new province's pick, accepting or waiting 9 or 24 years, Caesar; the yearly notice. The average in all 17 saves, Culture in 14, Peace and Prosperity across the one pair of consecutive years.
 - [x] **`systems::campaign`** (2026-09-15, findings section 31) — a new game (`0x056B8`), a new province's reset (`0x05730`: funds by rank, plebs, the Legion, cleared city, the Prima Cohors, the highway's entry) and the city's random terrain (`0x06F05`: lakes, erosion, shores, grass, the river). Every save's shores obey the transcribed rule.
 - [x] **Forum UI** (2026-09-15, findings section 32) — `systems::forum` transcribes the buttons (every arrow's limits, the Tribune's duty transfers, the Military Advisor's Cohort cycling and mobilizing, salary and donation); `gaius_viewer`'s Forum has the Treasurer, Tribune, Legion, ratings and governor pages. Promotion opens its page and an accepted one starts the new province from its `EMPIRE2.0NN`; the third missed tribute (`SimState::dismissed`) and becoming Caesar end the game. The layouts are Gaius's own; the names are the executable's tables (provinces, emblems, Cohort states).
+- [x] **The Forum's other figures and the advice** (2026-09-16, findings section 36) -- the statue's rank cheat, the histories graphed by the man in the blue robe, the industry report, and the ratings screen's 14 advice texts, in `systems::forum` and on the viewer's History, Industry and Ratings pages. The industry average matches all 17 saves.
 - [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay isn't modeled.
 
 **Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 
-**Still open, not blocking:** the original Forum art and layout (`FORUM32`, `P_BLOCKS.PL8`), the advisors' texts (`0x0D007`), the Trouble overlay.
+**Still open, not blocking:** the original Forum art and layout (the panels are `POINTERS.PL8` frames, section 36.2), the Trouble overlay.
 
 ---
 

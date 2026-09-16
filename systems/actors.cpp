@@ -776,4 +776,9 @@ int spawn_rioter(CityState& state, int x, int y) {
     return slot;
 }
 
+int workshop_base(int province, int goods) {
+    if (province < 0 || province >= 50 || goods < 0 || goods >= 8) return 0;
+    return kWorkshopBase[static_cast<size_t>(province * 8 + goods)];
+}
+
 }  // namespace gaius::systems::actors

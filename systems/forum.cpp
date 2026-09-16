@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <array>
 
+#include "systems/actors.hpp"
+#include "systems/administration.hpp"
+#include "systems/economy.hpp"
 #include "systems/military.hpp"
 #include "systems/plebs.hpp"
 
@@ -127,6 +130,125 @@ bool toggle_mobilized(model::CityState& state) {
     uint8_t& s = state.objects[static_cast<size_t>(slot)].raw[0x31];
     s = s == military::kCohortDemobilized ? military::kCohortMobilized : military::kCohortDemobilized;
     return true;
+}
+
+void raise_rank(model::CityState& state) {
+    if (g(state, kRank) < 19) set(state, kRank, g(state, kRank) + 1);
+    if (g(state, kRank) > 1 && g(state, kDifficulty) == 0) set(state, kDifficulty, 1);
+}
+
+void lower_rank(model::CityState& state) {
+    if (g(state, kRank) > 1) set(state, kRank, g(state, kRank) - 1);
+    if (g(state, kRank) == 1 && g(state, kDifficulty) == 1) set(state, kDifficulty, 0);
+}
+
+namespace {
+
+int grade_of_level(int level) {
+    if (level <= 1) return 0;
+    if (level <= 3) return 1;
+    if (level <= 5) return 2;
+    if (level <= 6) return 3;
+    return 4;
+}
+
+int grade_of_prospects(int p) {
+    if (p <= -2) return 0;
+    if (p <= 0) return 1;
+    if (p <= 2) return 2;
+    if (p <= 4) return 3;
+    return 4;
+}
+
+int grade_of_suitability(int s) {
+    switch (s) {
+        case -3: return 0;
+        case -2: return 1;
+        case 0: return 2;
+        case 1: return 3;
+        case 2: return 4;
+        default: return -1;
+    }
+}
+
+int word_at(const std::vector<uint8_t>& t, size_t o) {
+    if (t.size() < o + 2) return 0;
+    return static_cast<int16_t>(t[o] | (t[o + 1] << 8));
+}
+
+}  // namespace
+
+IndustryReport open_industry_report(model::CityState& state) {
+    IndustryReport r = industry_report(state);
+    set(state, 0x6BE8, r.average_level);
+    return r;
+}
+
+IndustryReport industry_report(const model::CityState& state) {
+    IndustryReport r;
+    r.province = g(state, 0x6CA6);
+    r.average_level = economy::average_workshop_level(state);
+    r.overall = grade_of_level(r.average_level);
+    r.prospects = grade_of_prospects(g(state, 0x6BF4));
+    for (size_t i = 0; i < 8; ++i) {
+        IndustryRow& row = r.rows[i];
+        row.suitability = actors::workshop_base(r.province, static_cast<int>(i));
+        row.grade = grade_of_suitability(row.suitability);
+        row.factories = i < state.table_8.size() ? static_cast<int8_t>(state.table_8[i]) : 0;
+    }
+    return r;
+}
+
+HistoryBars history_bars(const std::vector<uint8_t>& table, int newest, int start_scale, int max_height) {
+    const auto value = [&](int k) {
+        const int i = ((newest - k) % 15 + 15) % 15;
+        return word_at(table, static_cast<size_t>(i) * 4 + 2);
+    };
+    HistoryBars bars;
+    int scale = start_scale;
+    for (int k = 0; k < 14; ++k) {
+        if (value(k) / scale > max_height) {
+            scale *= 2;
+            ++bars.doublings;
+            k = -1;
+        }
+    }
+    for (int k = 0; k < 14; ++k) {
+        const int v = value(k);
+        bars.value[static_cast<size_t>(k)] = v;
+        bars.height[static_cast<size_t>(k)] = std::min(v / scale, max_height);
+    }
+    return bars;
+}
+
+std::string history_years(int year) {
+    const int from = year - 15, to = year - 1;
+    return std::string(from >= 0 ? "A.D. " : "B.C. ") + std::to_string(from < 0 ? -from : from) + " - " +
+           std::to_string(to < 0 ? -to : to);
+}
+
+int rating_hint(const model::CityState& state, int x, int cycle, int linked_towns, int random_walk) {
+    if (x > 0 && x < 0x50 && g(state, administration::kPeace) < 100) {
+        if (g(state, 0x6C84) == 1 && cycle == 0) return 1;
+        if (g(state, 0x6C84) == 2 && cycle == 1) return 2;
+        return 3;
+    }
+    if (x > 0x50 && x < 0xA0 && g(state, administration::kCulture) < 100) {
+        if (g(state, 0x6C80) < 36 && cycle == 0) return 4;
+        if (g(state, 0x6C82) < 36 && cycle == 1) return 5;
+        return random_walk < 50 ? 6 : 7;
+    }
+    if (x > 0xA0 && x < 0xF0 && g(state, administration::kProsperity) < 100) {
+        if (g(state, 0x6C10) < 1200 && cycle == 0) return 8;
+        if (g(state, 0x6C7E) != 0 && cycle == 1) return 9;
+        return 10;
+    }
+    if (x > 0xF0 && x < 0x140 && g(state, administration::kEmpire) < 100) {
+        if (g(state, 0x6C8C) == 0 && cycle == 0) return 11;
+        if (linked_towns < 4 && cycle == 1) return 12;
+        return 13;
+    }
+    return 14;
 }
 
 }  // namespace gaius::systems::forum

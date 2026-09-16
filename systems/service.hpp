@@ -87,7 +87,7 @@ inline const std::array<C9D4BitInfo, 8> kC9D4BitTable = {{
     {0x20, "administration", Confidence::High,
      "Forums (tiles 0xE0-0xE7, which the corpus called temples) set it at radius 6/8/10/12, and the Prefecture "
      "handler (tile 0xEE, 0x2C267) at radius 4. Its consumer is the yearly population tax (0x282A1): only housing "
-     "cells with 0x20 pay, and a house without it sets DS:0x6C7E, which the advisor text picker (0xD007) reads -- "
+     "cells with 0x20 pay, and a house without it sets DS:0x6C7E, which the ratings advice picker (0x0CF12) reads -- "
      "the manual's 'taxes will be automatically collected from nearby houses' of the Forum. The corpus's "
      "'religious' rested on the temple misreading (renamed 2026-09-14, findings section 25)."},
     {0x40, "localized_service_coverage_b", Confidence::High,

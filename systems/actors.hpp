@@ -140,6 +140,11 @@ int spawn_rioter(model::CityState& state, int x, int y);  // the slot, or -1
 // Exposed for tests; run_spawners applies it.
 int workshop_level(model::CityState& state, int record);
 
+// 3496:1880: how suited a province (DS:0x6CA6, 0-49) is to a goods type (0-7),
+// the base of workshop_level -- the industry report's suitability. 0 outside
+// the table.
+int workshop_base(int province, int goods);
+
 // One perimeter cell of the square ring around a size x size footprint, as
 // the tables at 3496:1A20 / 1A90 / 1B10 list them: clockwise from the
 // top-left corner outside the footprint.

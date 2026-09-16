@@ -77,7 +77,7 @@ inline std::string year_text(int year) {
 // ---------------------------------------------------------------------------
 // Action ids
 
-enum ForumTab { kTreasurer, kTribune, kLegion, kRatings, kGovernor, kForumTabCount };
+enum ForumTab { kTreasurer, kTribune, kLegion, kRatings, kGovernor, kIndustry, kHistory, kForumTabCount, kStatue };
 
 inline constexpr int kActionTab = 100;       // + ForumTab
 inline constexpr int kActionControl = 200;   // + 2 x forum::Control, +1 for up
@@ -94,6 +94,8 @@ inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDi
 inline constexpr int kActionSlot = 710;  // + slot
 inline constexpr int kActionBack = 720;
 inline constexpr int kSaveSlots = 8;
+inline constexpr int kActionHint = 800;  // + ratings column (Peace, Culture, Prosperity, Empire)
+inline constexpr int kActionRankDown = 810, kActionRankUp = 811;
 
 namespace detail {
 
@@ -115,16 +117,17 @@ inline ui::PanelRow duty_row(const model::CityState& s, const char* label, syste
 }  // namespace detail
 
 // `speed`, when not negative, adds the game speed (DS:0x5292) to the governor's
-// page -- the original keeps it on its options screen (0x0F0D8).
-inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = -1) {
+// page -- the original keeps it on its options screen (0x0F0D8). `hint` is the
+// ratings advice on show (forum::kRatingHints), 0 for none.
+inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = -1, int hint = 0) {
     namespace forum = systems::forum;
     using detail::g;
     ui::Page page;
     for (int i = 0; i < kForumTabCount; ++i) {
-        static constexpr const char* kTabs[] = {"Money", "Plebs", "Legion", "Ratings", "Governor"};
+        static constexpr const char* kTabs[] = {"Money", "Plebs", "Legion", "Ratings", "Governor", "Industry", "History"};
         page.tabs.push_back({kTabs[i], kActionTab + i});
     }
-    page.selected_tab = tab;
+    page.selected_tab = tab < kForumTabCount ? tab : -1;
     page.buttons.push_back({"Save", kActionOpenSave});
     page.buttons.push_back({"Load", kActionOpenLoad});
     page.buttons.push_back({"Close", kActionClose});
@@ -215,6 +218,49 @@ inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = 
                 page.rows.push_back({"  and each at least", std::to_string(need.each)});
             }
             page.rows.push_back({"Year", year_text(g(s, 0x6C32))});
+            // 0x0CF12: the original's advice comes from clicking a column.
+            if (hint > 0 && hint < static_cast<int>(forum::kRatingHints.size()))
+                page.rows.push_back({forum::kRatingHints[static_cast<size_t>(hint)], ""});
+            static constexpr const char* kAsk[] = {"Peace ?", "Culture ?", "Prosperity ?", "Empire ?"};
+            for (int c = 3; c >= 0; --c) page.buttons.insert(page.buttons.begin(), {kAsk[c], kActionHint + c});
+            break;
+        }
+        case kIndustry: {
+            // 0x09D22, the man in green.
+            const forum::IndustryReport r = forum::industry_report(s);
+            page.title = std::string("Industry Report on ") + province_name(r.province);
+            page.rows.push_back({"Overall Industry Rating", forum::kGradeNames[static_cast<size_t>(r.overall)]});
+            page.rows.push_back({"Prospects for Expansion", forum::kGradeNames[static_cast<size_t>(r.prospects)]});
+            page.rows.push_back({"Industry type", "suitability  factories"});
+            for (size_t i = 0; i < r.rows.size(); ++i) {
+                const forum::IndustryRow& row = r.rows[i];
+                const std::string grade = row.grade >= 0 ? forum::kGradeNames[static_cast<size_t>(row.grade)] : "";
+                page.rows.push_back({std::string("  ") + forum::kGoodsNames[i], grade + "   " + std::to_string(row.factories)});
+            }
+            break;
+        }
+        case kHistory: {
+            // 0x0ACA7, the man in the blue robe.
+            page.title = forum::history_years(g(s, 0x6C32));
+            const std::array<const std::vector<uint8_t>*, 4> tables = {&s.table_60_a, &s.table_60_b, &s.table_60_c,
+                                                                       &s.table_60_d};
+            for (size_t i = 0; i < forum::kHistoryGraphs.size(); ++i) {
+                const forum::HistoryGraph& graph = forum::kHistoryGraphs[i];
+                const forum::HistoryBars bars =
+                    forum::history_bars(*tables[i], g(s, graph.index_word), graph.start_scale, graph.max_height);
+                ui::PanelChart chart;
+                chart.label = graph.label;
+                chart.caption = bars.doublings < 3 ? graph.ranges[static_cast<size_t>(bars.doublings)] : "";
+                chart.max = graph.max_height;
+                for (size_t k = bars.height.size(); k-- > 0;) chart.bars.push_back(bars.height[k]);
+                page.charts.push_back(chart);
+            }
+            break;
+        }
+        case kStatue: {
+            // 0x0DF9B, the statue's hidden page.
+            page.title = "The statue";
+            page.rows.push_back({"Rank", rank_name(g(s, forum::kRank)), kActionRankDown, kActionRankUp});
             break;
         }
         case kGovernor:
@@ -239,6 +285,11 @@ inline bool apply_forum_action(model::CityState& s, int action, ForumTab& tab) {
     if (action == kActionClose) return false;
     if (action >= kActionTab && action < kActionTab + kForumTabCount) {
         tab = static_cast<ForumTab>(action - kActionTab);
+        if (tab == kIndustry) forum::open_industry_report(s);
+    } else if (action == kActionRankUp) {
+        forum::raise_rank(s);
+    } else if (action == kActionRankDown) {
+        forum::lower_rank(s);
     } else if (action >= kActionControl && action < kActionControl + 14) {
         const int i = action - kActionControl;
         forum::adjust(s, static_cast<forum::Control>(i / 2), i % 2 ? 1 : -1);

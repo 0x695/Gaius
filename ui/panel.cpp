@@ -24,6 +24,9 @@ constexpr RGB kSelectedEdge{236, 206, 116};
 constexpr RGB kHoverEdge{190, 180, 130};
 constexpr RGB kText{232, 226, 200};
 constexpr RGB kDim{150, 144, 118};
+constexpr RGB kChartFill{48, 45, 33};
+constexpr RGB kBar{196, 170, 96};
+constexpr RGB kBarAlt{168, 142, 78};
 
 void put(std::vector<uint8_t>& rgb, int w, int h, int x, int y, RGB c) {
     if (x < 0 || x >= w || y < 0 || y >= h) return;
@@ -125,6 +128,15 @@ PanelLayout layout(const Page& page, const Metrics& m, int w, int h) {
         lay.down.push_back(arrows ? Rect{x1 - 2 * arrow - m.scale, y, arrow, arrow} : Rect{});
         y += lh + m.scale;
     }
+    if (!page.charts.empty()) {
+        const int gap = 6 * m.scale, cw = (x1 - x0 - gap) / 2, ch = 5 * lh;
+        y += 2 * m.scale;
+        for (size_t i = 0; i < page.charts.size(); ++i) {
+            const int col = static_cast<int>(i % 2);
+            lay.charts.push_back(Rect{x0 + col * (cw + gap), y, cw, ch});
+            if (col == 1 || i + 1 == page.charts.size()) y += ch + 3 * m.scale;
+        }
+    }
     if (!page.buttons.empty()) {
         std::vector<Rect> probe = flow(page.buttons, m, x0, x1, 0);
         const int height = probe.back().y + probe.back().h;
@@ -164,6 +176,28 @@ void render(const Page& page, const PanelLayout& lay, std::vector<uint8_t>& rgb,
         text(rgb, w, h, right - text_w(row.value, m, font), r.y + m.scale, row.value, m, font);
         draw_arrow(rgb, w, h, lay.down[i], false, row.down_action >= 0 && row.down_action == hovered);
         draw_arrow(rgb, w, h, lay.up[i], true, row.up_action >= 0 && row.up_action == hovered);
+    }
+    for (size_t i = 0; i < lay.charts.size() && i < page.charts.size(); ++i) {
+        const PanelChart& c = page.charts[i];
+        const Rect r = lay.charts[i];
+        const int lh = line_h(m);
+        text(rgb, w, h, r.x, r.y + m.scale, c.label, m, font);
+        const Rect area{r.x, r.y + lh + m.scale, r.w, r.h - 2 * lh - 2 * m.scale};
+        fill(rgb, w, h, area, kChartFill);
+        bevel(rgb, w, h, area, kFrameDark, kFrameLight);
+        const int n = static_cast<int>(c.bars.size());
+        if (n > 0 && c.max > 0) {
+            const int inner_w = area.w - 4 * m.scale, inner_h = area.h - 4 * m.scale;
+            const int slot = inner_w / n, bw = std::max(1, slot - m.scale);
+            for (int k = 0; k < n; ++k) {
+                const int v = std::min(c.bars[static_cast<size_t>(k)], c.max);
+                if (v <= 0) continue;
+                const int bh = std::max(1, v * inner_h / c.max);
+                fill(rgb, w, h, Rect{area.x + 2 * m.scale + k * slot, area.y + 2 * m.scale + inner_h - bh, bw, bh},
+                     k % 2 ? kBarAlt : kBar);
+            }
+        }
+        text(rgb, w, h, r.x + r.w - text_w(c.caption, m, font), r.y + r.h - lh, c.caption, m, font);
     }
     for (size_t i = 0; i < lay.buttons.size(); ++i)
         draw_button(rgb, w, h, lay.buttons[i], page.buttons[i], false, page.buttons[i].action == hovered, m, font);

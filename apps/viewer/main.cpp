@@ -231,7 +231,8 @@ int main(int argc, char** argv) {
     int run_months = 0;
     bool start_paused = false;
     std::string start_screen;       // --screen city|province|forum
-    int start_forum_tab = 0;        // --forum-tab 0..4
+    int start_forum_tab = 0;        // --forum-tab 0..6, or 8 for the statue
+    bool cheats = false;            // --cheats: the statue opens (the original's key gate, 0x0DF9B)
     std::vector<int> test_actions;  // --test-action N: a page action applied before the first frame
     bool test_battle = false;       // --test-battle: the first Cohort meets a new army
     bool test_promotion = false;    // --test-promotion: a promotion is offered now
@@ -246,6 +247,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--forum-tab") == 0 && i + 1 < argc) start_forum_tab = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-action") == 0 && i + 1 < argc) test_actions.push_back(std::atoi(argv[++i]));
         if (std::strcmp(argv[i], "--test-battle") == 0) test_battle = true;
+        if (std::strcmp(argv[i], "--cheats") == 0) cheats = true;
         if (std::strcmp(argv[i], "--test-promotion") == 0) test_promotion = true;
         if (std::strcmp(argv[i], "--save-dir") == 0 && i + 1 < argc) save_dir_option = argv[++i];
         if (std::strcmp(argv[i], "--speed") == 0 && i + 1 < argc) start_speed = std::atoi(argv[++i]);
@@ -582,7 +584,12 @@ int main(int argc, char** argv) {
     if (start_screen == "forum-page") screen = Screen::Forum;
     Screen battle_return = Screen::Province;
     viewer::ForumTab forum_tab =
-        static_cast<viewer::ForumTab>(std::clamp(start_forum_tab, 0, static_cast<int>(viewer::kForumTabCount) - 1));
+        start_forum_tab == viewer::kStatue
+            ? viewer::kStatue
+            : static_cast<viewer::ForumTab>(std::clamp(start_forum_tab, 0, static_cast<int>(viewer::kForumTabCount) - 1));
+    if (forum_tab == viewer::kIndustry) systems::forum::open_industry_report(state);
+    int rating_hint = 0;  // forum::kRatingHints on show
+    int hint_cycle = 0;   // DS:0x6D2A
     bool promotion_to_caesar = false;
     viewer::BattleView battle_view;
     int shore_variant = 0;  // DS:0x079C, kept from one generated city to the next
@@ -698,7 +705,7 @@ int main(int argc, char** argv) {
 
     auto current_page = [&]() -> ui::Page {
         switch (screen) {
-            case Screen::Forum: return viewer::forum_page(state, forum_tab, sim.speed);
+            case Screen::Forum: return viewer::forum_page(state, forum_tab, sim.speed, rating_hint);
             case Screen::Notice:
                 return viewer::notice_page(systems::messages::kFundsWarning.data(),
                                            systems::messages::kFundsWarning.size());
@@ -784,8 +791,20 @@ int main(int argc, char** argv) {
             return;
         }
         if (screen == Screen::Forum) {
+            if (action >= viewer::kActionHint && action < viewer::kActionHint + 4) {
+                // 0x0CF12: each click advances the cycle, then picks the text.
+                hint_cycle = systems::forum::next_hint_cycle(hint_cycle);
+                rating_hint = systems::forum::rating_hint(
+                    state, systems::forum::rating_column_x(action - viewer::kActionHint), hint_cycle,
+                    sim.linked_towns, sim.random.walk);
+                return;
+            }
+            const viewer::ForumTab tab_before = forum_tab;
             if (!viewer::apply_forum_action(state, action, forum_tab))
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
+            if (forum_tab != tab_before) rating_hint = 0;
+            if (action == viewer::kActionRankUp || action == viewer::kActionRankDown)
+                sim.difficulty = model::global_word(state, systems::forum::kDifficulty);
         } else if (screen == Screen::Promotion) {
             if (action == viewer::kActionAccept) {
                 if (promotion_to_caesar) {
@@ -1110,17 +1129,20 @@ int main(int argc, char** argv) {
                 // 0x0DF57: the figure under the click opens its advisor
                 // (findings section 34.2). Those Gaius has no page for say so.
                 const int region = forum_clicks.region_at(lx, ly);
-                const int tab = region == 2   ? viewer::kGovernor
+                const int tab = region == 1   ? (cheats ? viewer::kStatue : -1)
+                                : region == 2 ? viewer::kGovernor
                                 : region == 3 ? viewer::kLegion
+                                : region == 4 ? viewer::kHistory
                                 : region == 5 ? viewer::kTreasurer
                                 : region == 6 ? viewer::kRatings
                                 : region == 7 ? viewer::kTribune
+                                : region == 8 ? viewer::kIndustry
                                               : -1;
                 if (tab >= 0) {
                     forum_tab = static_cast<viewer::ForumTab>(tab);
+                    rating_hint = 0;
+                    if (forum_tab == viewer::kIndustry) systems::forum::open_industry_report(state);
                     screen = Screen::Forum;
-                } else if (region != 0) {
-                    std::printf("that advisor isn't modeled yet\n");
                 }
                 return;
             }
@@ -1437,7 +1459,7 @@ int main(int argc, char** argv) {
                 }
                 static constexpr const char* kFigures[] = {"Choose an advisor",       "The statue",
                                                             "The governor's affairs",  "The Military Advisor",
-                                                            "An advisor",              "The Treasurer",
+                                                            "The histories",           "The Treasurer",
                                                             "The ratings",             "The Tribune of the Plebs",
                                                             "Industry"};
                 ui::render_bar({}, -1, hall_bar, frame, kLogicalW, kLogicalH, page_metrics, font,
