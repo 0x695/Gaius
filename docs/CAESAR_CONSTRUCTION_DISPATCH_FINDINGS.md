@@ -1754,3 +1754,7 @@ The start screen's "Choose name" button (`0x27F84`) calls it with the button rec
 - The viewer keeps the name like `DS:0x0DD0`: across new games, written into each new game's state, and read back from a loaded game.
 - **Checked** by `test_name_entry`: both arrows including the down arrow's quirk, every key, the clicks, and the name in all 17 saves.
 - **Not modeled:** the governor's screen's own button (the viewer's governor page doesn't show the name).
+
+### 38.4 MINIFONT's colour (2026-09-16)
+
+The text routine `100F:1583` sends a glyph from the sheet at `54E0:C254` (`MINIFONT`) to `1F6F:292B` rather than the sprite blitter. That routine walks the glyph's 16-bit rows and plots each set bit through `2EF9:11A4` with the colour word `2EF9:0039` set to 0, so every MINIFONT text is colour 0 of the palette on screen. That is black in both `SHADE.256` and `WAR2.256`. The battle screen's figures (38.1) are black, not colour 1 as first drawn; the maps screen's legend (section 39) matched its capture this way. DEFINITIVE.

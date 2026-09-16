@@ -139,9 +139,8 @@ BattleArt load_battle_art(const std::string& dir) {
     art.font = GameFont{formats::pl8::load(asset(dir, "FONT2.PL8")), art.palette};
     art.interface_palette = formats::pal256::load(asset(dir, "SHADE.256"));
     art.dialog_font = GameFont{formats::pl8::load(asset(dir, "FONT1.PL8")), art.interface_palette};
-    // A MINIFONT bit is drawn as colour 1 (INFERENCE: the planar blitter
-    // receives the bit as the pixel value).
-    art.mini = load_mini_font(dir, art.palette.colors[1]);
+    // 1F6F:292B plots every MINIFONT bit in colour 0 (2EF9:0039 = 0).
+    art.mini = load_mini_font(dir, art.palette.colors[0]);
     return art;
 }
 

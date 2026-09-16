@@ -58,7 +58,9 @@ struct GameFont {
 // MINIFONT.PL1 (formats::pl8::load_pl1): 72 frames of 8x6, a 5x5 font of
 // capitals, digits and a little punctuation, laid out so the same DS:0F64
 // table maps characters to it (lower case folds onto the capitals). The engine
-// loads it at 54E0:C254 and advances 6 px per character. Drawn in `ink`.
+// loads it at 54E0:C254 and advances 6 px per character. Drawn in `ink`: the
+// engine's glyph routine 1F6F:292B plots every set bit in colour 0 of the
+// current palette (findings section 38.4).
 GameFont load_mini_font(const std::string& asset_dir, formats::RGB ink);
 
 // As game_text_width, at the font's own advance.

@@ -92,7 +92,7 @@ MapsArt load_maps_art(const std::string& dir) {
     art.blocks = formats::pl8::load(asset(dir, "P_BLOCKS.PL8"));
     art.palette = formats::pal256::load(asset(dir, "SHADE.256"));
     art.font = GameFont{formats::pl8::load(asset(dir, "FONT1.PL8")), art.palette};
-    art.mini = load_mini_font(dir, art.palette.colors[0]);
+    art.mini = load_mini_font(dir, art.palette.colors[0]);  // 1F6F:292B: colour 0
     return art;
 }
 
