@@ -10,23 +10,23 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 ## At a glance
 
-*As of 2026-09-15.*
+*As of 2026-09-16.*
 
 | Phase | Area | Status | What's left |
 |---|---|---|---|
 | 0 | Repo & format library | **Done** | — |
 | 1 | Viewer & platform skeleton | **Done** | Android: real-device ABI, viewer port |
-| 2 | Data model & save round trip | **Done** | Meaning of some global words |
+| 2 | Data model & save round trip | **Done** | — |
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
-| 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
-| 6 | Economy & military | **Done** | The Cohort 2 hand-over |
-| 7 | Forum, advisors, ratings | **Done** | The governor's sub-dialogs |
+| 5 | Construction & build mode | **Done** | Touch drag gesture, a walker path check; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
+| 6 | Economy & military | **Done** | The Cohort 2 hand-over (optional) |
+| 7 | Forum, advisors, ratings | **Done** | The governor's three sub-dialogs |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3450 checks.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3705 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
 **Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Next is Phase 9 -- an audio path for the effects and music, packaging, and the platform pass.
 
@@ -275,7 +275,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **Forum UI** (2026-09-15, findings section 32) — `systems::forum` transcribes the buttons (every arrow's limits, the Tribune's duty transfers, the Military Advisor's Cohort cycling and mobilizing, salary and donation); `gaius_viewer`'s Forum has the Treasurer, Tribune, Legion, ratings and governor pages. Promotion opens its page and an accepted one starts the new province from its `EMPIRE2.0NN`; the third missed tribute (`SimState::dismissed`) and becoming Caesar end the game. The layouts are Gaius's own; the names are the executable's tables (provinces, emblems, Cohort states).
 - [x] **The Forum's other figures and the advice** (2026-09-16, findings section 36) -- the statue's rank cheat, the histories graphed by the man in the blue robe, the industry report, and the ratings screen's 14 advice texts, in `systems::forum` and on the viewer's History, Industry and Ratings pages. The industry average matches all 17 saves.
 - [x] **The map of the Empire** (2026-09-16, findings section 37) -- `EMAP2.VPX` with the given provinces' markers, pixel-exact against the map capture, opened from the governor's page.
-- [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay isn't modeled.
+- [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay came with the original maps screen (2026-09-16, section 39).
 
 **Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 
@@ -300,7 +300,8 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **Save loader RE and save writing** (2026-09-15, findings section 33.1) — the loader `0x04537` reads the 175 records the writer `0x033C8` writes, same addresses, sizes and order: DEFINITIVE. `formats::save::write`; every real save written back reads byte-identical. The difficulty `DS:0x6CB8` turned out to be saved. The viewer's Forum saves and loads eight slots.
 - [x] **Remaining formats** (2026-09-15, findings section 34) — `.VAS` is the battle screen's animations, XOR deltas over a picture's planes (`formats::vas`, `tools/dump_vas`; every frame of both files, drawn over `WAR2.VPX`); `CONTFRM.GD8` is the Forum picture's click map, one region per advisor (`formats::screen_data`, and the viewer's Forum hall uses it); `EDATA.CSR` holds the empire map's 50 province markers; `TEMPLBIT.PL8` is the ratings' column pieces; `P_BLOCKS.PL8` already decoded (renderer findings). Both screens were drawn with their original art on 2026-09-16 (findings sections 37-38).
 - [x] **Sound effects and music as formats** (2026-09-15, findings section 34.5) — all 23 `.VOC` effects decode (`formats::voc`); all 28 `.XMI`/`.XM2` cues convert to Standard MIDI (`formats::xmi`, `tools/xmi2mid`), their timing checked against the international `.MDI` files — which turned out to be re-orchestrations, not conversions. Playing them is Phase 9's audio path.
-- [ ] **Overlay map modes and the province view** in the renderer — the province view is drawn (2026-09-15, findings section 32.3, frame = tile by STRONG INFERENCE with no capture to check it), and the maps panel tints the city from the modeled layers; the original overlays' own art isn't read.
+- [x] **Overlay map modes** (2026-09-16, findings section 39) — the original maps screen, all six modes, pixel-exact around the map against its capture.
+- [ ] **The province view against a capture** — drawn since 2026-09-15 (findings section 32.3), but frame = tile is STRONG INFERENCE with no DOSBox capture to check it.
 - [x] **The start screen and a new game** (2026-09-15, findings section 33.2) — the main loop's new game read end to end: funding levels (`3496:1718`, Trivial 8000 Dn to Impossible 250 Dn), difficulty, the first province drawn, terrain before the map and the reset (which settles section 31.4). `campaign::begin_new_game`; `gaius_viewer <game folder>` opens the start screen. The governor's name and its dialog came on 2026-09-16 (findings section 40).
 - [x] **City terrain generation** (2026-09-15, findings section 31.2) — `campaign::generate_city`.
 - [ ] **Bindiff the two `CSR.EXE` builds** whenever an item here stalls; differences are often faster to read than one disassembly.
