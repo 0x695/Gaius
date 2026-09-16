@@ -781,6 +781,7 @@ int main(int argc, char** argv) {
     const auto original_forum_screen = [&]() {
         return screen == Screen::Forum && have_interface_art &&
                (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry || forum_tab == viewer::kTreasurer ||
+                forum_tab == viewer::kTribune ||
                 (forum_tab == viewer::kLegion && have_province_sprites));
     };
     const auto page_screen = [&]() {
@@ -1185,6 +1186,24 @@ int main(int argc, char** argv) {
                     if (cell == 16) forum::adjust(state, forum::Control::IndustrialTax, 1);
                     if (cell == 17) forum::adjust(state, forum::Control::IndustrialTax, -1);
                     if (cell == 12 || cell == 13 || cell == 16 || cell == 17) return;
+                }
+                if (forum_tab == viewer::kTribune) {
+                    // DS:0x0494's buttons.
+                    namespace forum = systems::forum;
+                    const int cx = lx / 16, cy = ly / 16;
+                    if ((cx == 13 || cx == 14) && cy == 3) {
+                        forum::adjust(state, forum::Control::Welfare, cx == 13 ? 1 : -1);
+                        return;
+                    }
+                    if ((cx == 12 || cx == 13) && cy >= 5 && cy <= 9) {
+                        const auto duty = static_cast<forum::Duty>(cy - 5);
+                        if (cx == 12) {
+                            forum::raise_duty(state, duty);
+                        } else {
+                            forum::lower_duty(state, duty);
+                        }
+                        return;
+                    }
                 }
                 if (forum_tab == viewer::kLegion) {
                     // DS:0x0094's buttons.
@@ -1644,6 +1663,7 @@ int main(int argc, char** argv) {
                     const formats::IndexedImage advisor =
                         forum_tab == viewer::kHistory     ? ui::compose_history_screen(state, interface_art)
                         : forum_tab == viewer::kIndustry  ? ui::compose_industry_screen(state, interface_art)
+                        : forum_tab == viewer::kTribune   ? ui::compose_tribune_screen(state, interface_art)
                         : forum_tab == viewer::kLegion
                             ? ui::compose_legion_screen(state, interface_art, province_sprites.units,
                                                         static_cast<int>(sim.ticks))

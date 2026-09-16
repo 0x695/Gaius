@@ -202,6 +202,50 @@ formats::IndexedImage compose_legion_screen(const model::CityState& state, const
     return img;
 }
 
+formats::IndexedImage compose_tribune_screen(const model::CityState& state, const InterfaceArt& art) {
+    formats::IndexedImage img = blank_canvas();
+    // 0x0A57A, once (DS:0x7092-0x70BC).
+    draw_panel(img, art, 0, 0, 20, 12);
+    struct Line { int x, y; const char* text; };
+    static constexpr Line kLines[] = {
+        {0x20, 0x0C, "Pleb population"},
+        {0x20, 0x18, " - last year"},
+        {0x20, 0x30, "Denarii spent on"},
+        {0x20, 0x38, " Pleb welfare"},
+        {0x10, 0x44, " Construction work             ( 50)"},
+        {0x10, 0x94, " Army                          (    "},
+        {0x10, 0x84, " Province                      (   )"},
+        {0x10, 0xA4, " Unused Plebs"},
+        {0x10, 0x74, " Road maintenance              (   )"},
+        {0x10, 0x64, " Building upkeep               (   )"},
+        {0x10, 0x54, " Fire prevention               (   )"}};
+    for (const Line& l : kLines) draw_text(img, art, Font::Font1, l.x, l.y, l.text);
+    draw_number(img, art, Font::Font1, 0xC0, 0x0C, g(state, 0x6C56), 5, 1);
+    draw_number(img, art, Font::Font1, 0xC0, 0x18, g(state, 0x6C54), 5, 1);
+
+    // 0x0E822, each frame. The buttons (DS:0x0494): welfare (13-14, 3), a
+    // plain block at (16, 1) whose handler does nothing, and each duty's up
+    // and down at (12-13, 5-9). Their stone (0x0D623) is repainted only after
+    // a click.
+    draw_block(img, art.blocks, 18, 13 * 16, 3 * 16);
+    draw_block(img, art.blocks, 19, 14 * 16, 3 * 16);
+    draw_block(img, art.blocks, 4, 16 * 16, 1 * 16);
+    for (int row = 5; row <= 9; ++row) {
+        draw_block(img, art.blocks, 18, 12 * 16, row * 16);
+        draw_block(img, art.blocks, 19, 13 * 16, row * 16);
+    }
+    draw_number(img, art, Font::Font1, 0x100, 0x34, g(state, 0x6C46), 4, 1);
+    // The plebs on each duty, then each duty's need.
+    static constexpr int kDutyWords[][2] = {{0x44, 0x6C64}, {0x54, 0x6C62}, {0x64, 0x6C60}, {0x74, 0x6C5E},
+                                            {0x84, 0x6C5C}, {0x94, 0x6C5A}, {0xA6, 0x6C58}};
+    for (const auto& d : kDutyWords) draw_number(img, art, Font::Font1, 0xEA, d[0], g(state, static_cast<uint16_t>(d[1])), 3, 1);
+    static constexpr int kNeedWords[][2] = {{0x54, 0x6C44}, {0x64, 0x6C42}, {0x74, 0x6C40}, {0x84, 0x6C3E}};
+    for (const auto& d : kNeedWords) draw_number(img, art, Font::Font1, 0x110, d[0], g(state, static_cast<uint16_t>(d[1])), 3, 1);
+    // The auxiliaries, army duty / 16 (0x0E85A), into "   )".
+    draw_text(img, art, Font::Font1, 0x110, 0x94, number_text(g(state, 0x6C5A) / 16, 3, 2) + ")");
+    return img;
+}
+
 formats::IndexedImage compose_funds_warning_screen(const InterfaceArt& art) {
     formats::IndexedImage img = blank_canvas();
     draw_panel(img, art, 0, 0, 20, 12);
