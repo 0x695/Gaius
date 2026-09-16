@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/forum_screens.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 
@@ -52,6 +53,72 @@ formats::IndexedImage compose_history_screen(const model::CityState& state, cons
     draw_text(img, art, Font::Font1, 0x60, 0x0C, year - 15 >= 0 ? "A.D.     -" : "B.C.     -");
     draw_number(img, art, Font::Font1, 0x8A, 0x0C, std::labs(year - 15), 2, 1);
     draw_number(img, art, Font::Font1, 0xB8, 0x0C, std::labs(year - 1), 2, 1);
+    return img;
+}
+
+formats::IndexedImage compose_treasurer_screen(const model::CityState& state, const InterfaceArt& art) {
+    formats::IndexedImage img = blank_canvas();
+    draw_panel(img, art, 0, 0, 20, 12);
+    draw_inset(img, art, 0x10, 0x10, 5, 10);
+
+    // 1F6F:2292 and 0x0D361: the funds history (table_72, 17 records of year
+    // and value, newest first) as one-pixel columns 6 high from x 0x50 --
+    // a loss to the left in colour 8 (a column per 40 Dn, at most 28), a gain
+    // to the right in colour 0 (per 80 Dn, at most 12) -- and each record's
+    // year in MINIFONT.
+    const std::vector<uint8_t>& t = state.table_72;
+    int index = g(state, 0x6B38);
+    for (int k = 0; k < 17; ++k) {
+        const size_t o = static_cast<size_t>(index) * 4;
+        const int year = t.size() >= o + 2 ? static_cast<int16_t>(t[o] | (t[o + 1] << 8)) : 0;
+        const int value = t.size() >= o + 4 ? static_cast<int16_t>(t[o + 2] | (t[o + 3] << 8)) : 0;
+        const int bar_y = 0x1C + 8 * k;
+        if (value < 0) {
+            const int n = std::min(-value / 40, 28);
+            for (int i = 0; i < n; ++i) fill_rect(img, 0x50 - i, bar_y, 1, 6, 8);
+        } else {
+            const int n = std::min(value / 80, 12);
+            for (int i = 0; i < n; ++i) fill_rect(img, 0x50 + i, bar_y, 1, 6, 0);
+        }
+        const int label_y = 0x1D + 8 * k;
+        if (year < 0) draw_text(img, art, Font::Mini, 0x14, label_y, "bc");
+        if (year > 0) draw_text(img, art, Font::Mini, 0x14, label_y, "ad");
+        if (year != 0) draw_number(img, art, Font::Mini, 0x21, label_y, std::abs(year), 3, 1);
+        if (--index < 0) index = 16;
+    }
+
+    // The accounts (DS:0x70CA-0x70F0).
+    struct Line { int y; const char* text; };
+    static constexpr Line kLines[] = {
+        {0x06, "            POP.    IND."}, {0x14, "Tax rate"},          {0x26, "City population"},
+        {0x32, "Unemployment           %"}, {0x3E, "tax per head     dn   ."}, {0x4E, "previous year"},
+        {0x5D, "denarii in  -"},            {0x67, " taxes - population"}, {0x71, " taxes - industry  "},
+        {0x80, "denarii out -"},            {0x8A, " construction work"},  {0x94, " operating costs"},
+        {0x9E, " tribute to rome"}};
+    for (const Line& l : kLines) draw_text(img, art, Font::Font1, 0x64, l.y, l.text);
+    draw_text(img, art, Font::Font1, 0x64, 0xAE, g(state, 0x6BB6) >= 0 ? "overall gain of" : "overall loss of");
+    draw_number(img, art, Font::Font1, 0x104, 0x26, g(state, 0x6C0E), 5, 1);
+    draw_number(img, art, Font::Font1, 0xFC, 0x32, g(state, 0x6BCC), 3, 1);
+    draw_number(img, art, Font::Font1, 0x10A, 0x3E, g(state, 0x6BCA), 1, 1);
+    draw_number(img, art, Font::Font1, 0x11C, 0x3E, g(state, 0x6BC8), 2, 0);
+    draw_number(img, art, Font::Font1, 0x104, 0x67, g(state, 0x6BB2), 4, 1);
+    draw_number(img, art, Font::Font1, 0x104, 0x71, g(state, 0x6BB0), 4, 1);
+    draw_number(img, art, Font::Font1, 0x104, 0x8A, g(state, 0x6BAE), 4, 1);
+    draw_number(img, art, Font::Font1, 0x104, 0x94, g(state, 0x6BAC), 4, 1);
+    draw_number(img, art, Font::Font1, 0x104, 0x9E, g(state, 0x6BAA), 4, 1);
+    const int balance = g(state, 0x6BB4);
+    draw_number(img, art, Font::Font1, 0x104, 0xAE, balance >= 0 ? balance : -balance, 4, 1);
+
+    // 0x0E6E3, each frame: the rates (0x0D623 repaints their stone only for
+    // four frames after an arrow is clicked, DS:0x6D8B) ("  %" filled by 100F:17E2 mode 2) and
+    // the arrows (DS:0x0404: cells (12, 1) and (13, 1) the population tax's
+    // up and down, (16, 1) and (17, 1) the industry tax's).
+    draw_text(img, art, Font::Font1, 0xE4, 0x14, number_text(g(state, 0x6C04), 2, 2) + "%");
+    draw_text(img, art, Font::Font1, 0x124, 0x14, number_text(g(state, 0x6C02), 2, 2) + "%");
+    draw_block(img, art.blocks, 18, 12 * 16, 16);
+    draw_block(img, art.blocks, 19, 13 * 16, 16);
+    draw_block(img, art.blocks, 18, 16 * 16, 16);
+    draw_block(img, art.blocks, 19, 17 * 16, 16);
     return img;
 }
 

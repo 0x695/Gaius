@@ -777,6 +777,11 @@ int main(int argc, char** argv) {
             default: return ui::Page{};
         }
     };
+    // The Forum pages Gaius draws in the original's art, when its files are there.
+    const auto original_forum_screen = [&]() {
+        return screen == Screen::Forum && have_interface_art &&
+               (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry || forum_tab == viewer::kTreasurer);
+    };
     const auto page_screen = [&]() {
         return screen == Screen::Forum || screen == Screen::Promotion ||
                (screen == Screen::Battle && !have_battle_art) ||
@@ -1167,10 +1172,19 @@ int main(int argc, char** argv) {
             province_drag_x = province_drag_y = -1;
             drag_undo.clear();
             drag_refund = 0;
-            if (screen == Screen::Forum && have_interface_art &&
-                (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry)) {
-                // The original's advisor screen waits for a click, then the
-                // Forum picture again.
+            if (original_forum_screen()) {
+                // The original's advisor screens: their arrows (the
+                // Treasurer's DS:0x0404), or anything else goes back to the
+                // Forum picture (the original leaves on a right-click).
+                if (forum_tab == viewer::kTreasurer && ly >= 16 && ly < 32) {
+                    namespace forum = systems::forum;
+                    const int cell = lx / 16;
+                    if (cell == 12) forum::adjust(state, forum::Control::PopulationTax, 1);
+                    if (cell == 13) forum::adjust(state, forum::Control::PopulationTax, -1);
+                    if (cell == 16) forum::adjust(state, forum::Control::IndustrialTax, 1);
+                    if (cell == 17) forum::adjust(state, forum::Control::IndustrialTax, -1);
+                    if (cell == 12 || cell == 13 || cell == 16 || cell == 17) return;
+                }
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
                 return;
             }
@@ -1400,6 +1414,10 @@ int main(int argc, char** argv) {
                             screen = Screen::Forum;
                             break;
                         }
+                        if (save_mode && original_forum_screen()) {
+                            screen = have_forum_picture ? Screen::ForumHall : Screen::City;
+                            break;
+                        }
                         if (save_mode && screen == Screen::NameEntry) {
                             // 0x0C544: a right-click ends the dialog, keeping the name.
                             governor_name = ui::name_text(name_entry);
@@ -1594,12 +1612,12 @@ int main(int argc, char** argv) {
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
                 if (screen == Screen::NameEntry) ui::compose_name_entry(name_entry, name_art, frame);
-                if (screen == Screen::Forum && have_interface_art &&
-                    (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry)) {
-                    // 0x0ACA7 / 0x09D22 in the original's art.
-                    const formats::IndexedImage advisor = forum_tab == viewer::kHistory
-                                                              ? ui::compose_history_screen(state, interface_art)
-                                                              : ui::compose_industry_screen(state, interface_art);
+                if (original_forum_screen()) {
+                    // The advisors in the original's art.
+                    const formats::IndexedImage advisor =
+                        forum_tab == viewer::kHistory     ? ui::compose_history_screen(state, interface_art)
+                        : forum_tab == viewer::kIndustry  ? ui::compose_industry_screen(state, interface_art)
+                                                          : ui::compose_treasurer_screen(state, interface_art);
                     ui::canvas_to_rgb(advisor, interface_art.palette, frame);
                 }
             } else if (save_mode && screen == Screen::Battle && have_battle_art) {

@@ -17,6 +17,10 @@ namespace gaius::ui {
 // 0x0ACA7, the man in the blue robe: the four history graphs.
 formats::IndexedImage compose_history_screen(const model::CityState& state, const InterfaceArt& art);
 
+// 0x0A7C3 + 0x0E6E3, the Treasurer: last year's accounts, the funds history
+// and the two tax rates with their arrows (DS:0x0404).
+formats::IndexedImage compose_treasurer_screen(const model::CityState& state, const InterfaceArt& art);
+
 // 0x09D22, the man in green: the industry report.
 formats::IndexedImage compose_industry_screen(const model::CityState& state, const InterfaceArt& art);
 

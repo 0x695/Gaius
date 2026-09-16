@@ -4097,6 +4097,57 @@ void test_forum_screens_art() {
             CHECK(unmatched == 0 && drawn > 0);
         }
     }
+
+    // The Treasurer against its capture: the capture's figures, and its funds
+    // history's years BC 6 (newest) to BC 13. Each row's loss bar is fitted:
+    // some width must match the capture exactly.
+    const fs::path treasurer_shot = screens / "2053523-caesar-dos-managing-your-economy.png";
+    if (fs::exists(treasurer_shot)) {
+        auto t = std::make_unique<CityState>(gaius::model::blank_state());
+        set_global_word(*t, 0x6C04, 5);
+        set_global_word(*t, 0x6C02, 5);
+        set_global_word(*t, 0x6C0E, 104);
+        set_global_word(*t, 0x6BAE, 33);
+        set_global_word(*t, 0x6BAC, 118);
+        set_global_word(*t, 0x6BAA, 58);
+        set_global_word(*t, 0x6BB4, -209);
+        set_global_word(*t, 0x6BB6, -209);
+        t->table_72.assign(68, 0);
+        set_global_word(*t, 0x6B38, 7);
+        for (int k = 0; k < 8; ++k) {
+            const int year = -6 - k;
+            t->table_72[static_cast<size_t>(7 - k) * 4] = static_cast<uint8_t>(year & 0xFF);
+            t->table_72[static_cast<size_t>(7 - k) * 4 + 1] = static_cast<uint8_t>((year >> 8) & 0xFF);
+        }
+        const gaius::formats::IndexedImage bare = gaius::ui::compose_treasurer_screen(*t, art);
+        const std::vector<std::array<int, 4>> skip = {{0x50 - 27, 0x1C, 28, 8 * 17}, {144, 96, 24, 24}};
+        CHECK(compare_with_capture(bare, art.palette, treasurer_shot, skip) == 0);
+        int sw, sh, sc;
+        unsigned char* shot = stbi_load(treasurer_shot.string().c_str(), &sw, &sh, &sc, 3);
+        if (shot) {
+            int unmatched = 0, drawn = 0;
+            for (int k = 0; k < 17; ++k) {
+                int best = -1;
+                for (int n = 0; n <= 28 && best < 0; ++n) {
+                    gaius::formats::IndexedImage patch = bare;
+                    gaius::ui::fill_rect(patch, 0x50 - n + 1, 0x1C + 8 * k, n, 6, 8);
+                    bool same = true;
+                    for (int yy = 0x1C + 8 * k; yy < 0x1C + 8 * k + 8 && same; ++yy)
+                        for (int xx = 0x50 - 27; xx <= 0x50 && same; ++xx) {
+                            const RGB c = art.palette.colors[patch.pixels[static_cast<size_t>(yy) * 320 + xx]];
+                            const unsigned char* q = shot + (yy * 320 + xx) * 3;
+                            same = (c.r >> 2) == (q[0] >> 2) && (c.g >> 2) == (q[1] >> 2) && (c.b >> 2) == (q[2] >> 2);
+                        }
+                    if (same) best = n;
+                }
+                if (best < 0) ++unmatched;
+                if (best > 0) ++drawn;
+            }
+            stbi_image_free(shot);
+            std::printf("  funds history: %d rows hold a loss bar, %d match no width\n", drawn, unmatched);
+            CHECK(unmatched == 0 && drawn > 0);
+        }
+    }
 }
 
 // The maps screen against the DOSBox capture of it (road layout, the city
