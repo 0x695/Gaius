@@ -63,9 +63,11 @@
 #include "apps/viewer/screens.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
+#include "formats/p32/p32.hpp"
 #include "formats/screen_data/screen_data.hpp"
 #include "formats/vpx/vpx.hpp"
 #include "render/city_render.hpp"
+#include "render/empire_map.hpp"
 #include "render/province_render.hpp"
 #include "systems/campaign.hpp"
 #include "systems/month.hpp"
@@ -347,6 +349,10 @@ int main(int argc, char** argv) {
     formats::Palette forum_palette;
     formats::screen_data::ClickMap forum_clicks;
     bool have_forum_picture = false;
+    formats::IndexedImage empire_picture;  // EMAP2.VPX
+    formats::Palette empire_palette;       // EMAP2.P32
+    std::array<formats::screen_data::Marker, 50> empire_markers{};  // EDATA.CSR
+    bool have_empire_map = false;
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -376,6 +382,13 @@ int main(int argc, char** argv) {
                     forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
                     forum_clicks = formats::screen_data::load_click_map(asset("CONTFRM.GD8"));
                     have_forum_picture = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    empire_picture = formats::vpx::decode(asset("EMAP2.VPX")).image;
+                    empire_palette = formats::p32::load(asset("EMAP2.P32"));
+                    empire_markers = formats::screen_data::load_province_markers(asset("EDATA.CSR"));
+                    have_empire_map = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -563,7 +576,7 @@ int main(int argc, char** argv) {
     // ---- The screens: the city, the province, the Forum, a promotion offer and
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
-    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice };
+    enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap };
     Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
@@ -582,6 +595,7 @@ int main(int argc, char** argv) {
     if (start_screen == "province") screen = Screen::Province;
     if (start_screen == "forum") screen = have_forum_picture ? Screen::ForumHall : Screen::Forum;
     if (start_screen == "forum-page") screen = Screen::Forum;
+    if (start_screen == "empire" && have_empire_map && have_icons) screen = Screen::EmpireMap;
     Screen battle_return = Screen::Province;
     viewer::ForumTab forum_tab =
         start_forum_tab == viewer::kStatue
@@ -705,7 +719,8 @@ int main(int argc, char** argv) {
 
     auto current_page = [&]() -> ui::Page {
         switch (screen) {
-            case Screen::Forum: return viewer::forum_page(state, forum_tab, sim.speed, rating_hint);
+            case Screen::Forum:
+                return viewer::forum_page(state, forum_tab, sim.speed, rating_hint, have_empire_map && have_icons);
             case Screen::Notice:
                 return viewer::notice_page(systems::messages::kFundsWarning.data(),
                                            systems::messages::kFundsWarning.size());
@@ -797,6 +812,10 @@ int main(int argc, char** argv) {
                 rating_hint = systems::forum::rating_hint(
                     state, systems::forum::rating_column_x(action - viewer::kActionHint), hint_cycle,
                     sim.linked_towns, sim.random.walk);
+                return;
+            }
+            if (action == viewer::kActionEmpireMap) {
+                screen = Screen::EmpireMap;  // 0x0C060 -> 0x0D174
                 return;
             }
             const viewer::ForumTab tab_before = forum_tab;
@@ -1100,6 +1119,10 @@ int main(int argc, char** argv) {
                 if (action >= 0) apply_page_action(action);
                 return;
             }
+            if (screen == Screen::EmpireMap) {
+                screen = Screen::Forum;  // 0x0D174 waits for a click
+                return;
+            }
             if (const int tab = strip_hit(lx, ly); tab >= 0) {
                 switch_to(tab);
                 return;
@@ -1264,6 +1287,10 @@ int main(int argc, char** argv) {
                         }
                         if (save_mode && screen == Screen::ForumHall) {
                             screen = Screen::City;  // right-click leaves the Forum
+                            break;
+                        }
+                        if (save_mode && screen == Screen::EmpireMap) {
+                            screen = Screen::Forum;
                             break;
                         }
                         if (save_mode && screen == Screen::Province) {
@@ -1448,6 +1475,18 @@ int main(int argc, char** argv) {
                 frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
+            } else if (save_mode && screen == Screen::EmpireMap) {
+                // 0x09276 + 0x0D21E: the map of the Empire and the provinces given.
+                formats::IndexedImage empire;
+                render::render_empire_map(empire_picture, toolbar_icons, empire_markers, state.table_50,
+                                          model::global_word(state, 0x6CA6), empire);
+                frame.resize(static_cast<size_t>(kLogicalW) * kLogicalH * 3);
+                for (size_t i = 0; i < empire.pixels.size() && i * 3 + 2 < frame.size(); ++i) {
+                    const formats::RGB c = empire_palette.colors[empire.pixels[i]];
+                    frame[i * 3] = c.r;
+                    frame[i * 3 + 1] = c.g;
+                    frame[i * 3 + 2] = c.b;
+                }
             } else if (save_mode && screen == Screen::ForumHall) {
                 // The original's Forum picture, clicked through its own click map.
                 frame.resize(static_cast<size_t>(kLogicalW) * kLogicalH * 3);

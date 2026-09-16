@@ -124,6 +124,7 @@ target_link_libraries(gaius_ui PUBLIC gaius_systems)
 add_library(gaius_render STATIC
   render/city_render.cpp
   render/province_render.cpp
+  render/empire_map.cpp
 )
 target_link_libraries(gaius_render PUBLIC gaius_systems)
 

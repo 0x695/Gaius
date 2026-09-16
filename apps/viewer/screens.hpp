@@ -89,6 +89,7 @@ inline constexpr int kActionTactic = 600;    // + battle::Tactic
 inline constexpr int kActionRetreat = 610, kActionContinue = 611, kActionQuit = 612;
 inline constexpr int kActionOpenSave = 405, kActionOpenLoad = 406;
 inline constexpr int kActionSpeedDown = 407, kActionSpeedUp = 408;
+inline constexpr int kActionEmpireMap = 409;
 inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDifficultyDown = 702,
                      kActionDifficultyUp = 703, kActionBegin = 704;
 inline constexpr int kActionSlot = 710;  // + slot
@@ -118,8 +119,10 @@ inline ui::PanelRow duty_row(const model::CityState& s, const char* label, syste
 
 // `speed`, when not negative, adds the game speed (DS:0x5292) to the governor's
 // page -- the original keeps it on its options screen (0x0F0D8). `hint` is the
-// ratings advice on show (forum::kRatingHints), 0 for none.
-inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = -1, int hint = 0) {
+// ratings advice on show (forum::kRatingHints), 0 for none. `empire_map` adds
+// the governor's map button (0x0C060) when the map's files are there.
+inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = -1, int hint = 0,
+                           bool empire_map = false) {
     namespace forum = systems::forum;
     using detail::g;
     ui::Page page;
@@ -273,6 +276,7 @@ inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = 
             page.rows.push_back(detail::control_row(s, "Donation", forum::Control::Donation, " Dn"));
             if (speed >= 0) page.rows.push_back({"Game speed", std::to_string(speed), kActionSpeedDown, kActionSpeedUp});
             page.buttons.insert(page.buttons.begin(), {"Donate", kActionDonate});
+            if (empire_map) page.buttons.insert(page.buttons.begin() + 1, {"Empire", kActionEmpireMap});
             break;
         }
     }

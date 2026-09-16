@@ -46,6 +46,7 @@
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "systems/forum.hpp"
+#include "render/empire_map.hpp"
 #include "systems/housing.hpp"
 #include "systems/military.hpp"
 #include "systems/month.hpp"
@@ -3841,6 +3842,56 @@ void test_xmi_matches_mdi() {
                                              "CZARJINB=CZARJINB.MDI"}));
 }
 
+// The map of the Empire against the DOSBox capture of it: EMAP2.VPX with the
+// markers 0x0D21E draws, compared at 6-bit DAC level everywhere but the
+// status line.
+void test_empire_map_screen() {
+    std::printf("test_empire_map_screen (0x09276 EMAP2.VPX, 0x0D21E markers vs the map capture)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    const fs::path shot_path = fs::path(dir) / "gaius_test_screens" / "7489888-caesar-dos-map.png";
+    if (!fs::exists(shot_path) || !fs::exists(fs::path(dir) / "POINTERS.PL8")) {
+        skip("map capture or POINTERS.PL8 not found");
+        return;
+    }
+    const vpx::DecodeResult map = vpx::decode((fs::path(dir) / "EMAP2.VPX").string());
+    const Palette pal = p32::load((fs::path(dir) / "EMAP2.P32").string());
+    const gaius::formats::PL8Sheet pointers = gaius::formats::pl8::load((fs::path(dir) / "POINTERS.PL8").string());
+    const auto markers = gaius::formats::screen_data::load_province_markers((fs::path(dir) / "EDATA.CSR").string());
+    int sw, sh, sc;
+    unsigned char* shot = stbi_load(shot_path.string().c_str(), &sw, &sh, &sc, 3);
+    CHECK(shot != nullptr && sw == 320 && sh == 200);
+    if (!shot) return;
+    const auto mismatches = [&](const gaius::formats::IndexedImage& img) {
+        size_t bad = 0;
+        for (int y = 0; y < gaius::render::kGeneratingY - 2; ++y) {
+            for (int x = 0; x < 320; ++x) {
+                const RGB c = pal.colors[img.pixels[static_cast<size_t>(y) * 320 + x]];
+                const unsigned char* q = shot + (y * 320 + x) * 3;
+                bad += !((c.r >> 2) == (q[0] >> 2) && (c.g >> 2) == (q[1] >> 2) && (c.b >> 2) == (q[2] >> 2));
+            }
+        }
+        return bad;
+    };
+    gaius::formats::IndexedImage out;
+    std::vector<uint8_t> given(50, 0);
+    gaius::render::render_empire_map(map.image, pointers, markers, given, -1, out);
+    const size_t bare = mismatches(out);
+    std::printf("  no markers: %zu mismatches above the status line\n", bare);
+    // The capture is the new-province screen for Pamphylia (35), the only
+    // province given: every pixel above the status line matches with its
+    // marker, and not with the other provinces' frame.
+    CHECK(bare > 0);
+    given[35] = 1;
+    gaius::render::render_empire_map(map.image, pointers, markers, given, 35, out);
+    const size_t with_marker = mismatches(out);
+    gaius::render::render_empire_map(map.image, pointers, markers, given, -1, out);
+    const size_t other_frame = mismatches(out);
+    std::printf("  Pamphylia's marker: %zu mismatches (%zu with frame 0x31)\n", with_marker, other_frame);
+    CHECK(with_marker == 0 && other_frame > 0);
+    stbi_image_free(shot);
+}
+
 void test_screen_data() {
     std::printf("test_screen_data (CONTFRM.GD8 Forum click map, EDATA.CSR province markers)\n");
     const char* assets = std::getenv("GAIUS_TEST_ASSETS");
@@ -5274,6 +5325,7 @@ int main() {
     test_voc_sounds();
     test_xmi_matches_mdi();
     test_screen_data();
+    test_empire_map_screen();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();

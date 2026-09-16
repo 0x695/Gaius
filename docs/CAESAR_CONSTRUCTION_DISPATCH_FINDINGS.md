@@ -1551,3 +1551,20 @@ A click with the pointer's y in 0x78-0xB3 advances `DS:0x6D2A` (0, 1, 2, 0...) a
 Anything else -- a rating of 100, or x on 0, 80, 160 or 240 -- gives "you need no help here". `DS:0x6C84` is set to 1 by an army reaching the city (`0x24C01`) and to 2 by a collapse's rioter (`0x2DC56`). Earlier sections' "`0xD007` advisor text picker" is this routine's middle.
 
 **Checked** by `test_forum_figures`: the statue's limits, the doubling scale, the caption years, every hint branch, and the industry average against all 17 saves.
+
+## 37. The map of the Empire (2026-09-16)
+
+`render::render_empire_map` draws the screen and `gaius_viewer` opens it from the governor's page. The screen:
+
+- **The picture.** `0x09276` decodes `EMAP2.VPX` to the screen (palette `EMAP2.P32`), then loads `HOUSES2.PL8` back into the same buffer for the city. The round dots on the map belong to the picture.
+- **The markers.** `0x0D21E` draws them from the interface sheet at `A000:8000` -- `POINTERS.PL8`, the sheet the Forum's panels come from (section 36.2) -- through `1F6F:1831`. It walks the provinces in the order `3496:172C` lists them (`23, 22, 21, 20, 24, 25, 19, 17, ...`, north-west first) and draws each given one (`table_50`): frame `0x30` (16x32) for the current province `DS:0x6CA6`, `0x31` for the others, at its `EDATA.CSR` position (section 34.3). With `DS:0x4F4A` set it draws none.
+- **Checked against the capture.** The DOSBox capture `7489888-caesar-dos-map.png` is the new-province screen for Pamphylia (35). With its marker drawn, every pixel above the status line matches at 6-bit level. The marker explains all 240 pixels that differ from the bare picture, and frame `0x31` in its place leaves 201 wrong. `test_empire_map_screen` checks this.
+
+Where the game shows it:
+
+| Routine | When | What |
+|---|---|---|
+| `0x0D174` | the governor's screen (`0x0BDD3`), its third button | the map, until a click. The governor's buttons are the 16-byte records at `DS:0x0444` -- cell x, cell y, `POINTERS.PL8` frame and pressed frame, handler far pointer, timer, mode (read by `0x0D521`/`0x0D41D`) -- at cells (18, 1), (18, 2), (18, 4), (18, 8), (18, 10); the map is (18, 4) -> `0x0C060` |
+| `0x0D1D3` | a new game or a new province (`0x0F79D`, `0x0FB34`), before the terrain (`0x06F05`) | the map with "generating scrubland" in `FONT1` at (0x4E, 0xBB), drawn to both pages. After the terrain the map is redrawn without it, then the province file is loaded (`0x0FF1C`) and the province starts (`0x05730`), with no wait for a click |
+
+Gaius's terrain generation takes no visible time, so the viewer doesn't show the second screen.
