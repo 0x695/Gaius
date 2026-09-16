@@ -366,6 +366,11 @@ int main(int argc, char** argv) {
     bool have_name_art = false;
     ui::InterfaceArt interface_art;  // the original's advisor screens
     bool have_interface_art = false;
+    ui::RatingsArt ratings_art;      // TEMPLE.VPX and its columns
+    bool have_ratings_art = false;
+    formats::IndexedImage governor_picture;  // C_VITAE.VPX
+    bool have_governor_picture = false;
+    bool governor_details = false;  // the governor's arrows page, reached from the original screen
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -400,6 +405,16 @@ int main(int argc, char** argv) {
                 try {
                     interface_art = ui::load_interface_art(dir);
                     have_interface_art = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    governor_picture = ui::load_governor_picture(dir);
+                    have_governor_picture = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    ratings_art = ui::load_ratings_art(dir);
+                    have_ratings_art = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -614,6 +629,7 @@ int main(int argc, char** argv) {
     // DS:0x0DD0: the governor's name, kept across new games and saved with each.
     std::string governor_name = ui::governor_name(state);
     ui::NameEntry name_entry;
+    bool name_return_to_forum = false;  // opened from the governor's screen rather than the start screen
     Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
@@ -643,6 +659,7 @@ int main(int argc, char** argv) {
     if (forum_tab == viewer::kIndustry) systems::forum::open_industry_report(state);
     int rating_hint = 0;  // forum::kRatingHints on show
     int hint_cycle = 0;   // DS:0x6D2A
+    int hint_frames = 0;  // the advice shows 90 frames on the original screen
     bool promotion_to_caesar = false;
     viewer::BattleView battle_view;
     ui::BattleScreen battle_screen;  // the original's screen, when its files are there
@@ -772,7 +789,9 @@ int main(int argc, char** argv) {
             case Screen::Battle: return viewer::battle_page(state, battle_view);
             case Screen::Ending: return viewer::ending_page(state, ending_caesar);
             case Screen::Start:
-            case Screen::NameEntry: return viewer::start_page(funding_level, start_difficulty, governor_name);
+            case Screen::NameEntry:
+                return name_return_to_forum ? viewer::forum_page(state, forum_tab, sim.speed, rating_hint)
+                                            : viewer::start_page(funding_level, start_difficulty, governor_name);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons);
             default: return ui::Page{};
         }
@@ -781,7 +800,8 @@ int main(int argc, char** argv) {
     const auto original_forum_screen = [&]() {
         return screen == Screen::Forum && have_interface_art &&
                (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry || forum_tab == viewer::kTreasurer ||
-                forum_tab == viewer::kTribune ||
+                forum_tab == viewer::kTribune || (forum_tab == viewer::kRatings && have_ratings_art) ||
+                (forum_tab == viewer::kGovernor && have_governor_picture && !governor_details) ||
                 (forum_tab == viewer::kLegion && have_province_sprites));
     };
     const auto page_screen = [&]() {
@@ -882,7 +902,10 @@ int main(int argc, char** argv) {
             const viewer::ForumTab tab_before = forum_tab;
             if (!viewer::apply_forum_action(state, action, forum_tab))
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
-            if (forum_tab != tab_before) rating_hint = 0;
+            if (forum_tab != tab_before) {
+                rating_hint = 0;
+                governor_details = false;
+            }
             if (action == viewer::kActionRankUp || action == viewer::kActionRankDown)
                 sim.difficulty = model::global_word(state, systems::forum::kDifficulty);
         } else if (screen == Screen::Promotion) {
@@ -1187,6 +1210,37 @@ int main(int argc, char** argv) {
                     if (cell == 17) forum::adjust(state, forum::Control::IndustrialTax, -1);
                     if (cell == 12 || cell == 13 || cell == 16 || cell == 17) return;
                 }
+                if (forum_tab == viewer::kGovernor) {
+                    // DS:0x0444: the name (18, 1) and the map (18, 4). The
+                    // requirements, salary and donation buttons open Gaius's
+                    // governor page, whose arrows do the same.
+                    const int cx = lx / 16, cy = ly / 16;
+                    if (cx == 18 && cy == 1 && have_name_art) {
+                        name_entry = ui::begin_name_entry(governor_name);
+                        name_return_to_forum = true;
+                        screen = Screen::NameEntry;
+                        platform::set_text_entry(true);
+                        return;
+                    }
+                    if (cx == 18 && cy == 4 && have_empire_map && have_icons) {
+                        screen = Screen::EmpireMap;
+                        return;
+                    }
+                    if (cx == 18 && (cy == 2 || cy == 8 || cy == 10)) {
+                        governor_details = true;
+                        return;
+                    }
+                }
+                if (forum_tab == viewer::kRatings) {
+                    // 0x0CF12: a click among the columns asks for advice.
+                    if (ly >= systems::forum::kRatingHintTop && ly < systems::forum::kRatingHintBottom) {
+                        hint_cycle = systems::forum::next_hint_cycle(hint_cycle);
+                        rating_hint = systems::forum::rating_hint(state, lx, hint_cycle, sim.linked_towns,
+                                                                  sim.random.walk);
+                        hint_frames = systems::forum::kRatingHintFrames;
+                        return;
+                    }
+                }
                 if (forum_tab == viewer::kTribune) {
                     // DS:0x0494's buttons.
                     namespace forum = systems::forum;
@@ -1303,6 +1357,7 @@ int main(int argc, char** argv) {
                 if (tab >= 0) {
                     forum_tab = static_cast<viewer::ForumTab>(tab);
                     rating_hint = 0;
+                    governor_details = false;
                     if (forum_tab == viewer::kIndustry) systems::forum::open_industry_report(state);
                     screen = Screen::Forum;
                 }
@@ -1418,7 +1473,9 @@ int main(int argc, char** argv) {
                             if (ui::name_key(name_entry, key, cmd->ch) != 0) {
                                 // Escape or Enter: the dialog edits in place, so both keep it.
                                 governor_name = ui::name_text(name_entry);
-                                screen = Screen::Start;
+                                if (name_return_to_forum) ui::set_governor_name(state, governor_name);
+                                screen = name_return_to_forum ? Screen::Forum : Screen::Start;
+                                name_return_to_forum = false;
                                 platform::set_text_entry(false);
                             }
                         }
@@ -1465,7 +1522,9 @@ int main(int argc, char** argv) {
                         if (save_mode && screen == Screen::NameEntry) {
                             // 0x0C544: a right-click ends the dialog, keeping the name.
                             governor_name = ui::name_text(name_entry);
-                            screen = Screen::Start;
+                            if (name_return_to_forum) ui::set_governor_name(state, governor_name);
+                            screen = name_return_to_forum ? Screen::Forum : Screen::Start;
+                            name_return_to_forum = false;
                             platform::set_text_entry(false);
                             break;
                         }
@@ -1664,11 +1723,17 @@ int main(int argc, char** argv) {
                         forum_tab == viewer::kHistory     ? ui::compose_history_screen(state, interface_art)
                         : forum_tab == viewer::kIndustry  ? ui::compose_industry_screen(state, interface_art)
                         : forum_tab == viewer::kTribune   ? ui::compose_tribune_screen(state, interface_art)
+                        : forum_tab == viewer::kRatings
+                            ? ui::compose_ratings_screen(state, interface_art, ratings_art, rating_hint)
+                        : forum_tab == viewer::kGovernor
+                            ? ui::compose_governor_screen(state, interface_art, governor_picture)
                         : forum_tab == viewer::kLegion
                             ? ui::compose_legion_screen(state, interface_art, province_sprites.units,
                                                         static_cast<int>(sim.ticks))
                             : ui::compose_treasurer_screen(state, interface_art);
-                    ui::canvas_to_rgb(advisor, interface_art.palette, frame);
+                    ui::canvas_to_rgb(advisor,
+                                      forum_tab == viewer::kRatings ? ratings_art.palette : interface_art.palette, frame);
+                    if (forum_tab == viewer::kRatings && hint_frames > 0 && --hint_frames == 0) rating_hint = 0;
                 }
             } else if (save_mode && screen == Screen::Battle && have_battle_art) {
                 // 0x2244B, once a frame: the generator draws, then the screen.

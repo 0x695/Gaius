@@ -3,10 +3,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdlib>
+#include <filesystem>
 
 #include "systems/forum.hpp"
+#include "formats/pal256/pal256.hpp"
+#include "formats/pl8/pl8.hpp"
+#include "formats/vpx/vpx.hpp"
 #include "systems/military.hpp"
+#include "ui/name_entry.hpp"
 
 namespace gaius::ui {
 
@@ -243,6 +249,123 @@ formats::IndexedImage compose_tribune_screen(const model::CityState& state, cons
     for (const auto& d : kNeedWords) draw_number(img, art, Font::Font1, 0x110, d[0], g(state, static_cast<uint16_t>(d[1])), 3, 1);
     // The auxiliaries, army duty / 16 (0x0E85A), into "   )".
     draw_text(img, art, Font::Font1, 0x110, 0x94, number_text(g(state, 0x6C5A) / 16, 3, 2) + ")");
+    return img;
+}
+
+RatingsArt load_ratings_art(const std::string& dir) {
+    namespace fs = std::filesystem;
+    const auto asset = [&](std::string name) {
+        fs::path p = fs::path(dir) / name;
+        if (fs::exists(p)) return p.string();
+        for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        p = fs::path(dir) / name;
+        if (fs::exists(p)) return p.string();
+        throw formats::FormatError("ratings screen: " + name + " not found in " + dir);
+    };
+    RatingsArt art;
+    art.picture = formats::vpx::decode(asset("TEMPLE.VPX")).image;
+    art.palette = formats::pal256::load(asset("TEMPLE.256"));
+    art.columns = formats::pl8::load(asset("TEMPLBIT.PL8"));
+    return art;
+}
+
+formats::IndexedImage compose_ratings_screen(const model::CityState& state, const InterfaceArt& art,
+                                             const RatingsArt& ratings, int hint) {
+    formats::IndexedImage img = ratings.picture;
+    // 0x0D069: pieces from y 0x79 upwards, 10 apart -- the base (frame 2),
+    // shafts (1) and at the tenth the capital (0) -- one for every 10 points,
+    // rounded up.
+    static constexpr int kColumns[][2] = {{0x18, 0x6C3C}, {0x68, 0x6C3A}, {0xBA, 0x6C38}, {0x10C, 0x6C36}};
+    for (const auto& col : kColumns) {
+        int left = g(state, static_cast<uint16_t>(col[1])) + 9;
+        for (int piece = 0; piece < 10; ++piece) {
+            left -= 10;
+            if (left < 0) break;
+            draw_sprite(img, ratings.columns, piece == 0 ? 2 : piece == 9 ? 0 : 1, col[0], 0x79 - 10 * piece);
+        }
+    }
+    // The percentages: "   %" with three digits over its start.
+    static constexpr int kPercents[][2] = {{0x16, 0x6C3C}, {0x6A, 0x6C3A}, {0xBE, 0x6C38}, {0x112, 0x6C36}};
+    for (const auto& p : kPercents)
+        draw_text(img, art, Font::Font1, p[0], 0xA0, number_text(g(state, static_cast<uint16_t>(p[1])), 3, 2) + "%");
+    // 0x0CC21, each frame: the stone strip (0x0D623, 18 x 1 at (0x10, 0xB4))
+    // and the average or the advice.
+    draw_stone(img, art, 0x10, 0xB4, 18, 1);
+    if (hint <= 0 || hint >= static_cast<int>(systems::forum::kRatingHints.size())) {
+        draw_text(img, art, Font::Font1, 0x10, 0xB8, "      Average Rating     %");
+        draw_number(img, art, Font::Font1, 0xC6, 0xB8, g(state, 0x6C34), 2, 1);
+    } else {
+        // DS:0x7142-0x712E, drawn from x 0 (the last from 0x10), padded as stored.
+        static constexpr const char* kStored[] = {
+            "",
+            "  Stop barbarians from reaching city",
+            "  Building temples helps prevent riots",
+            "  Reduce taxes, keep everyone happy !!",
+            "   Prehaps you need a grand spectacle   ",
+            "    Is everyone served by religion ?    ",
+            "       Increase your population",
+            "   Are people healthy and educated ?",
+            "        Increase the population",
+            "   Check everyone is paying you tax !",
+            "  Upgrade slums to high grade housing",
+            "    Build an Imperial highway to Rome",
+            "   Develop links with local villages",
+            "       Straighten those roads !",
+            "      you need no help here"};
+        draw_text(img, art, Font::Font1, hint == 14 ? 0x10 : 0, 0xB8, kStored[hint]);
+    }
+    return img;
+}
+
+formats::IndexedImage load_governor_picture(const std::string& dir) {
+    namespace fs = std::filesystem;
+    for (const char* name : {"C_VITAE.VPX", "c_vitae.vpx"}) {
+        const fs::path p = fs::path(dir) / name;
+        if (fs::exists(p)) return formats::vpx::decode(p.string()).image;
+    }
+    throw formats::FormatError("governor screen: C_VITAE.VPX not found in " + dir);
+}
+
+formats::IndexedImage compose_governor_screen(const model::CityState& state, const InterfaceArt& art,
+                                              const formats::IndexedImage& picture) {
+    formats::IndexedImage img = picture;
+    // 0x098AB: a 13 x 12 panel at (0x70, 0) over the picture's right.
+    draw_panel(img, art, 0x70, 0, 13, 12);
+    draw_text(img, art, Font::Font1, 0x64, 0x35, "             of");
+    draw_text(img, art, Font::Font1, 0x64, 0x68, "   Imperial favor");
+    draw_text(img, art, Font::Font1, 0x64, 0x7E, "        Salary drawn");
+    draw_text(img, art, Font::Font1, 0x62, 0x9B, "        Donate money");
+    draw_text(img, art, Font::Font1, 0x62, 0xAB, "           to city");
+    // Numbers into "      dn" and "  %" (mode 2).
+    draw_text(img, art, Font::Font1, 0xB0, 0x5B, number_text(g(state, 0x6C2E), 5, 2) + " dn");
+    draw_text(img, art, Font::Font1, 0x118, 0x68, number_text(g(state, 0x6C2A), 2, 2) + "%");
+    draw_text(img, art, Font::Font1, 0xB8, 0x8C, number_text(g(state, 0x6C2C), 5, 2) + " dn");
+    // The rank (DS:0x7102) and province (DS:0x70F2), 16-character fields.
+    static constexpr const char* kRanks[] = {
+        "    Plebian     ", "    Citizen     ", "    Equitus     ", " Taberllarius   ", "    Decurian    ",
+        "   Iuridicus    ", "   Procurator   ", "   Magistrate   ", "    Logistas    ", "   Praefectus   ",
+        "    Magister    ", " Cubicularius   ", "     Legate     ", "    Quaestor    ", "    Senator     ",
+        "    Praetor     ", "     Consul     ", "    Proconsul   ", "    Princeps    ", "    Imperator   ",
+        "     Caesar     "};
+    const int rank = g(state, 0x6C30);
+    if (rank >= 0 && rank <= 20) draw_text(img, art, Font::Font1, 0x94, 0x25, kRanks[rank]);
+    static constexpr const char* kProvinces[] = {
+        "    Sicilia     ", "    Campania    ", "    Latium      ", " Cisalpine Gaul ", "    Corsica     ",
+        "    Sardinia    ", " Alpes Maritimae", "   Narbonensis  ", "  Hispania Inf. ", "     Baetica    ",
+        " Lusitania Inf. ", " Lusitania Sup. ", " Tarraconensis  ", " Aquitania Inf. ", "  Hispania Sup. ",
+        " Aquitania Sup. ", "  Lugdunensis   ", "    Belgica     ", "  Gallia  Sup.  ", "  Gallia  Inf.  ",
+        "  W. Britannia  ", "  E. Britannia  ", " Britannia Sup. ", "   Caledonia    ", "  Germania Inf. ",
+        "  Germania Sup. ", "    Pannonia    ", "     Dacia      ", "   Illyricum    ", "    Dalmatia    ",
+        "   Macedonia    ", "     Achaea     ", "     Creta      ", "    Thracia     ", "      Asia      ",
+        "   Pamphylia    ", "   Cappadocia   ", "    Assyria     ", "     Syria      ", "  Mesopotamia   ",
+        "     Judea      ", "     Arabia     ", "    Aegyptus    ", "   Cyrenaica    ", "     Africa     ",
+        "    Numidia     ", "   Mauretania   ", "  Caeariensis   ", "   Tingitania   ", "     Moesia     "};
+    const int province = g(state, 0x6CA6);
+    if (province >= 0 && province < 50) draw_text(img, art, Font::Font1, 0x94, 0x45, kProvinces[province]);
+    // 0x0C373: the name, 8 px a character from x 0xA4.
+    draw_text(img, art, Font::Font1, 0xA4, 0x14, governor_name(state));
+    // 0x0BDD3, each frame: the buttons.
+    for (int row : {1, 2, 4, 8, 10}) draw_block(img, art.blocks, 29, 18 * 16, row * 16);
     return img;
 }
 

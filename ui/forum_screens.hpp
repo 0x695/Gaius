@@ -33,6 +33,31 @@ formats::IndexedImage compose_legion_screen(const model::CityState& state, const
 // duty's plebs and need, with the arrows (DS:0x0494).
 formats::IndexedImage compose_tribune_screen(const model::CityState& state, const InterfaceArt& art);
 
+// The ratings screen's own art: TEMPLE.VPX, TEMPLE.256 and the column pieces
+// TEMPLBIT.PL8 (loaded at 43A5:5694).
+struct RatingsArt {
+    formats::IndexedImage picture;
+    formats::Palette palette;
+    formats::PL8Sheet columns;
+};
+RatingsArt load_ratings_art(const std::string& asset_dir);
+
+// 0x096ED + 0x0CC21, the ratings: a column for each of Peace, Culture,
+// Prosperity and Empire, a piece per 10 points (0x0D069), the percentages,
+// and along the bottom the average or the advice `hint`
+// (systems::forum::kRatingHints; 0 for the average). The screen keeps
+// TEMPLE.256 as its palette.
+formats::IndexedImage compose_ratings_screen(const model::CityState& state, const InterfaceArt& art,
+                                             const RatingsArt& ratings, int hint);
+
+// 0x098AB + 0x0BDD3, the governor's own affairs: C_VITAE.VPX (`picture`,
+// load_governor_picture) and a panel with the governor's name, rank,
+// province, savings, Imperial favour and salary, and the five buttons
+// (DS:0x0444, cells (18, 1), (18, 2), (18, 4), (18, 8), (18, 10)).
+formats::IndexedImage load_governor_picture(const std::string& asset_dir);
+formats::IndexedImage compose_governor_screen(const model::CityState& state, const InterfaceArt& art,
+                                              const formats::IndexedImage& picture);
+
 // 0x084B1: the funds warning -- a 20 x 12 panel and the six lines at
 // DS:0x085F in FONT1 from x 0.
 formats::IndexedImage compose_funds_warning_screen(const InterfaceArt& art);
