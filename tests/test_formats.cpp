@@ -53,6 +53,7 @@
 #include "systems/service.hpp"
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
+#include "ui/maps_screen.hpp"
 #include "ui/game_font.hpp"
 #include "ui/metrics.hpp"
 #include "ui/toolbar.hpp"
@@ -3929,6 +3930,80 @@ void test_xmi_matches_mdi() {
                                              "CZARJINB=CZARJINB.MDI"}));
 }
 
+// The maps screen against the DOSBox capture of it (road layout, the city
+// shown): everything but the map itself, whose city isn't one of the saves,
+// and the mouse pointer.
+void test_maps_screen() {
+    std::printf("test_maps_screen (0x0B717 maps screen, 1F6F:0009 map colours vs the capture)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    const fs::path shot_path = fs::path(dir) / "gaius_test_screens" / "2053402-caesar-dos-evaluating-your-infrastructure.png";
+    gaius::ui::MapsArt art;
+    try {
+        art = gaius::ui::load_maps_art(dir);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("maps screen files: ") + e.what());
+        return;
+    }
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    // Colours by mode on a few cells.
+    auto& city = st->city;
+    city.tile[0][0] = 0x40;  // a road
+    city.tile[0][1] = 0xD0;  // a house
+    city.tile[0][2] = 0x10;  // low ground
+    city.service_flags[0][1] = 0x21;
+    city.land_value[0][1] = 17;
+    city.coverage[0][2] = static_cast<uint8_t>(-3);
+    using gaius::ui::MapMode;
+    CHECK(gaius::ui::map_colour(city, MapMode::Roads, false, 0, 0) == 0xA);
+    CHECK(gaius::ui::map_colour(city, MapMode::Roads, true, 1, 0) == 0);
+    CHECK(gaius::ui::map_colour(city, MapMode::Water, false, 1, 0) == 0xF &&
+          gaius::ui::map_colour(city, MapMode::Water, true, 1, 0) == 0xE);
+    CHECK(gaius::ui::map_colour(city, MapMode::Administration, true, 1, 0) == 8);
+    CHECK(gaius::ui::map_colour(city, MapMode::Trouble, false, 1, 0) == 0x18);
+    CHECK(gaius::ui::map_colour(city, MapMode::LandValue, false, 2, 0) == 0x1D);
+    CHECK(gaius::ui::map_colour(city, MapMode::None, false, 2, 0) == 0xC);
+    bool toggle = false;
+    MapMode mode = MapMode::None;
+    CHECK(gaius::ui::maps_button_at(18 * 16 + 3, 5 * 16 + 3, toggle, mode) && mode == MapMode::Roads && !toggle);
+    CHECK(gaius::ui::maps_button_at(18 * 16 + 3, 2 * 16 + 3, toggle, mode) && toggle);
+    CHECK(!gaius::ui::maps_button_at(17 * 16, 2 * 16, toggle, mode));
+    int cx = 0, cy = 0;
+    CHECK(gaius::ui::maps_cell_at(0x16 + 5, 0x26 + 7, cx, cy) && cx == 5 && cy == 7 && !gaius::ui::maps_cell_at(0x7A, 0x30, cx, cy));
+
+    if (!fs::exists(shot_path)) {
+        skip("maps capture not found");
+        return;
+    }
+    std::vector<uint8_t> rgb;
+    gaius::ui::compose_maps_screen(city, MapMode::Roads, true, art, rgb);
+    int sw, sh, sc;
+    unsigned char* shot = stbi_load(shot_path.string().c_str(), &sw, &sh, &sc, 3);
+    CHECK(shot != nullptr && sw == 320 && sh == 200);
+    if (!shot) return;
+    size_t total = 0, bad = 0;
+    std::array<size_t, 8> by_row{};
+    for (int y = 0; y < 200; ++y) {
+        for (int x = 0; x < 320; ++x) {
+            if (x >= 0x16 && x < 0x7A && y >= 0x26 && y < 0x8A) continue;  // the map
+            if (x >= 280 && x < 308 && y >= 60 && y < 84) continue;        // the pointer
+            const size_t i = static_cast<size_t>(y) * 320 + x;
+            const unsigned char* q = shot + i * 3;
+            const bool same = (rgb[i * 3] >> 2) == (q[0] >> 2) && (rgb[i * 3 + 1] >> 2) == (q[1] >> 2) &&
+                              (rgb[i * 3 + 2] >> 2) == (q[2] >> 2);
+            ++total;
+            if (!same) {
+                ++bad;
+                ++by_row[static_cast<size_t>(y / 25)];
+            }
+        }
+    }
+    stbi_image_free(shot);
+    std::printf("  around the map: %zu / %zu pixels differ (by 25-row band: %zu %zu %zu %zu %zu %zu %zu %zu)\n", bad,
+                total, by_row[0], by_row[1], by_row[2], by_row[3], by_row[4], by_row[5], by_row[6], by_row[7]);
+    CHECK(bad == 0);
+}
+
 // The map of the Empire against the DOSBox capture of it: EMAP2.VPX with the
 // markers 0x0D21E draws, compared at 6-bit DAC level everywhere but the
 // status line.
@@ -5414,6 +5489,7 @@ int main() {
     test_xmi_matches_mdi();
     test_screen_data();
     test_empire_map_screen();
+    test_maps_screen();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();

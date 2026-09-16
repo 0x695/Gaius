@@ -75,6 +75,7 @@
 #include "ui/panel.hpp"
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
+#include "ui/maps_screen.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
@@ -356,6 +357,8 @@ int main(int argc, char** argv) {
     bool have_empire_map = false;
     ui::BattleArt battle_art;  // WAR2.VPX and the rest of the original battle screen
     bool have_battle_art = false;
+    ui::MapsArt maps_art;  // the original maps screen
+    bool have_maps_art = false;
     std::string game_dir;  // where the game's files are: a new province's EMPIRE2.0NN is read from here
     if (save_mode) {
         std::vector<std::string> candidates;
@@ -385,6 +388,11 @@ int main(int argc, char** argv) {
                     forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
                     forum_clicks = formats::screen_data::load_click_map(asset("CONTFRM.GD8"));
                     have_forum_picture = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    maps_art = ui::load_maps_art(dir);
+                    have_maps_art = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -597,6 +605,8 @@ int main(int argc, char** argv) {
         time_running = false;
     }
     int overlay = 0;             // viewer::Overlay on the maps panel
+    ui::MapMode map_mode = ui::MapMode::None;  // DS:0x6D26 on the original maps screen
+    bool map_shows_city = false;               // DS:0x6D28
     bool ending_caesar = false;  // the ending page: Caesar, or dismissed
     bool quit_requested = false;
     if (start_screen == "maps") screen = Screen::Maps;
@@ -1198,6 +1208,21 @@ int main(int argc, char** argv) {
                 }
                 return;
             }
+            if (screen == Screen::Maps && have_maps_art) {
+                // DS:0x0704's buttons, or a click on the map (0x0DCB4), which
+                // takes the city view there.
+                bool toggle_city = false;
+                int map_x = 0, map_y = 0;
+                if (ui::maps_button_at(lx, ly, toggle_city, map_mode)) {
+                    if (toggle_city) map_shows_city = !map_shows_city;
+                } else if (ui::maps_cell_at(lx, ly, map_x, map_y)) {
+                    screen = Screen::City;
+                    cam.x = (map_x - 10) * city_cell_px;
+                    cam.y = (map_y - 5) * city_cell_px;
+                    cam.clamp();
+                }
+                return;
+            }
             if (screen == Screen::Maps) {
                 for (size_t i = 0; i < overlay_bar.buttons.size(); ++i) {
                     if (overlay_bar.buttons[i].contains(lx, ly)) overlay = static_cast<int>(i);
@@ -1563,6 +1588,10 @@ int main(int argc, char** argv) {
                 ui::render_bar(province_buttons, province_command, province_bar, frame, kLogicalW, kLogicalH,
                                page_metrics, font, label.c_str());
                 ui::render_strip(screen_tabs, 1, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+            } else if (save_mode && screen == Screen::Maps && have_maps_art) {
+                // 0x0B717: the original maps screen.
+                ui::compose_maps_screen(state.city, map_mode, map_shows_city, maps_art, frame);
+                ui::render_strip(screen_tabs, 2, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
             } else if (save_mode && screen == Screen::Maps) {
                 // The city under the overlay: cells it marks take its colour
                 // over a third of the city's, the rest are dimmed.

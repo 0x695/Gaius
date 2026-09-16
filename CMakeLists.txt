@@ -115,6 +115,7 @@ add_library(gaius_ui STATIC
   ui/font.cpp
   ui/game_font.cpp
   ui/battle_screen.cpp
+  ui/maps_screen.cpp
   ui/toolbar.cpp
   ui/panel.cpp
 )

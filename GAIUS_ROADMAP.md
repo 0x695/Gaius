@@ -21,7 +21,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
 | 6 | Economy & military | **Done** | The Cohort 2 hand-over |
-| 7 | Forum, advisors, ratings | **Done** | The original screens' art; the Trouble overlay |
+| 7 | Forum, advisors, ratings | **Done** | The Forum pages in the original's art |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | Not started | Everything |
 | 10 | Editor & IGDK integration | Not started | Everything |
@@ -279,7 +279,9 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 **Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 
-**Still open, not blocking:** the original Forum art and layout (the panels are `P_BLOCKS.PL8` frames, section 38.3), the Trouble overlay.
+- [x] **The original maps screen** (2026-09-16, findings section 39) -- the whole-city map with urbanization, water, administration, roads, land value and trouble areas, pixel-exact around the map against the capture; `ui::compose_maps_screen`.
+
+**Still open, not blocking:** the Forum pages in the original's art and layout (the panels are `P_BLOCKS.PL8` frames, section 38.3).
 
 ---
 

@@ -1641,7 +1641,7 @@ This corrects section 34.1, which had the victory and defeat animations the wron
 - Each running animation plays a frame (`0x239E1`): counter n draws file frame n - 2, and the animation stops past its limit.
 - At 0 the background is redrawn.
 
-**The retreat dialog** (`0x23708`). It reloads `FONT1`, switches the whole screen to the palette saved at `68F6:B6A8`, clears both pages (`100F:00EF` calls `2EF9:0C50` on each, STRONG INFERENCE), and draws a 14 × 5 panel at (0x30, 0x40). The text is "Retreat ?" at (0x5A, 0x4A) and "     Yes" / "      No" at (0x32, 0x62) / (0x32, 0x72), and the buttons are `DS:0x132C`: cells (12, 6) Yes -> `0x236EE` and (12, 7) No -> `0x236FB`. Afterwards it puts `WAR2`'s palette back. That the saved palette is `SHADE.256` is INFERENCE; the panel's stone only looks right through it.
+**The retreat dialog** (`0x23708`). It reloads `FONT1`, switches the whole screen to the palette saved at `68F6:B6A8`, clears both pages (`100F:00EF` calls `2EF9:0C50` on each, STRONG INFERENCE), and draws a 14 × 5 panel at (0x30, 0x40). The text is "Retreat ?" at (0x5A, 0x4A) and "     Yes" / "      No" at (0x32, 0x62) / (0x32, 0x72), and the buttons are `DS:0x132C`: cells (12, 6) Yes -> `0x236EE` and (12, 7) No -> `0x236FB`. Afterwards it puts `WAR2`'s palette back. That the saved palette is `SHADE.256` is confirmed by the maps screen's capture (section 39.1).
 
 ### 38.3 Which sheet the interface routines draw from (correcting 36.2 and 37)
 
@@ -1668,3 +1668,53 @@ This corrects section 34.1, which had the victory and defeat animations the wron
 - the 0x78-frame close after a retreat.
 
 No DOSBox capture of this screen exists to compare pixels against.
+
+
+## 39. The maps screen (2026-09-16)
+
+The original's maps screen (`0x0B717`) is a small map of the whole city beside six buttons, not a tint over the city view. `ui::compose_maps_screen` draws it, and `gaius_viewer` shows it in place of its own overlay tints when the files are present. Against the DOSBox capture `2053402-caesar-dos-evaluating-your-infrastructure.png`, every pixel outside the map and the mouse pointer matches at 6-bit level (53,424 pixels, `test_maps_screen`).
+
+### 39.1 The screen
+
+- **Palette and frame.** The palette saved at `68F6:B6A8` -- `SHADE.256`, which the capture's match confirms (it was INFERENCE in section 38.2). `1F6F:1EC1` draws a 20 x 11 panel at (0, 0x10), and `1F6F:2008` a 7 x 7 inset at (0x10, 0x20).
+- **Blocks draw opaque.** `303E:0BF0` draws a whole block, colour 0 included, so the inset's black edge frames the map. The sprite routine `303E:13D6` is the one that skips colour 0; drawing them transparent left 405 wrong pixels, the other 2 being the pointer's edge.
+- **The labels,** in `FONT1` at x 0x86, y 0x24 + 16i: "   urbanization", "water distribution", "  administration", "   road layout", "    land value", "  trouble areas" (`DS:0x6FF6`, `0x6FF2`, `0x6FEE`, `0x6FEA`, `0x6FE6`, `0x6FE2`).
+- **The buttons** are records at `DS:0x0704` (the format of section 37): `P_BLOCKS.PL8` frames 29/30 at cells (18, 2)-(18, 7).
+
+| Cell | Handler | Does |
+|---|---|---|
+| (18, 2) | `0x0DEC2` | toggles the city, `DS:0x6D28` ("urbanization") |
+| (18, 3) | `0x0DE6D` | water, `DS:0x6D26` = 1 |
+| (18, 4) | `0x0DE8F` | administration, 3 |
+| (18, 5) | `0x0DEB1` | roads, 5 |
+| (18, 6) | `0x0DE7E` | land value, 2 |
+| (18, 7) | `0x0DEA0` | trouble areas, 4 |
+
+Mode 0 is the screen before any button is chosen.
+
+- **The legend.** Plain stone (`1F6F:2115`, 10 x 3 at (0x90, 0x88)), then 12 x 12 boxes (`100F:0EF9`) with `MINIFONT` text in colour 0, black -- the capture's match settles the ink on this screen.
+  - water: box `0xF`, "water";
+  - administration: box `0x11`, "admin";
+  - roads: box `0xA`, "roads";
+  - the rest: box `0x1F`, "negative", and boxes `0x14`-`0x19` at x 0xD0-0x120, "low  -  high";
+  - with the city shown, a box `0xB` at (0x90, 0xA0) and "city".
+- **Clicks.** A click on the map (`0x0DCB4`, x 0x16-0x79, y 0x26-0x89) goes to the city view there.
+
+### 39.2 The map's colours (`1F6F:0009`)
+
+Pixel (0x16 + x, 0x26 + y) is cell (x, y). The layers are read through bases that land on row 0 once y's 0x26 × 100 is added: `43A5:F128` + 0xED8 wraps to the tile layer, `3496:BAFC` + 0xED8 = `C9D4`, `3496:93EC` + 0xED8 = `A2C4`, and `3496:45B6` + 0xED8 = `54A4`.
+
+- **The ground** (`0x1FADA`), where a mode leaves a cell:
+  - black when the city shows and the tile is 0x92-0xA1 or 0xC8 and up;
+  - `0xF` for tile 0, 0xA4-0xA6 or 0x4A-0x91;
+  - `0xC` for tiles up to 0x26;
+  - 6 otherwise.
+- **Water:** `C9D4` bit 0x01 -> `0xF`, or `0xE` on the city when it shows.
+- **Administration:** `C9D4` bit 0x20 -> 9, or 8 on the city when it shows.
+- **Roads:** tiles 0x5E, 0x82, 0x86, 0x36-0x43 and 0x94-0x95 -> `0xA`.
+- **Land value** reads `A2C4` as signed: -4 or less `0x1F`, -3 `0x1D`, -2 `0x1B`, -1 `0x1A`, 0 the ground, 1-3 `0x16`, 4-7 `0x17`, 8-15 `0x18`, 16 and up `0x19`.
+- **Trouble areas** read `54A4` on housing (tile above 0xC8): 1-7 `0x16`, 8-15 `0x17`, 16-23 `0x18`, 24 and up `0x19`; anything else is the ground.
+
+**A naming question this raises.** The layer the original calls "land value" is the one `model::CityMap` names `coverage` (`A2C4`). What `CityMap::land_value` holds (`54A4`) is what the original maps as "trouble areas" on houses -- the value whose limit collapses a house (section 21). The code keeps its names; this is recorded here rather than renamed.
+
+**Not compared:** the map's own pixels -- the capture's city isn't one of the saves -- and the frames `0x0DC18` loops over while the map draws in (`DS:0x6D24` counts three passes).
