@@ -40,13 +40,21 @@ struct BattleArt {
     GameFont mini;                     // MINIFONT.PL1
     GameFont dialog_font;              // FONT1.PL8, which the retreat dialog loads back (0x2371D)
     formats::Palette interface_palette;  // SHADE.256: the palette the retreat dialog switches to (0x23738)
+    formats::IndexedImage offer;       // WARMESS.VPX, the Cohort 2 offer (0x09611); empty if missing
 };
 
 // Throws formats::FormatError when a file is missing or malformed.
 BattleArt load_battle_art(const std::string& asset_dir);
 
+// The Cohort 2 offer (0x222CE, findings section 44): with cohort.exe beside
+// the game (DS:0x6CF8) the battle starts on WARMESS.VPX, and a click on its
+// two lines asks "Cohort ?".
+enum class Cohort2Offer { None, Offer, Question };
+enum class Cohort2Answer { Waiting, Declined, Accepted };
+
 // The screen's words.
 struct BattleScreen {
+    Cohort2Offer cohort2 = Cohort2Offer::None;
     int cohort = -1, army = -1;    // DS:0x6DC1, DS:0x6DBF
     formats::IndexedImage screen;  // what the display pages hold
     int message_timer = 0;         // DS:0x57FA: frames the message shows; 0 = the buttons
@@ -93,6 +101,13 @@ void play_round(BattleScreen& b, model::CityState& state, const BattleArt& art, 
 // 0x230BE: the dialog 0x23708 asks "Retreat ?"; its Yes button (cell 12, 6)
 // retreats, No (cell 12, 7) goes back. Returns whether the click was on one.
 bool answer_retreat(BattleScreen& b, model::CityState& state, const BattleArt& art, int x, int y);
+
+// A click on the offer or the question. On the offer (0x22345) a left click
+// on its lines (y 0x4A-0x73) asks the question, any other click -- or
+// `right_click` -- goes on to the battle; on the question (0x2357E) Yes
+// (cell 12, 6) accepts and No (12, 7) goes on to the battle. The original
+// acts when the button is let go.
+Cohort2Answer answer_cohort2(BattleScreen& b, int x, int y, bool right_click);
 
 // One frame of the loop 0x2244B: the message and animations (0x225EE), then
 // the closing count. `clicked` is a click this frame that wasn't a button.

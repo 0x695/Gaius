@@ -2682,6 +2682,107 @@ void test_battle_rounds() {
           st->objects[0].raw[0x12] == 21 && st->objects[0].raw[0x13] == 23);
 }
 
+void test_cohort2_handover() {
+    std::printf("test_cohort2_handover (0x23493 hand-over, 0x23272 take-back, cohort.csr, the offer)\n");
+    using namespace gaius::systems;
+    const auto setup = []() {
+        auto st = std::make_unique<CityState>(gaius::model::blank_state());
+        set_global_word(*st, 0x6CA6, 20);
+        set_global_word(*st, 0x6C32, -7);
+        set_global_word(*st, 0x6C1C, 4);
+        battle::load_race(*st);
+        auto& c = st->objects[0].raw;
+        c[0x06] = 1;
+        c[0x07] = province::kCohortType;
+        c[0x31] = province::kAttack;
+        c[0x2A] = 3;
+        c[military::kCohortRegulars] = 4;
+        c[military::kCohortIrregulars] = 2;
+        c[military::kCohortAuxiliaries] = 1;
+        c[military::kCohortMorale] = 5;
+        c[0x02] = 0x50;  // x 80: cell 5
+        c[0x04] = 0x60;  // y 96: cell 6
+        c[0x18] = static_cast<uint8_t>(6 * 40 + 5);
+        c[battle::kCohortHomeX] = 9;
+        c[battle::kCohortHomeY] = 11;
+        set_global_word(*st, military::kRegulars, 10);
+        set_global_word(*st, military::kIrregulars, 6);
+        set_global_word(*st, military::kAuxiliaries, 3);
+        auto& a = st->objects[1].raw;
+        a[0x06] = 1;
+        a[0x07] = province::kArmyType;
+        a[battle::kArmySize] = 6;
+        st->empire.cells[6 * 40 + 5] |= 0x80;
+        return st;
+    };
+
+    auto st = setup();
+    battle::hand_over(*st, 0, 1);
+    const auto w = [&](uint16_t ds) { return gaius::model::global_word(*st, ds); };
+    CHECK(w(battle::kHandoverPending) == 1 && w(battle::kHandoverOutcome) == 0);
+    CHECK(w(battle::kHandoverCohort) == 0 && w(battle::kHandoverArmy) == 1);
+    CHECK(w(battle::kHandoverRegularsBefore) == 4 && w(battle::kHandoverRegulars) == 4);
+    CHECK(w(battle::kHandoverIrregularsBefore) == 2 && w(battle::kHandoverAuxiliaries) == 1);
+    CHECK(w(battle::kHandoverMorale) == 5 && w(battle::kHandoverNumber) == 3);
+    CHECK(w(battle::kHandoverArmyBefore) == 6 && w(battle::kHandoverArmySize) == 6);
+    CHECK(w(battle::kHandoverRace) == w(0x6BD6) && w(battle::kHandoverYear) == -7 &&
+          w(battle::kHandoverMonth) == 4 && w(battle::kHandoverProvince) == 20);
+
+    // Cohort 2 never ran: the words come back unchanged and outcome 0 counts
+    // as a defeat -- morale 5 - 3, the standard at its fort, the Centuries kept.
+    battle::take_back(*st);
+    auto& c = st->objects[0].raw;
+    CHECK(w(battle::kHandoverPending) == 0);
+    CHECK(c[military::kCohortMorale] == 2 && c[0x31] == military::kCohortMobilized);
+    CHECK(c[military::kCohortRegulars] == 4 && w(military::kRegulars) == 10);
+    CHECK(c[0x02] == 9 * 16 && c[0x04] == 11 * 16 && c[0x12] == 9 && c[0x13] == 11);
+    CHECK((st->empire.cells[6 * 40 + 5] & 0x80) == 0);
+    CHECK(st->objects[1].raw[0x06] == 1);
+
+    // Cohort 2 reports a victory with Centuries lost: the Legion loses them,
+    // the Cohort stops where it stands (no patrol) and the army goes.
+    st = setup();
+    battle::hand_over(*st, 0, 1);
+    set_global_word(*st, battle::kHandoverOutcome, battle::kCohort2Victory);
+    set_global_word(*st, battle::kHandoverRegulars, 3);
+    set_global_word(*st, battle::kHandoverIrregulars, 0);
+    set_global_word(*st, battle::kHandoverMorale, 7);
+    set_global_word(*st, battle::kHandoverArmySize, 0);
+    battle::take_back(*st);
+    auto& v = st->objects[0].raw;
+    CHECK(v[military::kCohortRegulars] == 3 && v[military::kCohortIrregulars] == 0 && v[military::kCohortMorale] == 7);
+    CHECK(gaius::model::global_word(*st, military::kRegulars) == 9);
+    CHECK(gaius::model::global_word(*st, military::kIrregulars) == 4);
+    CHECK(gaius::model::global_word(*st, military::kAuxiliaries) == 3);
+    CHECK(v[0x31] == military::kCohortMobilized && v[0x12] == 5 && v[0x13] == 6);
+    CHECK(st->objects[1].raw[0x06] == 0);
+
+    // cohort.csr.
+    const std::string bytes = battle::handover_file_bytes();
+    CHECK(bytes.size() == 14 && bytes == std::string("csr0.dat\0start", 14));
+    const fs::path tmp = fs::temp_directory_path() / "gaius_test_cohort.csr";
+    CHECK(battle::write_handover_file(tmp.string()));
+    CHECK(fs::file_size(tmp) == 14 && battle::read_handover_file(tmp.string()) == "csr0.dat");
+    std::error_code ec;
+    fs::remove(tmp, ec);
+    CHECK(battle::read_handover_file(tmp.string()).empty());
+
+    // The offer: a click on its lines asks, elsewhere goes on; the question's
+    // Yes and No.
+    namespace ui = gaius::ui;
+    ui::BattleScreen b;
+    b.cohort2 = ui::Cohort2Offer::Offer;
+    CHECK(ui::answer_cohort2(b, 100, 0x50, false) == ui::Cohort2Answer::Waiting && b.cohort2 == ui::Cohort2Offer::Question);
+    CHECK(ui::answer_cohort2(b, 100, 0x50, false) == ui::Cohort2Answer::Waiting);
+    CHECK(ui::answer_cohort2(b, 12 * 16, 6 * 16, false) == ui::Cohort2Answer::Accepted && b.cohort2 == ui::Cohort2Offer::None);
+    b.cohort2 = ui::Cohort2Offer::Offer;
+    CHECK(ui::answer_cohort2(b, 100, 0x30, false) == ui::Cohort2Answer::Declined);
+    b.cohort2 = ui::Cohort2Offer::Offer;
+    CHECK(ui::answer_cohort2(b, 100, 0x50, true) == ui::Cohort2Answer::Declined);
+    b.cohort2 = ui::Cohort2Offer::Question;
+    CHECK(ui::answer_cohort2(b, 12 * 16, 7 * 16, false) == ui::Cohort2Answer::Declined);
+}
+
 // Every save keeps its province's race words: the tables must give them.
 void test_battle_race_matches_saves() {
     std::printf("test_battle_race_matches_saves (3496:175E/1790 vs each real save's DS:0x6BCE-0x6BDA)\n");
@@ -5944,6 +6045,7 @@ int main() {
     test_battle_rounds();
     test_battle_screen();
     test_battle_race_matches_saves();
+    test_cohort2_handover();
     test_province_movement();
     test_province_armies();
     test_province_towns();

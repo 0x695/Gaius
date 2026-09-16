@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "systems/battle.hpp"
 
+#include <fstream>
+
 #include "systems/actors.hpp"
 #include "systems/military.hpp"
 
@@ -179,6 +181,101 @@ void lose(model::CityState& state, int cohort) {
     c.raw[kDestY] = static_cast<uint8_t>(home_y);
     c.raw[kPixelsLeft] = 0;
     clamp_morale(c);
+}
+
+void hand_over(model::CityState& state, int cohort, int army) {
+    const model::Actor& c = state.objects[static_cast<size_t>(cohort)];
+    const model::Actor& a = state.objects[static_cast<size_t>(army)];
+    set(state, kHandoverPending, 1);
+    set(state, kHandoverOutcome, 0);
+    set(state, kHandoverCohort, cohort);
+    set(state, kHandoverArmy, army);
+    set(state, kHandoverRegularsBefore, sbyte(c.raw[military::kCohortRegulars]));
+    set(state, kHandoverIrregularsBefore, sbyte(c.raw[military::kCohortIrregulars]));
+    set(state, kHandoverAuxiliariesBefore, sbyte(c.raw[military::kCohortAuxiliaries]));
+    set(state, kHandoverRegulars, sbyte(c.raw[military::kCohortRegulars]));
+    set(state, kHandoverIrregulars, sbyte(c.raw[military::kCohortIrregulars]));
+    set(state, kHandoverAuxiliaries, sbyte(c.raw[military::kCohortAuxiliaries]));
+    set(state, kHandoverMorale, sbyte(c.raw[military::kCohortMorale]));
+    set(state, kHandoverNumber, sbyte(c.raw[0x2A]));
+    set(state, kHandoverArmyBefore, sbyte(a.raw[kArmySize]));
+    set(state, kHandoverArmySize, sbyte(a.raw[kArmySize]));
+    set(state, kHandoverRace, g(state, 0x6BD6));
+    set(state, kHandoverYear, g(state, 0x6C32));
+    set(state, kHandoverMonth, g(state, 0x6C1C));
+    set(state, kHandoverProvince, g(state, 0x6CA6));
+    // DS:0x6DE7 is never written in the US build (0 in its data); the date
+    // line 0x2793E reads it to choose "AD" (1), "aJC" or "nCH" (2), so it is
+    // most likely the international build's language (INFERENCE).
+    set(state, kHandoverLanguage, 0);
+}
+
+void take_back(model::CityState& state) {
+    set(state, kHandoverPending, 0);
+    const int cohort = g(state, kHandoverCohort), army = g(state, kHandoverArmy);
+    if (cohort < 0 || cohort >= static_cast<int>(state.objects.size()) || army < 0 ||
+        army >= static_cast<int>(state.objects.size())) {
+        return;  // Gaius's guard: the original indexes whatever the words hold
+    }
+    model::Actor& c = state.objects[static_cast<size_t>(cohort)];
+    c.raw[military::kCohortRegulars] = static_cast<uint8_t>(g(state, kHandoverRegulars));
+    c.raw[military::kCohortIrregulars] = static_cast<uint8_t>(g(state, kHandoverIrregulars));
+    c.raw[military::kCohortAuxiliaries] = static_cast<uint8_t>(g(state, kHandoverAuxiliaries));
+    c.raw[military::kCohortMorale] = static_cast<uint8_t>(g(state, kHandoverMorale));
+    set(state, military::kRegulars,
+        g(state, military::kRegulars) - (g(state, kHandoverRegularsBefore) - g(state, kHandoverRegulars)));
+    set(state, military::kIrregulars,
+        g(state, military::kIrregulars) - (g(state, kHandoverIrregularsBefore) - g(state, kHandoverIrregulars)));
+    set(state, military::kAuxiliaries,
+        g(state, military::kAuxiliaries) - (g(state, kHandoverAuxiliariesBefore) - g(state, kHandoverAuxiliaries)));
+    state.objects[static_cast<size_t>(army)].raw[kArmySize] = static_cast<uint8_t>(g(state, kHandoverArmySize));
+
+    if (g(state, kHandoverOutcome) == kCohort2Victory) {
+        // 0x23309: as 0x22D5D without the morale.
+        if (c.raw[kCohortPatrolX] == 0) {
+            stop_here(c, false);
+        } else {
+            c.raw[kState] = 11;
+            c.raw[kDestX] = c.raw[kCohortResumeX];
+            c.raw[kDestY] = c.raw[kCohortResumeY];
+        }
+        actors::release(state, army);  // 0x05DC7
+        return;
+    }
+    // 0x233BB: as 0x22EDB, keeping the Centuries.
+    add_morale(c, -3);
+    c.raw[kState] = military::kCohortMobilized;
+    const int cell = word(c, kCell);
+    if (cell >= 0 && cell < static_cast<int>(state.empire.cells.size())) {
+        state.empire.cells[static_cast<size_t>(cell)] &= 0x7F;
+    }
+    const int home_x = sbyte(c.raw[kCohortHomeX]), home_y = sbyte(c.raw[kCohortHomeY]);
+    set_word(c, kX, w16(home_x << 4));
+    set_word(c, kY, w16(home_y << 4));
+    c.raw[kDestX] = static_cast<uint8_t>(home_x);
+    c.raw[kDestY] = static_cast<uint8_t>(home_y);
+    c.raw[kPixelsLeft] = 0;
+}
+
+std::string handover_file_bytes() { return std::string("csr0.dat\0start", 14); }
+
+bool write_handover_file(const std::string& path) {
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    const std::string bytes = handover_file_bytes();
+    f.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return static_cast<bool>(f);
+}
+
+std::string read_handover_file(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return {};
+    char bytes[14] = {};
+    f.read(bytes, sizeof bytes);
+    if (f.gcount() <= 0) return {};
+    std::string name(bytes, static_cast<size_t>(f.gcount()));
+    const size_t nul = name.find('\0');
+    return nul == std::string::npos ? name : name.substr(0, nul);
 }
 
 }  // namespace gaius::systems::battle

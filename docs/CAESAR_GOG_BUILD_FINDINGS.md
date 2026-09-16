@@ -44,6 +44,8 @@ This resolves one of the two originally-missing files, but reclassifies it: it w
 
 ## 4. The actual battle-resolution entry point — NEW, HIGH CONFIDENCE, actionable
 
+> **Corrected (2026-09-17, dispatch findings section 44):** `csr.exe cohort` is not the internal battle resolution. It resumes the game after Cohort 2: it reads `cohort.csr`, loads the save named there (`csr0.dat` in the US build) and applies the battle's result. The internal battle screen runs from the province map (dispatch findings sections 27 and 38). `CSR.EXE` exits with code 0 after handing a battle over, not a special errorlevel.
+
 `CAESAR.BAT` (both builds) reveals the real launch architecture, and it's a **process loop**, not a single continuously-running program:
 
 ```bat

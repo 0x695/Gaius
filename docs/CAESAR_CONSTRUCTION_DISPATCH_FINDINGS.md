@@ -1042,7 +1042,7 @@ A new province starts with 2 regular Centuries and nothing else (`0x058C0`-`0x05
   - the auxiliaries' source, the pleb routines (`0x2DD45`-`0x2DE0E` at step 105 and the Tribune's screen `0x0E85A`);
   - what conscription and wages do to the city besides (the manual: "your citizens don't like being drafted");
   - battles. Their code is located: `0x22000`-`0x23600`, with morale changes at `0x225B7`-`0x226F7`, the tactic comparisons at `0x22A02`-`0x22A4A` and casualties at `0x22C16`. It uses the "Cohort ?"/"Retreat ?" texts `DS:0x4599`/`0x45B4` (table at `0x27851`).
-- **The `cohort` argument.** `CAESAR.BAT` runs `csr.exe cohort` after the external Cohort 2. `0x0F687` tests whether `cohort.exe` exists (`DS:0x6CF8`, which decides whether the battle screen offers it), and `0x03344`/`0x03388` write and read `cohort.csr`, 14 bytes, the battle's hand-over. With any argument (argc > 1, `0x0F6BD`) the start-up skips the title music and loads the province screen's sheets (`0x0FBBE`: `p_blocks.pl8`, `pointers.pl8`, `font1.pl8`) before running the game. So the argument most likely only resumes a game after Cohort 2 has fought the battle, and the internal battle screen runs from the province map itself (STRONG INFERENCE: the argv string isn't compared anywhere found, and the path from `0x0F6C7` into the resumed game isn't traced).
+- **The `cohort` argument.** `CAESAR.BAT` runs `csr.exe cohort` after the external Cohort 2. `0x0F687` tests whether `cohort.exe` exists (`DS:0x6CF8`, which decides whether the battle screen offers it), and `0x03344`/`0x03388` write and read `cohort.csr`, 14 bytes, the battle's hand-over. With any argument (argc > 1, `0x0F6BD`) the start-up skips the title music and loads the province screen's sheets (`0x0FBBE`: `p_blocks.pl8`, `pointers.pl8`, `font1.pl8`) before running the game. So the argument only resumes a game after Cohort 2 has fought the battle, and the internal battle screen runs from the province map itself. (Confirmed in section 44: with any argument the start-up reads `cohort.csr`, loads the save it names and applies the result; the argument's text is never compared.)
 
 ## 27. The battle screen (2026-09-14)
 
@@ -1078,7 +1078,7 @@ After the routine, morale is clamped to 0-9 (`0x225AD`). The difference in stren
 ### 27.4 In Gaius, and what's open
 
 - **`systems::battle`**: `kRaces`, `kProvinceRace`, `load_race`, `tactic_strength`, `fight_round`, `win`, `lose`, `retreat`. The two random words are the caller's: between clicks the screen draws once a frame, which no save pins. `test_battle_rounds`, `test_battle_race_matches_saves`.
-- **Not modeled:** the screen and its texts; the Cohort 2 hand-over.
+- **Not modeled:** the screen and its texts (since then: section 38); the Cohort 2 hand-over (since then: section 44).
 
 ## 28. The province map's actors (2026-09-14)
 
@@ -1587,7 +1587,7 @@ Section 27 transcribed the rounds; this section reads the screen `0x22116` draws
   - `DS:0x57FC` the Centuries × 2;
   - `DS:0x57F8`/`F6`/`F4` the regulars, irregulars and auxiliaries.
 
-With `cohort.exe` present it first offers the Cohort 2 hand-over on `WARMESS.VPX` (`0x09611`: "Left click here for Cohort. Click / elsewhere or right-click to continue."). Gaius has no Cohort 2 and skips it.
+With `cohort.exe` present it first offers the Cohort 2 hand-over on `WARMESS.VPX` (`0x09611`: "Left click here for Cohort. Click / elsewhere or right-click to continue."). Gaius shows it when it has a command that runs Cohort 2 (section 44).
 
 **The background** (`0x0934B`):
 
@@ -1939,3 +1939,71 @@ Every `EMPIRE2.0xx` starts with two bytes before its 40 x 40 cells, `14 14` in a
 - **The saves agree.** All 17 saves carry `14 14` at the start of their embedded map (save offset 55076), unchanged from the scenario they started with.
 
 So the bytes are most likely left over from whatever tool wrote the scenarios (what they meant there isn't recoverable from the game). Gaius keeps them verbatim (`formats::empire2::EmpireMap::prefix`), and any scenario it writes should keep `14 14`.
+
+## 44. The hand-over to Cohort 2 (2026-09-17)
+
+*Cohort 2* was a separate Impressions battle game. With `cohort.exe` beside `csr.exe`, a battle can be fought there instead of on the battle screen. The whole exchange goes through a save and a 14-byte file, run by `CAESAR.BAT`:
+
+```bat
+csr.exe
+if errorlevel 2 goto end
+:loop
+cohort.exe caesar
+if errorlevel 2 goto end
+csr.exe cohort
+if errorlevel 2 goto end
+goto loop
+```
+
+### 44.1 The offer
+
+- **Whether.** At start-up `0x0F687` sets `DS:0x6CF8` when `cohort.exe` (`DS:0x0DAC`) exists.
+- **The offer screen.** When a battle starts (`0x22116`), after loading `FONT2.PL8` and `SPRITE2X.PL8`, a set `DS:0x6CF8` shows `0x09611`: `WARMESS.VPX` in `WAR2.256`, with " Left click here for Cohort. Click" at (0x0A, 0x52) and "elsewhere or right-click to continue." at (0x0A, 0x62) in `FONT2` (`DS:0x712A`, `0x7126`). It waits for either button to be let go.
+- **The click.** A left click let go with the pointer's y between 0x4A and 0x73 asks the question; anything else goes on to the battle screen (`0x0600B` draws `WAR2.VPX`).
+- **The question** (`0x2357E`). `FONT1.PL8` is loaded back and the interface palette set, then the pages are cleared (`100F:00EF`). A 14 x 5 panel at (0x30, 0x40) shows "Cohort ?" at (0x5A, 0x4A), "     Yes" at (0x32, 0x62) and "      No" at (0x32, 0x72), with release buttons `DS:0x132C` at (12, 6) and (12, 7) -- the same table the "Retreat ?" dialog uses. Yes (`0x236EE`) sets `DS:0x5808` = 1, No (`0x236FB`) 0; either shows its pressed frame for 10 frames (`DS:0x580A`), then `FONT2` is loaded again. The right button does nothing here.
+
+### 44.2 Handing the battle over
+
+With Yes, `0x22377`:
+
+1. **`0x23493` writes the battle into the words.**
+   - `DS:0x6CE2` = 1 (a battle is out) and `DS:0x6CE0` = 0 (the outcome).
+   - The Cohort's slot `DS:0x6DC1` into `DS:0x6CDC` and the army's `DS:0x6DBF` into `DS:0x6CDE`.
+   - The Cohort's regular, irregular and auxiliary Centuries (+0x20, +0x21, +0x1D) into `DS:0x6CD8`, `6CD6`, `6CD4` as "before", and again into `6CD2`, `6CD0`, `6CCE`.
+   - Its morale (+0x2B) into `6CCC` and its number (+0x2A) into `6CDA`.
+   - The army's size (+0x30) into `6CC8` and `6CC6`.
+   - The race `DS:0x6BD6` into `6CCA`, the year `6C32` into `6CC4`, the month `6C1C` into `6CC2`, the province `6CA6` into `6CC0`.
+   - `DS:0x6DE7` into `6CBE`. Nothing in the US build writes `DS:0x6DE7`; the date line `0x2793E` reads it to pick "AD" (1), "aJC" or "nCH" (2), so it is most likely the international build's language (INFERENCE).
+2. **`0x03344` writes `cohort.csr`** (`DS:0x0849`): 14 bytes from the save name's buffer `DS:0x5850`. In the US build that buffer is `DS:0x0DEA`, "csr0.dat" followed by "starter.xmi", so the file is `csr0.dat\0start`. (The international build's `COHORT.CSR`, "CaesarXV.sav\0 ", is the same 14-byte copy of a different buffer.)
+3. **`0x033C8` saves the game** under that name -- the ordinary save writer, so `csr0.dat` is a normal `.SAV` with the battle in its global words.
+4. **The game exits.** It stops the music (`31E0:0364`), restores the video mode, writes `caesar.inf` (section 42.3), prints "Exiting from caesar" and exits with code 0, so `CAESAR.BAT` goes on to `cohort.exe caesar`.
+
+### 44.3 Taking it back
+
+`csr.exe cohort` (any argument, argc > 1, `0x0F71D`):
+
+1. The start-up skips the title and resets a new game (`0x056B8`).
+2. `0x03388` reads `cohort.csr` back into the name buffer, and the loader `0x04537` loads the save it names.
+3. `0x23272` (`2211:1162`) takes the result:
+   - `DS:0x6CE2` = 0.
+   - The Cohort in slot `DS:0x6CDC` gets its Centuries from `6CD2`, `6CD0`, `6CCE` and its morale from `6CCC`.
+   - The Legion loses what the battle cost: regulars `DS:0x6C4E` -= `6CD8` − `6CD2`, irregulars `6C4A` -= `6CD6` − `6CD0`, auxiliaries `6C52` -= `6CD4` − `6CCE`.
+   - The army in slot `DS:0x6CDE` gets its size from `6CC6`.
+   - **Outcome 2, the army destroyed** (`0x23309`): as the battle screen's victory `0x22D5D` without its morale. A Cohort with no patrol (+0x2C = 0) stops where it stands (state 10, destination its position / 16); one on patrol goes back to it (state 11, destination +0x22 / +0x24). Then the army is released (`0x05DC7`).
+   - **Any other outcome** (`0x233BB`): as the defeat `0x22EDB` without emptying the Centuries. Morale − 3 (not clamped), state 10, the province cell it stood on loses bit 0x80, and position and destination go to its fort (+0x2E / +0x2F, +0x0F = 0).
+4. The game continues on its main loop (`0x0F7EE`), skipping the start screen.
+
+What Cohort 2 writes isn't in these files: `cohort.exe` isn't in either build. The game only reads back `6CE0`, `6CD2`/`6CD0`/`6CCE`, `6CCC` and `6CC6`, and tells only outcome 2 apart. So if `cohort.exe` fails to change the save, the battle comes back as a defeat with nothing lost but 3 morale.
+
+### 44.4 In Gaius
+
+- **`systems::battle`**: `hand_over` (`0x23493`), `take_back` (`0x23272`), and `write_handover_file` / `read_handover_file` for `cohort.csr`.
+- **`ui::BattleScreen`**: the offer and the question (`Cohort2Offer`, `answer_cohort2`), drawn by `compose_battle`. `BattleArt::offer` is `WARMESS.VPX`, loaded when it's there.
+- **`gaius_viewer --cohort-command "<command>"`.** Gaius can't run a DOS program itself, so the offer appears when a command to run Cohort 2 is given (for example, DOSBox running `cohort.exe caesar` in the game folder), not merely when `cohort.exe` exists. Taking it:
+  - hands the battle over;
+  - saves `csr0.dat` and writes `cohort.csr` in the game's folder, where `cohort.exe` looks;
+  - runs the command and waits for it;
+  - loads the save `cohort.csr` names and takes the result back.
+
+  The batch file's "errorlevel 2 ends the game" isn't copied: Gaius goes back to the province either way.
+- **Checked** by `test_cohort2_handover`: the words written, the take-back as a defeat and as a victory with Centuries lost, the file's 14 bytes, and the offer's clicks. The whole exchange also ran end to end in the viewer, with a stand-in script in place of `cohort.exe`.

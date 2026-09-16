@@ -41,6 +41,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 #include "model/city_state.hpp"
 #include "systems/month.hpp"
@@ -110,5 +111,53 @@ void win(model::CityState& state, int cohort, int army);
 // its fort (state 10), clearing the province cell it stood on (bit 0x80). The
 // Legion's words are already down by the Centuries lost in the rounds.
 void lose(model::CityState& state, int cohort);
+
+// ---------------------------------------------------------------------------
+// The hand-over to Cohort 2 (findings section 44). With cohort.exe beside the
+// game the battle screen first offers the separate Cohort 2 program. Taking
+// it, the game writes the battle into saved words, saves itself as "csr0.dat",
+// writes that name into cohort.csr and exits; CAESAR.BAT runs "cohort.exe
+// caesar", then "csr.exe cohort", which loads the save cohort.csr names and
+// takes the battle's result back.
+
+// The words (DS:0x6CBE-0x6CE2), saved like every other global word.
+inline constexpr uint16_t kHandoverPending = 0x6CE2;  // 1 while a battle is out
+inline constexpr uint16_t kHandoverOutcome = 0x6CE0;  // 0 when handed over; Cohort 2's result
+inline constexpr uint16_t kHandoverCohort = 0x6CDC, kHandoverArmy = 0x6CDE;  // the actor slots
+inline constexpr uint16_t kHandoverRegularsBefore = 0x6CD8, kHandoverIrregularsBefore = 0x6CD6,
+                          kHandoverAuxiliariesBefore = 0x6CD4;
+inline constexpr uint16_t kHandoverRegulars = 0x6CD2, kHandoverIrregulars = 0x6CD0,
+                          kHandoverAuxiliaries = 0x6CCE;  // after the battle, as Cohort 2 leaves them
+inline constexpr uint16_t kHandoverMorale = 0x6CCC, kHandoverNumber = 0x6CDA;
+inline constexpr uint16_t kHandoverArmyBefore = 0x6CC8, kHandoverArmySize = 0x6CC6;
+inline constexpr uint16_t kHandoverRace = 0x6CCA, kHandoverYear = 0x6CC4, kHandoverMonth = 0x6CC2,
+                          kHandoverProvince = 0x6CC0, kHandoverLanguage = 0x6CBE;
+// The one outcome 0x23272 tells apart: the army destroyed. Anything else --
+// including the 0 the hand-over leaves, if Cohort 2 never ran -- is taken as
+// the Cohort beaten.
+inline constexpr int kCohort2Victory = 2;
+
+// 0x23493: the Cohort's Centuries (before and, until Cohort 2 changes them,
+// after), morale and number, the army's size, the race, the date, the
+// province and DS:0x6DE7 into the words; pending 1, outcome 0.
+void hand_over(model::CityState& state, int cohort, int army);
+
+// 0x23272, run by "csr.exe cohort" after loading the save: pending 0; the
+// Cohort takes the Centuries and morale Cohort 2 left, the Legion's words
+// lose what the Cohort lost, the army takes its size; then with outcome 2 the
+// Cohort goes back to its patrol or stops where it stands and the army is
+// removed (as win(), without the morale), and otherwise the Cohort's morale
+// drops 3 and its standard goes back to its fort (as lose(), keeping the
+// Centuries). Morale isn't clamped here.
+void take_back(model::CityState& state);
+
+// cohort.csr: 14 bytes copied from the save name's buffer, which in the US
+// build is DS:0x0DEA "csr0.dat" followed by "starter.xmi" -- so the file is
+// "csr0.dat\0start" (0x03344 writes it, 0x03388 reads it back into the buffer).
+inline constexpr const char* kHandoverSaveName = "csr0.dat";
+std::string handover_file_bytes();
+bool write_handover_file(const std::string& path);
+// The save name the file holds (up to its NUL), or "" if it can't be read.
+std::string read_handover_file(const std::string& path);
 
 }  // namespace gaius::systems::battle

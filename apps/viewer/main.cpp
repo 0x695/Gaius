@@ -51,6 +51,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <stdexcept>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -246,6 +248,7 @@ int main(int argc, char** argv) {
     bool test_battle = false;       // --test-battle: the first Cohort meets a new army
     bool test_promotion = false;    // --test-promotion: a promotion is offered now
     std::string save_dir_option;    // --save-dir: where the save slots live (default: the per-user data folder)
+    std::string cohort_command;     // --cohort-command: runs Cohort 2 for a battle (findings section 44)
     int start_speed = -1;           // --speed 0-100: DS:0x5292 (default: the options' CAESAR.INF)
     int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
     for (int i = 2; i < argc; ++i) {
@@ -259,6 +262,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--cheats") == 0) cheats = true;
         if (std::strcmp(argv[i], "--test-promotion") == 0) test_promotion = true;
         if (std::strcmp(argv[i], "--save-dir") == 0 && i + 1 < argc) save_dir_option = argv[++i];
+        if (std::strcmp(argv[i], "--cohort-command") == 0 && i + 1 < argc) cohort_command = argv[++i];
         if (std::strcmp(argv[i], "--speed") == 0 && i + 1 < argc) start_speed = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-message") == 0 && i + 1 < argc) test_message = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
@@ -716,7 +720,12 @@ int main(int argc, char** argv) {
             battle_view = viewer::BattleView{};
             battle_view.cohort = cohort;
             battle_view.army = army;
-            if (have_battle_art) battle_screen = ui::begin_battle(state, battle_art, cohort, army);
+            if (have_battle_art) {
+                battle_screen = ui::begin_battle(state, battle_art, cohort, army);
+                // 0x222CE: the original offers Cohort 2 when cohort.exe is
+                // there; Gaius offers it when it has a command to run it.
+                if (!cohort_command.empty()) battle_screen.cohort2 = ui::Cohort2Offer::Offer;
+            }
             battle_clicked = false;
             screen = Screen::Battle;
             time_running = false;
@@ -1359,6 +1368,36 @@ int main(int argc, char** argv) {
             active_buttons_key = -1;  // rebuilt on the next frame
         };
 
+        // The Cohort 2 hand-over (0x2236D-0x223DD, then "csr.exe cohort",
+        // findings section 44): the battle into its words, the game saved as
+        // csr0.dat and cohort.csr naming it, both in the game's folder where
+        // cohort.exe looks; the command runs; then the save cohort.csr names
+        // is loaded and the result taken back (0x23272).
+        const auto run_cohort2 = [&]() {
+            namespace battle = systems::battle;
+            battle::hand_over(state, battle_screen.cohort, battle_screen.army);
+            const fs::path dir = game_dir;
+            try {
+                formats::save::write(model::serialize(state), (dir / battle::kHandoverSaveName).string());
+                if (!battle::write_handover_file((dir / "cohort.csr").string()))
+                    throw std::runtime_error("can't write cohort.csr");
+                std::printf("Cohort 2: running %s\n", cohort_command.c_str());
+                std::fflush(stdout);
+                const int status = std::system(cohort_command.c_str());
+                std::printf("Cohort 2: finished (%d)\n", status);
+                std::string name = battle::read_handover_file((dir / "cohort.csr").string());
+                if (name.empty()) name = battle::kHandoverSaveName;
+                state = model::load(formats::save::load((dir / name).string()));
+                adopt_state();
+            } catch (const std::exception& e) {
+                std::printf("Cohort 2: %s -- taking the battle back as it was\n", e.what());
+            }
+            battle::take_back(state);
+            screen = battle_return;
+            time_running = true;
+            city_image_dirty = province_image_dirty = true;
+        };
+
         // One handler for "the primary action happened at this logical
         // point", shared by the real input path and --test-click. The
         // toolbar gets first refusal: a click on the panel selects a tool
@@ -1421,6 +1460,11 @@ int main(int argc, char** argv) {
             }
             if (screen == Screen::NameEntry) {
                 ui::name_click(name_entry, lx, ly);
+                return;
+            }
+            if (screen == Screen::Battle && have_battle_art && battle_screen.cohort2 != ui::Cohort2Offer::None) {
+                if (ui::answer_cohort2(battle_screen, lx, ly, false) == ui::Cohort2Answer::Accepted)
+                    run_cohort2();
                 return;
             }
             if (screen == Screen::Battle && have_battle_art) {
@@ -1690,6 +1734,11 @@ int main(int argc, char** argv) {
                             platform::set_text_entry(false);
                             break;
                         }
+                        if (save_mode && screen == Screen::Battle && have_battle_art &&
+                            battle_screen.cohort2 != ui::Cohort2Offer::None) {
+                            ui::answer_cohort2(battle_screen, 0, 0, true);
+                            break;
+                        }
                         if (save_mode && screen == Screen::Battle && have_battle_art) {
                             battle_clicked = true;
                             break;
@@ -1928,6 +1977,10 @@ int main(int argc, char** argv) {
                                       forum_tab == viewer::kRatings ? ratings_art.palette : interface_art.palette, frame);
                     if (forum_tab == viewer::kRatings && hint_frames > 0 && --hint_frames == 0) rating_hint = 0;
                 }
+            } else if (save_mode && screen == Screen::Battle && have_battle_art &&
+                       battle_screen.cohort2 != ui::Cohort2Offer::None) {
+                // The offer and its question wait outside the battle's loop.
+                ui::compose_battle(battle_screen, state, battle_art, frame);
             } else if (save_mode && screen == Screen::Battle && have_battle_art) {
                 // 0x2244B, once a frame: the generator draws, then the screen.
                 sim.random.advance();

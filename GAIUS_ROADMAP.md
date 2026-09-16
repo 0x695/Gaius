@@ -20,7 +20,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
 | 5 | Construction & build mode | **Done** | Touch drag gesture, a walker path check; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
-| 6 | Economy & military | **Done** | The Cohort 2 hand-over (optional) |
+| 6 | Economy & military | **Done** | — |
 | 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | Not started | Everything |
@@ -260,7 +260,9 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 - [x] **The original battle screen** (2026-09-16, findings section 38) -- `WAR2.VPX`, the bars, banners and figures, the tactic buttons, the round messages, the `.VAS` animations and the retreat dialog, in `ui::BattleScreen`.
 
-**Still open, not blocking:** the Cohort 2 hand-over.
+- [x] **The Cohort 2 hand-over** (2026-09-17, findings section 44) -- the offer on `WARMESS.VPX`, "Cohort ?", the battle written into its words and `csr0.dat` / `cohort.csr`, and the result taken back (`0x23272`); `gaius_viewer --cohort-command` runs Cohort 2 through a command of the player's choosing.
+
+Every Phase 6 item is done.
 
 ---
 

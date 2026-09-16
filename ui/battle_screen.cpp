@@ -141,6 +141,10 @@ BattleArt load_battle_art(const std::string& dir) {
     art.dialog_font = GameFont{formats::pl8::load(asset(dir, "FONT1.PL8")), art.interface_palette};
     // 1F6F:292B plots every MINIFONT bit in colour 0 (2EF9:0039 = 0).
     art.mini = load_mini_font(dir, art.palette.colors[0]);
+    try {
+        art.offer = formats::vpx::decode(asset(dir, "WARMESS.VPX")).image;  // only the offer uses it
+    } catch (const formats::FormatError&) {
+    }
     return art;
 }
 
@@ -207,6 +211,29 @@ void play_round(BattleScreen& b, model::CityState& state, const BattleArt& art, 
     }
 }
 
+Cohort2Answer answer_cohort2(BattleScreen& b, int x, int y, bool right_click) {
+    if (b.cohort2 == Cohort2Offer::Offer) {
+        if (!right_click && y > 0x49 && y < 0x74) {
+            b.cohort2 = Cohort2Offer::Question;
+            return Cohort2Answer::Waiting;
+        }
+        b.cohort2 = Cohort2Offer::None;
+        return Cohort2Answer::Declined;
+    }
+    if (b.cohort2 == Cohort2Offer::Question && !right_click && x / 16 == 12) {
+        // DS:0x132C's buttons: Yes 0x236EE, No 0x236FB (DS:0x5808).
+        if (y / 16 == 6) {
+            b.cohort2 = Cohort2Offer::None;
+            return Cohort2Answer::Accepted;
+        }
+        if (y / 16 == 7) {
+            b.cohort2 = Cohort2Offer::None;
+            return Cohort2Answer::Declined;
+        }
+    }
+    return Cohort2Answer::Waiting;
+}
+
 bool answer_retreat(BattleScreen& b, model::CityState& state, const BattleArt& art, int x, int y) {
     if (!b.confirming_retreat || x / 16 != 12) return false;
     if (y / 16 == 6) {
@@ -249,13 +276,49 @@ void battle_frame(BattleScreen& b, const model::CityState& state, const BattleAr
 
 void compose_battle(const BattleScreen& b, const model::CityState& state, const BattleArt& art,
                     std::vector<uint8_t>& rgb) {
+    if (b.cohort2 != Cohort2Offer::None) {
+        // 0x09611: WARMESS.VPX in WAR2.256, and the two lines in the battle's
+        // FONT2 (loaded at 0x22297, before the offer). 0x2357E: FONT1 back,
+        // the interface palette, the pages cleared, a 14 x 5 panel and the
+        // Yes / No buttons (DS:0x132C).
+        formats::IndexedImage img;
+        const bool question = b.cohort2 == Cohort2Offer::Question;
+        if (question || art.offer.pixels.empty()) {
+            img = b.screen;
+            std::fill(img.pixels.begin(), img.pixels.end(), uint8_t{0});
+        } else {
+            img = art.offer;
+        }
+        if (question) {
+            panel(img, art.blocks, 0x30, 0x40, 14, 5);
+            blit(img, art.blocks, 29, 12 * 16, 6 * 16);
+            blit(img, art.blocks, 29, 12 * 16, 7 * 16);
+        }
+        const formats::Palette& palette = question ? art.interface_palette : art.palette;
+        rgb.resize(static_cast<size_t>(320) * 200 * 3);
+        for (size_t i = 0; i < img.pixels.size() && i < 64000; ++i) {
+            const formats::RGB c = palette.colors[img.pixels[i]];
+            rgb[i * 3] = c.r;
+            rgb[i * 3 + 1] = c.g;
+            rgb[i * 3 + 2] = c.b;
+        }
+        if (question) {
+            draw_game_text(rgb, 320, 200, 0x5A, 0x4A, "Cohort ?", 1, art.dialog_font);
+            draw_game_text(rgb, 320, 200, 0x32, 0x62, "     Yes", 1, art.dialog_font);
+            draw_game_text(rgb, 320, 200, 0x32, 0x72, "      No", 1, art.dialog_font);
+        } else {
+            draw_game_text(rgb, 320, 200, 0x0A, 0x52, " Left click here for Cohort. Click", 1, art.font);
+            draw_game_text(rgb, 320, 200, 0x0A, 0x62, "elsewhere or right-click to continue.", 1, art.font);
+        }
+        return;
+    }
     formats::IndexedImage img = b.screen;
     // 0x23878: the Cohort's standard and the barbarians' banner.
     blit(img, art.banners, b.roman_banner, 0x10E, 0x12);
     blit(img, art.banners, b.barbarian_banner, 0x124, 0x10);
     if (b.confirming_retreat) {
-        // 0x23708: 100F:00EF runs 2EF9:0C50 on both display pages -- a clear
-        // (STRONG INFERENCE) -- then a 14 x 5 panel and the Yes / No buttons
+        // 0x23708: 100F:00EF runs 2EF9:0C50 on both display pages, which
+        // clears them to colour 0 (findings section 42.2), then a 14 x 5 panel and the Yes / No buttons
         // (DS:0x132C).
         std::fill(img.pixels.begin(), img.pixels.end(), 0);
         panel(img, art.blocks, 0x30, 0x40, 14, 5);
