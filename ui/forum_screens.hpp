@@ -10,6 +10,7 @@
 
 #include "formats/common/types.hpp"
 #include "model/city_state.hpp"
+#include "ui/buttons.hpp"
 #include "ui/interface.hpp"
 
 namespace gaius::ui {
@@ -65,6 +66,19 @@ formats::IndexedImage compose_governor_screen(const model::CityState& state, con
 enum class GovernorDialog { None, Requirements, Salary, Donation };
 formats::IndexedImage compose_governor_dialog(const model::CityState& state, const InterfaceArt& art,
                                               const formats::IndexedImage& picture, GovernorDialog dialog);
+// The button tables the advisor screens run each frame (0x0D41D), in table
+// order: the Treasurer's DS:0x0404 (population tax up, down, industrial tax
+// up, down), the Tribune's DS:0x0494 (welfare up, down, a plain block, then
+// each duty's up and down), the Legion's DS:0x0094 (next Cohort, mobilize,
+// previous, wages up, down, conscription up, down), the governor's DS:0x0444
+// (name, requirements, map, salary, donation) and the salary's DS:0x0144 or
+// donation's DS:0x0124 (up, down; none for the requirements).
+std::vector<Button> treasurer_buttons();
+std::vector<Button> tribune_buttons();
+std::vector<Button> legion_buttons();
+std::vector<Button> governor_buttons();
+std::vector<Button> governor_dialog_buttons(GovernorDialog dialog);
+
 // The salary and donation dialogs' two buttons (DS:0x0144, DS:0x0124): the up
 // arrow at cell (12, 6) gives +1, the down arrow at (13, 6) -1, elsewhere 0.
 int governor_dialog_arrow(GovernorDialog dialog, int x, int y);

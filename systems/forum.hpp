@@ -73,9 +73,9 @@ bool toggle_mobilized(model::CityState& state);
 // ratings screen's advice. Transcribed 2026-09-16; findings section 36.
 
 // The statue, region 1 (0x0DF9B): a hidden rank cheat. It opens only when the
-// keyboard handler's key words 2EF9:0031 and 2EF9:002F hold 0x63 and 0x42
-// ("c" and "B" if both keep typed characters -- INFERENCE: what 2EF9:0031
-// keeps isn't traced). Its page shows the rank's title with two arrows. The up
+// keyboard handler's key words 2EF9:0031 and 2EF9:002F hold 0x63 and 0x42:
+// "c" typed, then "B" (2EF9:029B moves the last character to 2EF9:0031 as it
+// reads the next; findings section 42.4). Its page shows the rank's title with two arrows. The up
 // arrow (0x0E066) raises the rank to at most 19 and, above rank 1, moves
 // difficulty 0 to 1; the down arrow (0x0E086) lowers it to at least 1 and, at
 // rank 1, moves difficulty 1 back to 0.

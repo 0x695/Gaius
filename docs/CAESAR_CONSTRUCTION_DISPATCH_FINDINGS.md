@@ -1482,7 +1482,7 @@ The main loop `0x0FA13`, once a frame:
 4. a frame that passes runs the frame counters, the walkers and a step;
 5. every frame runs the displays -- among them the message timer and the funds warning.
 
-The speed `DS:0x5292` moves in tens between 0 and 100 on the options screen (`0x0F204`/`0x0F217`). It lies outside the save, in the uninitialized data, so it comes from `csr0.dat` or the options.
+The speed `DS:0x5292` moves in tens between 0 and 100 on the options screen (`0x0F204`/`0x0F217`). It lies outside the save, in the uninitialized data. (Corrected in section 42.3: it is read from `CAESAR.INF`, not `csr0.dat`.)
 
 `month::run_frame` is this frame, and at speed 100 it is exactly `run_step`. Eleven frames at speed 50 run six steps and draw eleven times (`test_messages_and_speed`). `gaius_viewer` now runs frames, with the speed on the governor's page (`--speed`).
 
@@ -1510,10 +1510,10 @@ Three of the Forum picture's eight figures (`CONTFRM.GD8` regions, section 34.2)
 
 ### 36.1 The statue (region 1, `0x0DF9B`) -- a rank cheat
 
-- **The gate.** The page opens only when the keyboard handler's words `2EF9:0031` = `0x63` and `2EF9:002F` = `0x42`. `2EF9:002F` is the last typed character -- the text entry at `0x11093`-`0x112AF` compares it with Escape, Enter, backspace, digits and letters -- so the second key is "B". That `2EF9:0031` keeps the character before it ("c") is INFERENCE. Leaving clears `2EF9:002F`.
+- **The gate.** The page opens only when the keyboard handler's words `2EF9:0031` = `0x63` and `2EF9:002F` = `0x42`. `2EF9:002F` is the last typed character -- the text entry at `0x11093`-`0x112AF` compares it with Escape, Enter, backspace, digits and letters -- so the second key is "B". `2EF9:0031` keeps the character before it ("c"): DEFINITIVE since section 42.4. Leaving clears `2EF9:002F`.
 - **The page.** The rank title (the 16-character table `DS:0x7102`) at (0x68, 0x40), with two arrows.
 - **The arrows.** Up (`0x0E066`): the rank `DS:0x6C30` + 1, at most 19; then, above rank 1, difficulty `DS:0x6CB8` 0 becomes 1. Down (`0x0E086`): the rank - 1, at least 1; then, at rank 1, difficulty 1 becomes 0.
-- `gaius_viewer` stands in `--cheats` for the key gate.
+- `gaius_viewer` opens it after "c" then "B" (section 42.4), or with `--cheats`.
 
 ### 36.2 The histories (region 4, `0x0ACA7`)
 
@@ -1829,9 +1829,7 @@ Every advisor the Forum picture opens now draws the original's screen. `ui/inter
 
 - **Clicks.** The viewer's screens answer their buttons as the original does. Any other click, or a right-click, goes back to the Forum picture; the original leaves on a right-click only.
 - **Timing.** The ratings advice shows for 90 frames.
-- **Not modeled:**
-  - the pressed frames while a button is held;
-  - the sounds.
+- **Not modeled:** the sounds. (The pressed frames came with section 42.1.)
 
 ### 41.4 The governor's three dialogs (2026-09-16)
 
@@ -1847,3 +1845,81 @@ Each is drawn over the governor's screen, twice (both pages), then waits: every 
   - the figure, `DS:0x6C2C` in 5 digits at (0x68, 0x64), or `DS:0x6C28` in 4 digits at (0x64, 0x64), mode 1.
 - **Paying the donation** (`0x0C26E`). When its dialog ends, a donation no larger than the savings leaves them and adds 90% to the treasury (`economy::donate_savings`); a larger one does nothing. The amount stays set for next time.
 - **In Gaius.** Any click that isn't an arrow ends a dialog too, so touch can leave it.
+
+## 42. The Options screen, the buttons and the key words (2026-09-17)
+
+### 42.1 How a button works (`0x0D41D`, `0x0D521`)
+
+Every interface screen keeps its buttons as 16-byte records -- cell x, cell y, frame, pressed frame, a far pointer to the handler, a state word (+0x0C) and a mode (+0x0E) -- and each frame runs `0x0D41D` over the table, then draws it with `0x0D521`. `ui/buttons.hpp` transcribes both.
+
+- **The mouse** (`0x113E1`, each frame, from `2EF9:002B`): `DS:0x6D56` the left button held, `DS:0x6D54` the right held, `DS:0x6D4A` / `0x6D48` either just pressed, `DS:0x6D4E` / `0x6D4C` either just let go. The dialogs that "end on a right click" wait for `DS:0x6D4C`, the right button let go.
+- **Answering** (`0x0D41D`), for the button under the pointer:
+  - **mode 0, momentary:** while the left button is held it acts at once, sets its state to `DS:0x6D62` (10; 25 on the start screen) and counts `DS:0x6D64`; after 12 held frames it acts again whenever its state has fallen below 2;
+  - **mode 1, toggle:** acts once a press, flipping its state;
+  - **mode 2, radio:** acts every held frame and becomes `DS:0x6D60`;
+  - **mode 3, release:** acts when the left button is let go over it, with state 5.
+  With no button held `DS:0x6D64` goes back to 0.
+- **Drawing** (`0x0D521`), each button whole (`303E:0BF0`) from `P_BLOCKS.PL8`: a toggle pressed while its state is set, a radio button while it is the chosen one, and the others while their state counts down or while held over -- counting the state down each time.
+- **The tables:** the Treasurer's `DS:0x0404`, the Tribune's `DS:0x0494`, the Legion's `DS:0x0094`, the governor's `DS:0x0444` and its dialogs' `DS:0x0144` / `0x0124` are all mode 0 (`ui::treasurer_buttons` and its siblings). The Options menu's are mode 3.
+- **Checked** by `test_buttons` (each mode) and `test_options_screen`, which draws each advisor's table at rest over its composed screen and finds nothing changed, so each table is the buttons its screen draws.
+
+### 42.2 The Options screen (`0x0ECA3`)
+
+The control panel's "Game Options" (command 40, `0x17390`: `DS:0x6D0C` = 40, then `0x0ECA3`) plays `czarjin5.xmi` (`DS:0x0D46`), draws the screen once (`0x0B47D`) and runs the menu (`0x0ECDF`) until a right click or a handler ends it.
+
+- **The screen** (`0x0B47D`): a 20 x 12 panel over the whole screen in the interface palette, "Caesar - Options screen" at (0x20, 0x0C), and the nine items at x 0x20 (`DS:0x708E`-`0x706A`).
+- **The menu's buttons** (`DS:0x0564`, cells (15, 2)-(15, 10), frames 0x1D / 0x1E, mode 3):
+
+| Item | Handler | What it does |
+|---|---|---|
+| Resume game | `0x0F0CC` | ends the menu |
+| Game speed | `0x0F0D3` | the speed dialog |
+| Sound effects | `0x0F257` | the sound dialog |
+| Load a game | `0x0EE07` | the file dialog `0x0C558` on `*.sav`, then the loader `0x14537` |
+| Save a game | `0x0EE93` | the file dialog, asking before overwriting (`DS:0x703A`), then the writer `0x133C8` |
+| Display options | `0x0EF28` | the display dialog |
+| Pause the game | `0x0F01E` | draws the view each frame without steps (`DS:0x6CAC` = 1) until either button is held or T or Escape is pressed (`2EF9:0033` = 1), then ends the menu |
+| Restart the game | `0x0F0AD` | asks "Restart the game?" (`0x0F43F`); OK sets `DS:0x6D6F`, which ends the menu into a new game |
+| Exit to DOS | `0x0ED2C` | asks "Are you sure ?!"; "Resume game" (`0x0EDE3`) ends the menu, "Exit to DOS" (`0x0EDF0`) also sets `DS:0x6D70` and `DS:0x6D6F` |
+
+- **The dialogs.** The speed, sound, display and leaving dialogs start with `0x0F5AC` (a 16 x 5 panel at (0x20, 0x30)) or `0x0F5EA` (16 x 6), whose `100F:00EF` clears both pages to colour 0 (`2EF9:0C50`). Each redraws its text and buttons every frame and ends on its OK or a right click; then `0x0B47D` draws the menu again.
+  - **Speed** (`DS:0x0634`): "Game speed" and "Scroll speed" at x 0x40; a 2 x 2 stone at (0xE0, 0x40); the figures in 3 digits, mode 2, into "    %" (`DS:0x0D5F` / `0x0D65`) at x 0xE8. The arrows at (12-13, 4) and (12-13, 5) move `DS:0x5292` and `DS:0x5294` in tens within 0-100.
+  - **Sound** (`DS:0x0684`): "Allow effects", "Allow tunes", "City sounds"; a 2 x 3 stone at (0xE0, 0x40); "Yes" or "No" at x 0xE0. The buttons at (12, 4)-(12, 6) flip `DS:0x5296`, `DS:0x5298` (turning it off stops the music, `31E0:039D`) and `DS:0x529E`, which reads "No" when set.
+  - **Display** (`DS:0x05F4`): "Cancel Position indicator" (from x 0x30), "Cancel icon name", "Cancel messages", with toggles at (16, 4)-(16, 6). Their states are kept in the records themselves (`DS:0x0600`, `0x0610`, `0x0620`): the handlers copy them to `DS:0x529A` (the minimap's position marker, `0x21EBF`), `DS:0x529C` (the control panel's name of the icon under the pointer, `0x21C49`) and, flipped, to the messages option `DS:0x6C78`.
+  - **The restart question** (`0x0F43F`) is drawn over the menu: a 14 x 5 panel at (0x30, 0x70), the question at (0x50, 0x80), OK and Cancel at x 0x40 with buttons `DS:0x06E4` at (15, 9) and (15, 10). It waits for a button (`DS:0x6D46` 1 or 2) and ignores the right button.
+  - **Leaving** (`0x0ED2C`, also Alt-X from the key handler `0x2EC8A`): "   Are you sure ?!" at (0x40, 0x40), "Resume game" and "Exit to DOS" with buttons `DS:0x06C4` at (15, 5) and (15, 6).
+
+### 42.3 `CAESAR.INF`: where the options live
+
+The start-up `0x0F628` reads 28 bytes of `caesar.inf` (`DS:0x0D6B`) into `DS:0x5288` and exits with "No installation information found." without it; `0x0F8E2` and `0x223B3` write them back. As 14 words:
+
+| Word | DS | US release | Meaning |
+|---|---|---|---|
+| 0-4 | `0x5288`-`0x5290` | 0, 3, 0, 1, 0 | the installer's sound set-up; `DS:0x528A` is copied to `DS:0x6DE5` |
+| 5 | `0x5292` | 100 | the game speed (section 35.2) |
+| 6 | `0x5294` | 100 | the scroll speed |
+| 7 | `0x5296` | 1 | allow effects |
+| 8 | `0x5298` | 1 | allow tunes |
+| 9 | `0x529A` | 0 | cancel the position indicator |
+| 10 | `0x529C` | 0 | cancel the icon name |
+| 11 | `0x529E` | 0 | city sounds off |
+| 12-13 | `0x52A0`-`0x52A2` | 7, 0x220 | more of the sound set-up (0x220 is a Sound Blaster's port) |
+
+This corrects section 35.2, which guessed `csr0.dat`.
+
+### 42.4 The key words
+
+`2EF9:029B` reads a key when one is waiting (`int 16h`): it moves the last character `2EF9:002F` to `2EF9:0031`, then stores the new character in `2EF9:002F` and its scan code in `2EF9:0033`. So `2EF9:0031` is the character typed before the last one, and the statue's gate (section 36.1) is "c" followed by "B".
+
+The key handler `0x2EC40` also has: Alt-X leaving (`0x0ED2C`), "p" / "P" flipping the position indicator, "t" / "T" pausing (`0x0F01E`) and "s" / "S" a screen of its own (`0x0E7F6`, not read).
+
+### 42.5 In Gaius
+
+- **`ui::compose_options_screen`**, `ui::options_buttons` and `ui::options_dialog_button`; `ui::GameOptions` with `load_options` / `save_options` for `CAESAR.INF`.
+- **`gaius_viewer`** has an Options tab beside City, Province, Maps and Forum.
+  - Every button of the Options screen and of the Treasurer's, Tribune's, Legion's and governor's screens runs through `ui::process_buttons` once a frame, so buttons show their pressed frames and arrows repeat while held.
+  - The settings are Gaius's own `caesar.inf` in the per-user data folder, first copied from the game's, so the original's file is never written. The game speed takes effect at once; `--speed` overrides it.
+  - Load and Save open Gaius's slot page in place of the original's file dialog.
+  - Pause stops time until a click or T. Restart goes to the start screen. Exit to DOS closes the viewer.
+  - The statue opens after "c" then "B".
+- **Stored but without effect yet:** the scroll speed, the sound switches (Gaius plays no sound yet), and the position indicator and icon name, which belong to the original's control panel.

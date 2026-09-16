@@ -74,11 +74,13 @@
 #include "systems/province.hpp"
 #include "ui/panel.hpp"
 #include "ui/battle_screen.hpp"
+#include "ui/buttons.hpp"
 #include "ui/font.hpp"
 #include "ui/forum_screens.hpp"
 #include "ui/interface.hpp"
 #include "ui/maps_screen.hpp"
 #include "ui/name_entry.hpp"
+#include "ui/options_screen.hpp"
 #include "ui/game_font.hpp"
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
@@ -244,7 +246,7 @@ int main(int argc, char** argv) {
     bool test_battle = false;       // --test-battle: the first Cohort meets a new army
     bool test_promotion = false;    // --test-promotion: a promotion is offered now
     std::string save_dir_option;    // --save-dir: where the save slots live (default: the per-user data folder)
-    int start_speed = 100;          // --speed 0-100: DS:0x5292
+    int start_speed = -1;           // --speed 0-100: DS:0x5292 (default: the options' CAESAR.INF)
     int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
@@ -371,6 +373,15 @@ int main(int argc, char** argv) {
     formats::IndexedImage governor_picture;  // C_VITAE.VPX
     bool have_governor_picture = false;
     ui::GovernorDialog governor_dialog = ui::GovernorDialog::None;  // open over the governor's screen
+    ui::OptionsDialog options_dialog = ui::OptionsDialog::None;     // open on the Options screen
+    bool pause_until_click = false;  // "Pause the game" (0x0F01E): a click or T resumes
+    char key_last = 0, key_prev = 0;  // 2EF9:002F and 2EF9:0031: the last key typed and the one before
+    // The original screens' buttons, run once a frame (0x0D41D / 0x0D521).
+    std::vector<ui::Button> active_buttons;
+    ui::ButtonTracker button_tracker;
+    int active_buttons_key = -1;
+    ui::Pointer pointer;
+    bool pointer_was_held = false;
     // Ending a governor dialog; the donation's pays out (0x0C26E).
     const auto close_governor_dialog = [&] {
         if (governor_dialog == ui::GovernorDialog::Donation)
@@ -478,7 +489,21 @@ int main(int argc, char** argv) {
     // The simulation clock (systems::month), seeded from the save.
     systems::month::SimState sim;
     if (save_mode) sim = systems::month::sim_state_from_save(state);
-    sim.speed = std::clamp(start_speed / 10 * 10, 0, 100);
+    // The options: CAESAR.INF (DS:0x5288) -- Gaius's own copy in the per-user
+    // data folder, first read from the game's, so the original's is never
+    // written.
+    ui::GameOptions game_options = ui::default_options();
+    std::string options_path;
+    try {
+        options_path = (fs::path(platform::data_path("settings")) / "caesar.inf").string();
+    } catch (const std::exception&) {
+    }
+    if (options_path.empty() || !ui::load_options(options_path, game_options)) {
+        if (!ui::load_options((fs::path(game_dir) / "CAESAR.INF").string(), game_options))
+            ui::load_options((fs::path(game_dir) / "caesar.inf").string(), game_options);
+    }
+    if (start_speed >= 0) game_options.set(ui::kOptSpeed, std::clamp(start_speed / 10 * 10, 0, 100));
+    sim.speed = std::clamp(game_options.speed() / 10 * 10, 0, 100);
     bool time_running = save_mode && !start_paused;
     // One step every 19 ms: a month (106 steps) in about 2 s, and the walkers
     // move a pixel each step.
@@ -631,7 +656,8 @@ int main(int argc, char** argv) {
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
     enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap,
-                        NameEntry };
+                        NameEntry, Options };
+    Screen options_return = Screen::City;  // where "Resume game" goes back to
     // DS:0x0DD0: the governor's name, kept across new games and saved with each.
     std::string governor_name = ui::governor_name(state);
     ui::NameEntry name_entry;
@@ -1159,7 +1185,7 @@ int main(int argc, char** argv) {
         // page's dozen rows would not fit the logical screen.
         const ui::Metrics page_metrics = ui::metrics_for(ui::Breakpoint::Desktop);
         const std::vector<ui::PanelButton> screen_tabs = {
-            {"City", 900}, {"Province", 901}, {"Maps", 902}, {"Forum", 903}};
+            {"City", 900}, {"Province", 901}, {"Maps", 902}, {"Forum", 903}, {"Options", 904}};
         std::vector<ui::PanelButton> overlay_buttons;
         for (int i = 0; i < viewer::kOverlayCount; ++i) overlay_buttons.push_back({viewer::kOverlayNames[i], 1100 + i});
         const ui::PanelLayout overlay_bar = ui::bar_layout(overlay_buttons, page_metrics, kLogicalW, kLogicalH);
@@ -1185,6 +1211,14 @@ int main(int argc, char** argv) {
                    sim.messages.showing() && model::global_word(state, 0x6C78) != 0;
         };
         const auto switch_to = [&](int i) {
+            if (i == 4) {
+                // The control panel's "Game Options" (command 40, 0x1739D -> 0x0ECA3).
+                if (!have_interface_art) return;
+                if (screen != Screen::Options) options_return = screen;
+                options_dialog = ui::OptionsDialog::None;
+                screen = Screen::Options;
+                return;
+            }
             screen = i == 0   ? Screen::City
                      : i == 1 ? Screen::Province
                      : i == 2 ? Screen::Maps
@@ -1193,66 +1227,171 @@ int main(int argc, char** argv) {
             province_image_dirty = true;
         };
 
+        // The original screens' button tables: which one is running, and
+        // what each button does (its handler).
+        const auto buttons_key = [&]() -> int {
+            if (!save_mode) return -1;
+            if (screen == Screen::Options && have_interface_art) return 100 + static_cast<int>(options_dialog);
+            if (!original_forum_screen()) return -1;
+            if (forum_tab == viewer::kGovernor) return 200 + static_cast<int>(governor_dialog);
+            if (forum_tab == viewer::kTreasurer) return 1;
+            if (forum_tab == viewer::kTribune) return 2;
+            if (forum_tab == viewer::kLegion) return 3;
+            return -1;
+        };
+        const auto buttons_for = [&](int key) -> std::vector<ui::Button> {
+            if (key == 1) return ui::treasurer_buttons();
+            if (key == 2) return ui::tribune_buttons();
+            if (key == 3) return ui::legion_buttons();
+            if (key == 200) return ui::governor_buttons();
+            if (key > 200) return ui::governor_dialog_buttons(static_cast<ui::GovernorDialog>(key - 200));
+            if (key >= 100 && key < 200)
+                return ui::options_buttons(static_cast<ui::OptionsDialog>(key - 100), game_options,
+                                           model::global_word(state, 0x6C78) != 0);
+            return {};
+        };
+        const auto options_changed = [&]() {
+            sim.speed = std::clamp(game_options.speed() / 10 * 10, 0, 100);
+            if (!options_path.empty() && !ui::save_options(options_path, game_options))
+                std::printf("options: can't write %s\n", options_path.c_str());
+        };
+        const auto on_button = [&](int key, int index) {
+            namespace forum = systems::forum;
+            if (key == 1) {
+                // DS:0x0404 (0x0E7AE-0x0E7E4).
+                forum::adjust(state, index < 2 ? forum::Control::PopulationTax : forum::Control::IndustrialTax,
+                              index % 2 == 0 ? 1 : -1);
+            } else if (key == 2) {
+                // DS:0x0494: welfare, a block whose handler returns, the duties.
+                if (index < 2) forum::adjust(state, forum::Control::Welfare, index == 0 ? 1 : -1);
+                if (index >= 3) {
+                    const auto duty = static_cast<forum::Duty>((index - 3) / 2);
+                    if ((index - 3) % 2 == 0)
+                        forum::raise_duty(state, duty);
+                    else
+                        forum::lower_duty(state, duty);
+                }
+            } else if (key == 3) {
+                // DS:0x0094.
+                if (index == 0) forum::next_cohort(state);
+                if (index == 1) forum::toggle_mobilized(state);
+                if (index == 2) forum::previous_cohort(state);
+                if (index == 3 || index == 4) forum::adjust(state, forum::Control::ArmyWages, index == 3 ? 1 : -1);
+                if (index == 5 || index == 6) forum::adjust(state, forum::Control::Conscription, index == 5 ? 1 : -1);
+            } else if (key == 200) {
+                // DS:0x0444: the name, the requirements, the map, the salary, the donation.
+                if (index == 0 && have_name_art) {
+                    name_entry = ui::begin_name_entry(governor_name);
+                    name_return_to_forum = true;
+                    screen = Screen::NameEntry;
+                    platform::set_text_entry(true);
+                }
+                if (index == 1) governor_dialog = ui::GovernorDialog::Requirements;
+                if (index == 2 && have_empire_map && have_icons) screen = Screen::EmpireMap;
+                if (index == 3) governor_dialog = ui::GovernorDialog::Salary;
+                if (index == 4) governor_dialog = ui::GovernorDialog::Donation;
+            } else if (key > 200) {
+                // DS:0x0144 / 0x0124.
+                forum::adjust(state,
+                              governor_dialog == ui::GovernorDialog::Salary ? forum::Control::Salary
+                                                                            : forum::Control::Donation,
+                              index == 0 ? 1 : -1);
+            } else if (key == 100 + static_cast<int>(ui::OptionsDialog::None)) {
+                // DS:0x0564, the Options menu.
+                switch (static_cast<ui::OptionsItem>(index)) {
+                    case ui::OptionsItem::Resume: screen = options_return; break;  // 0x0F0CC
+                    case ui::OptionsItem::GameSpeed: options_dialog = ui::OptionsDialog::Speed; break;
+                    case ui::OptionsItem::Sound: options_dialog = ui::OptionsDialog::Sound; break;
+                    case ui::OptionsItem::Display: options_dialog = ui::OptionsDialog::Display; break;
+                    case ui::OptionsItem::Load:
+                    case ui::OptionsItem::Save:
+                        // 0x0EE07 / 0x0EE93: the original's file dialog (0x0C558);
+                        // Gaius's own slot page stands in for it.
+                        files_return = Screen::Options;
+                        files_saving = static_cast<ui::OptionsItem>(index) == ui::OptionsItem::Save;
+                        refresh_slots();
+                        screen = Screen::Files;
+                        break;
+                    case ui::OptionsItem::Pause:
+                        // 0x0F01E: the view without steps until a click or T.
+                        screen = options_return;
+                        time_running = false;
+                        pause_until_click = true;
+                        break;
+                    case ui::OptionsItem::Restart: options_dialog = ui::OptionsDialog::Restart; break;
+                    case ui::OptionsItem::Exit: options_dialog = ui::OptionsDialog::Exit; break;
+                }
+            } else if (key == 100 + static_cast<int>(ui::OptionsDialog::Restart)) {
+                // 0x0F53A OK: DS:0x6D6F ends the menu into a new game; 0x0F541 Cancel.
+                options_dialog = ui::OptionsDialog::None;
+                if (index == 0) {
+                    screen = Screen::Start;
+                    time_running = false;
+                }
+            } else if (key == 100 + static_cast<int>(ui::OptionsDialog::Exit)) {
+                // 0x0EDE3 resumes the game; 0x0EDF0 leaves it (DS:0x6D70).
+                options_dialog = ui::OptionsDialog::None;
+                if (index == 0) screen = options_return;
+                if (index == 1) running = false;
+            } else if (key > 100 && key < 200) {
+                bool messages_on = model::global_word(state, 0x6C78) != 0;
+                if (ui::options_dialog_button(options_dialog, index, active_buttons, game_options, messages_on))
+                    options_dialog = ui::OptionsDialog::None;
+                model::set_global_word(state, 0x6C78, messages_on ? 1 : 0);
+                options_changed();
+            }
+        };
+        // A headless click on a button: held for a frame, then let go.
+        const auto press_button_now = [&](int lx, int ly) {
+            const int key = buttons_key();
+            active_buttons = buttons_for(key);
+            active_buttons_key = key;
+            ui::ButtonTracker tracker;
+            ui::Pointer p{lx, ly, true, false};
+            int fired = ui::process_buttons(active_buttons, tracker, p);
+            if (fired >= 0) on_button(key, fired);
+            if (buttons_key() == key) {
+                p.left_held = false;
+                p.left_released = true;
+                fired = ui::process_buttons(active_buttons, tracker, p);
+                if (fired >= 0) on_button(key, fired);
+            }
+            active_buttons_key = -1;  // rebuilt on the next frame
+        };
+
         // One handler for "the primary action happened at this logical
         // point", shared by the real input path and --test-click. The
         // toolbar gets first refusal: a click on the panel selects a tool
         // and must NOT also fall through to the map underneath it.
-        auto handle_select_logical = [&](int lx, int ly) {
+        auto handle_select_logical = [&](int lx, int ly, bool synthetic) {
             if (!save_mode) return;
+            if (pause_until_click) {
+                pause_until_click = false;  // 0x0F070: a click ends the pause
+                time_running = true;
+                return;
+            }
             drag_last_x = drag_last_y = -1;
             province_drag_x = province_drag_y = -1;
             drag_undo.clear();
             drag_refund = 0;
+            if (buttons_key() >= 0 && ui::button_at(buttons_for(buttons_key()), lx, ly) >= 0) {
+                // The screen's buttons answer the mouse once a frame (the
+                // per-frame pass below); a headless --test-click presses and
+                // lets go at once.
+                if (synthetic) press_button_now(lx, ly);
+                return;
+            }
+            if (screen == Screen::Options) return;  // the original ignores other clicks here
             if (original_forum_screen() && governor_dialog != ui::GovernorDialog::None) {
-                // A governor dialog: its arrows (DS:0x0144 / 0x0124), or any
-                // other click ends it (the original ends it on a right-click).
-                const int arrow = ui::governor_dialog_arrow(governor_dialog, lx, ly);
-                if (arrow != 0) {
-                    systems::forum::adjust(state,
-                                           governor_dialog == ui::GovernorDialog::Salary
-                                               ? systems::forum::Control::Salary
-                                               : systems::forum::Control::Donation,
-                                           arrow);
-                } else {
-                    close_governor_dialog();
-                }
+                // Any other click ends a governor dialog (the original ends
+                // it on a right-click).
+                close_governor_dialog();
                 return;
             }
             if (original_forum_screen()) {
-                // The original's advisor screens: their arrows (the
-                // Treasurer's DS:0x0404), or anything else goes back to the
-                // Forum picture (the original leaves on a right-click).
-                if (forum_tab == viewer::kTreasurer && ly >= 16 && ly < 32) {
-                    namespace forum = systems::forum;
-                    const int cell = lx / 16;
-                    if (cell == 12) forum::adjust(state, forum::Control::PopulationTax, 1);
-                    if (cell == 13) forum::adjust(state, forum::Control::PopulationTax, -1);
-                    if (cell == 16) forum::adjust(state, forum::Control::IndustrialTax, 1);
-                    if (cell == 17) forum::adjust(state, forum::Control::IndustrialTax, -1);
-                    if (cell == 12 || cell == 13 || cell == 16 || cell == 17) return;
-                }
-                if (forum_tab == viewer::kGovernor) {
-                    // DS:0x0444: the name (18, 1), the requirements (18, 2),
-                    // the map (18, 4), the salary (18, 8) and the donation (18, 10).
-                    const int cx = lx / 16, cy = ly / 16;
-                    if (cx == 18 && cy == 1 && have_name_art) {
-                        name_entry = ui::begin_name_entry(governor_name);
-                        name_return_to_forum = true;
-                        screen = Screen::NameEntry;
-                        platform::set_text_entry(true);
-                        return;
-                    }
-                    if (cx == 18 && cy == 4 && have_empire_map && have_icons) {
-                        screen = Screen::EmpireMap;
-                        return;
-                    }
-                    if (cx == 18 && (cy == 2 || cy == 8 || cy == 10)) {
-                        governor_dialog = cy == 2   ? ui::GovernorDialog::Requirements
-                                          : cy == 8 ? ui::GovernorDialog::Salary
-                                                    : ui::GovernorDialog::Donation;
-                        return;
-                    }
-                }
+                // The original's advisor screens: a click that isn't a button
+                // goes back to the Forum picture (the original leaves on a
+                // right-click).
                 if (forum_tab == viewer::kRatings) {
                     // 0x0CF12: a click among the columns asks for advice.
                     if (ly >= systems::forum::kRatingHintTop && ly < systems::forum::kRatingHintBottom) {
@@ -1262,44 +1401,6 @@ int main(int argc, char** argv) {
                         hint_frames = systems::forum::kRatingHintFrames;
                         return;
                     }
-                }
-                if (forum_tab == viewer::kTribune) {
-                    // DS:0x0494's buttons.
-                    namespace forum = systems::forum;
-                    const int cx = lx / 16, cy = ly / 16;
-                    if ((cx == 13 || cx == 14) && cy == 3) {
-                        forum::adjust(state, forum::Control::Welfare, cx == 13 ? 1 : -1);
-                        return;
-                    }
-                    if ((cx == 12 || cx == 13) && cy >= 5 && cy <= 9) {
-                        const auto duty = static_cast<forum::Duty>(cy - 5);
-                        if (cx == 12) {
-                            forum::raise_duty(state, duty);
-                        } else {
-                            forum::lower_duty(state, duty);
-                        }
-                        return;
-                    }
-                }
-                if (forum_tab == viewer::kLegion) {
-                    // DS:0x0094's buttons.
-                    namespace forum = systems::forum;
-                    const int cx = lx / 16, cy = ly / 16;
-                    bool hit = true;
-                    if (cx == 18 && cy == 2) {
-                        forum::next_cohort(state);
-                    } else if (cx == 18 && cy == 3) {
-                        forum::toggle_mobilized(state);
-                    } else if (cx == 18 && cy == 4) {
-                        forum::previous_cohort(state);
-                    } else if ((cx == 16 || cx == 17) && cy == 9) {
-                        forum::adjust(state, forum::Control::ArmyWages, cx == 16 ? 1 : -1);
-                    } else if ((cx == 16 || cx == 17) && cy == 10) {
-                        forum::adjust(state, forum::Control::Conscription, cx == 16 ? 1 : -1);
-                    } else {
-                        hit = false;
-                    }
-                    if (hit) return;
                 }
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
                 return;
@@ -1367,7 +1468,10 @@ int main(int argc, char** argv) {
                 // 0x0DF57: the figure under the click opens its advisor
                 // (findings section 34.2). Those Gaius has no page for say so.
                 const int region = forum_clicks.region_at(lx, ly);
-                const int tab = region == 1   ? (cheats ? viewer::kStatue : -1)
+                // The statue opens after "c" then "B" (0x0DF9B reads the key
+                // words 2EF9:0031 and 2EF9:002F), or with --cheats.
+                const bool statue_keys = key_prev == 'c' && key_last == 'B';
+                const int tab = region == 1   ? (cheats || statue_keys ? viewer::kStatue : -1)
                                 : region == 2 ? viewer::kGovernor
                                 : region == 3 ? viewer::kLegion
                                 : region == 4 ? viewer::kHistory
@@ -1472,7 +1576,7 @@ int main(int argc, char** argv) {
         }
         for (const auto& c : test_clicks) {
             std::printf("--test-click (%d,%d): ", c.x, c.y);
-            handle_select_logical(c.x, c.y);
+            handle_select_logical(c.x, c.y, true);
         }
         for (int action : test_actions) {
             std::printf("--test-action %d\n", action);
@@ -1483,6 +1587,23 @@ int main(int argc, char** argv) {
         while (running) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_KEYDOWN) {
+                    // 0x3029B: each key read moves the last one to 2EF9:0031.
+                    const SDL_Keycode sym = event.key.keysym.sym;
+                    char c = 0;
+                    if (sym >= SDLK_a && sym <= SDLK_z) {
+                        c = static_cast<char>('a' + (sym - SDLK_a));
+                        if ((event.key.keysym.mod & KMOD_SHIFT) != 0) c = static_cast<char>(c - 'a' + 'A');
+                    } else if (sym >= 32 && sym < 127) {
+                        c = static_cast<char>(sym);
+                    }
+                    key_prev = key_last;
+                    key_last = c;
+                    if (pause_until_click && (c == 't' || c == 'T')) {
+                        pause_until_click = false;  // 0x0F07E: T ends the pause too
+                        time_running = true;
+                    }
+                }
                 int pw, ph;
                 window.physical_size(&pw, &ph);
                 auto cmd = platform::translate_event(event, pw, ph);
@@ -1520,6 +1641,21 @@ int main(int argc, char** argv) {
                                                                                           : 0);
                         break;
                     case platform::CommandType::Secondary:
+                        if (save_mode && pause_until_click) {
+                            pause_until_click = false;
+                            time_running = true;
+                            break;
+                        }
+                        if (save_mode && screen == Screen::Options) {
+                            // DS:0x6D4C: a right click leaves the menu, or a
+                            // dialog back to it (the restart question waits
+                            // for its buttons).
+                            if (options_dialog == ui::OptionsDialog::None)
+                                screen = options_return;
+                            else if (options_dialog != ui::OptionsDialog::Restart)
+                                options_dialog = ui::OptionsDialog::None;
+                            break;
+                        }
                         if (save_mode && message_visible()) {
                             // 0x0F93A: a right-click on the message dismisses it.
                             int mx = 0, my = 0;
@@ -1605,7 +1741,7 @@ int main(int argc, char** argv) {
                         // gamepad A all land on the same button or cell.
                         int lx = 0, ly = 0;
                         if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly)) break;
-                        handle_select_logical(lx, ly);
+                        handle_select_logical(lx, ly, false);
                         break;
                     }
                     case platform::CommandType::SelectMove: {
@@ -1706,6 +1842,28 @@ int main(int argc, char** argv) {
                 }
             }
 
+            if (save_mode) {
+                // The original screens' buttons, once a frame (0x0D41D).
+                const int key = buttons_key();
+                if (key != active_buttons_key) {
+                    active_buttons = buttons_for(key);
+                    button_tracker = ui::ButtonTracker{};
+                    active_buttons_key = key;
+                }
+                int wx = 0, wy = 0, lx = -1, ly = -1;
+                const Uint32 mouse = SDL_GetMouseState(&wx, &wy);
+                if (!window.window_to_logical(wx, wy, &lx, &ly)) lx = ly = -1;
+                pointer.x = lx;
+                pointer.y = ly;
+                pointer.left_held = (mouse & SDL_BUTTON_LMASK) != 0;
+                pointer.left_released = pointer_was_held && !pointer.left_held;
+                pointer_was_held = pointer.left_held;
+                if (key >= 0 && !active_buttons.empty()) {
+                    const int fired = ui::process_buttons(active_buttons, button_tracker, pointer);
+                    if (fired >= 0) on_button(key, fired);
+                }
+            }
+
             if (time_running) {
                 const Uint32 now = SDL_GetTicks();
                 // A battle or a promotion offer stops time mid-step.
@@ -1735,7 +1893,14 @@ int main(int argc, char** argv) {
                 save_mode ? "Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn"
                           : std::string();
             const ui::GameFont* font = have_font ? &game_font : nullptr;
-            if (save_mode && (page_screen() || screen == Screen::NameEntry)) {
+            if (save_mode && screen == Screen::Options && have_interface_art) {
+                formats::IndexedImage options_image = ui::compose_options_screen(
+                    interface_art, options_dialog, game_options, model::global_word(state, 0x6C78) != 0);
+                if (buttons_key() == active_buttons_key)
+                    ui::draw_buttons(options_image, interface_art.blocks, active_buttons, button_tracker, pointer);
+                frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
+                ui::canvas_to_rgb(options_image, interface_art.palette, frame);
+            } else if (save_mode && (page_screen() || screen == Screen::NameEntry)) {
                 const ui::Page page = current_page();
                 frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
@@ -1745,7 +1910,7 @@ int main(int argc, char** argv) {
                     ui::canvas_to_rgb(ui::compose_funds_warning_screen(interface_art), interface_art.palette, frame);
                 if (original_forum_screen()) {
                     // The advisors in the original's art.
-                    const formats::IndexedImage advisor =
+                    formats::IndexedImage advisor =
                         forum_tab == viewer::kHistory     ? ui::compose_history_screen(state, interface_art)
                         : forum_tab == viewer::kIndustry  ? ui::compose_industry_screen(state, interface_art)
                         : forum_tab == viewer::kTribune   ? ui::compose_tribune_screen(state, interface_art)
@@ -1757,6 +1922,8 @@ int main(int argc, char** argv) {
                             ? ui::compose_legion_screen(state, interface_art, province_sprites.units,
                                                         static_cast<int>(sim.ticks))
                             : ui::compose_treasurer_screen(state, interface_art);
+                    if (buttons_key() >= 0 && buttons_key() == active_buttons_key)
+                        ui::draw_buttons(advisor, interface_art.blocks, active_buttons, button_tracker, pointer);
                     ui::canvas_to_rgb(advisor,
                                       forum_tab == viewer::kRatings ? ratings_art.palette : interface_art.palette, frame);
                     if (forum_tab == viewer::kRatings && hint_frames > 0 && --hint_frames == 0) rating_hint = 0;

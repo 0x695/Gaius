@@ -425,6 +425,51 @@ formats::IndexedImage compose_governor_dialog(const model::CityState& state, con
     return img;
 }
 
+namespace {
+
+std::vector<Button> table(std::initializer_list<std::array<int, 4>> rows) {
+    std::vector<Button> out;
+    for (const auto& r : rows) {
+        Button b;
+        b.cx = r[0];
+        b.cy = r[1];
+        b.frame = r[2];
+        b.pressed = r[3];
+        out.push_back(b);
+    }
+    return out;
+}
+
+}  // namespace
+
+std::vector<Button> treasurer_buttons() {
+    return table({{12, 1, 0x12, 0x1B}, {13, 1, 0x13, 0x1C}, {16, 1, 0x12, 0x1B}, {17, 1, 0x13, 0x1C}});
+}
+
+std::vector<Button> tribune_buttons() {
+    std::vector<Button> b = table({{13, 3, 0x12, 0x1B}, {14, 3, 0x13, 0x1C}, {16, 1, 0x04, 0x04}});
+    for (int row = 5; row <= 9; ++row) {
+        const auto pair = table({{12, row, 0x12, 0x1B}, {13, row, 0x13, 0x1C}});
+        b.insert(b.end(), pair.begin(), pair.end());
+    }
+    return b;
+}
+
+std::vector<Button> legion_buttons() {
+    return table({{18, 2, 0x12, 0x1B}, {18, 3, 0x1D, 0x1E}, {18, 4, 0x13, 0x1C}, {16, 9, 0x12, 0x1B},
+                  {17, 9, 0x13, 0x1C}, {16, 10, 0x12, 0x1B}, {17, 10, 0x13, 0x1C}});
+}
+
+std::vector<Button> governor_buttons() {
+    return table({{18, 1, 0x1D, 0x1E}, {18, 2, 0x1D, 0x1E}, {18, 4, 0x1D, 0x1E}, {18, 8, 0x1D, 0x1E},
+                  {18, 10, 0x1D, 0x1E}});
+}
+
+std::vector<Button> governor_dialog_buttons(GovernorDialog dialog) {
+    if (dialog != GovernorDialog::Salary && dialog != GovernorDialog::Donation) return {};
+    return table({{12, 6, 0x12, 0x1B}, {13, 6, 0x13, 0x1C}});
+}
+
 int governor_dialog_arrow(GovernorDialog dialog, int x, int y) {
     if (dialog != GovernorDialog::Salary && dialog != GovernorDialog::Donation) return 0;
     if (y < 6 * 16 || y >= 7 * 16) return 0;

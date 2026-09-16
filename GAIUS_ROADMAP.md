@@ -287,6 +287,12 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 - [x] **The governor's three dialogs** (2026-09-16, findings section 41.4) -- the promotion requirements, the salary and the donation, drawn over the governor's screen with their arrows; the donation pays when its dialog ends.
 
+- [x] **The Options screen** (2026-09-17, findings section 42) -- the game and scroll speeds, sound, display options (including the messages option), pause, restart and exit, in the original's art (`ui/options_screen.hpp`); the settings are `CAESAR.INF`'s 28 bytes, kept in Gaius's own copy. The game speed is set here again.
+- [x] **The buttons** (2026-09-17, findings section 42.1) -- `0x0D41D` / `0x0D521` transcribed (`ui/buttons.hpp`): pressed frames, held arrows repeating, toggles, radio buttons and act-on-release.
+- [x] **The statue's key gate** (2026-09-17, findings section 42.4) -- "c" then "B"; `2EF9:0031` is the key before the last.
+
+Every Phase 7 item is done. Without effect until later phases: the scroll speed and the sound switches (Phase 9's audio), and the position indicator and icon name options (the original control panel, Phase 8).
+
 ---
 
 ## Phase 8 — Format completeness & save write-back

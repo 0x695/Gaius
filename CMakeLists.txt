@@ -118,6 +118,8 @@ add_library(gaius_ui STATIC
   ui/maps_screen.cpp
   ui/name_entry.cpp
   ui/interface.cpp
+  ui/buttons.cpp
+  ui/options_screen.cpp
   ui/forum_screens.cpp
   ui/toolbar.cpp
   ui/panel.cpp

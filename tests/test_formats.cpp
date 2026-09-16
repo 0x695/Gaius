@@ -53,7 +53,9 @@
 #include "systems/service.hpp"
 #include "ui/battle_screen.hpp"
 #include "ui/font.hpp"
+#include "ui/buttons.hpp"
 #include "ui/forum_screens.hpp"
+#include "ui/options_screen.hpp"
 #include "ui/interface.hpp"
 #include "ui/maps_screen.hpp"
 #include "ui/name_entry.hpp"
@@ -4036,6 +4038,166 @@ size_t compare_with_capture(const gaius::formats::IndexedImage& img, const Palet
     return bad;
 }
 
+void test_buttons() {
+    std::printf("test_buttons (0x0D41D / 0x0D521: momentary, toggle, radio, release)\n");
+    namespace ui = gaius::ui;
+    ui::Button b;
+    b.cx = 2;
+    b.cy = 3;
+    b.frame = 0x12;
+    b.pressed = 0x1B;
+    std::vector<ui::Button> buttons = {b};
+    ui::ButtonTracker t;
+    const ui::Pointer held{2 * 16 + 4, 3 * 16 + 4, true, false};
+    const ui::Pointer away{0, 0, false, false};
+    // Held: acts at once, then not until 12 held frames have passed and the
+    // timer (10, counted down once a frame here) is below 2.
+    std::vector<int> fires;
+    for (int frame = 0; frame < 40; ++frame)
+        if (ui::process_buttons(buttons, t, held) == 0) fires.push_back(frame);
+    CHECK(!fires.empty() && fires[0] == 0);
+    CHECK(fires.size() >= 2 && fires[1] >= 12);
+    CHECK(ui::process_buttons(buttons, t, away) == -1 && t.held_frames == 0);
+    // Drawn: pressed while its timer runs, then at rest.
+    buttons[0].state = 1;
+    auto img = ui::blank_canvas();
+    gaius::formats::PL8Sheet sheet;  // no frames: draw_block draws nothing, but the timer still runs
+    ui::draw_buttons(img, sheet, buttons, t, away);
+    CHECK(buttons[0].state == 0);
+
+    // A toggle flips once a press.
+    buttons[0].mode = ui::ButtonMode::Toggle;
+    buttons[0].state = 0;
+    CHECK(ui::process_buttons(buttons, t, held) == 0 && buttons[0].state == 1);
+    CHECK(ui::process_buttons(buttons, t, held) == -1 && buttons[0].state == 1);
+    ui::process_buttons(buttons, t, away);
+    CHECK(ui::process_buttons(buttons, t, held) == 0 && buttons[0].state == 0);
+
+    // A release button acts when the button is let go over it.
+    buttons[0].mode = ui::ButtonMode::Release;
+    ui::process_buttons(buttons, t, away);
+    CHECK(ui::process_buttons(buttons, t, held) == -1);
+    ui::Pointer released = held;
+    released.left_held = false;
+    released.left_released = true;
+    CHECK(ui::process_buttons(buttons, t, released) == 0 && buttons[0].state == 5);
+
+    // A radio button acts every held frame and becomes the chosen one.
+    ui::Button r = b;
+    r.cx = 5;
+    r.mode = ui::ButtonMode::Radio;
+    buttons = {b, r};
+    buttons[0].mode = ui::ButtonMode::Radio;
+    ui::Pointer on_r{5 * 16, 3 * 16, true, false};
+    CHECK(ui::process_buttons(buttons, t, on_r) == 1 && t.radio == 1);
+    CHECK(ui::process_buttons(buttons, t, on_r) == 1);
+    CHECK(ui::button_at(buttons, 5 * 16 + 15, 3 * 16 + 15) == 1 && ui::button_at(buttons, 6 * 16, 3 * 16) == -1);
+}
+
+void test_options_screen() {
+    std::printf("test_options_screen (0x0B47D options, CAESAR.INF, 0x0F0D3 / 0x0F257 / 0x0EF28 dialogs)\n");
+    namespace ui = gaius::ui;
+    ui::GameOptions o = ui::default_options();
+    CHECK(o.speed() == 100 && o.scroll_speed() == 100 && o.effects() && o.tunes() && !o.city_sounds_off());
+    // The dialogs' handlers.
+    bool messages = true;
+    auto speed = ui::options_buttons(ui::OptionsDialog::Speed, o, messages);
+    CHECK(speed.size() == 5);
+    CHECK(!ui::options_dialog_button(ui::OptionsDialog::Speed, 0, speed, o, messages) && o.speed() == 100);
+    CHECK(!ui::options_dialog_button(ui::OptionsDialog::Speed, 1, speed, o, messages) && o.speed() == 90);
+    CHECK(!ui::options_dialog_button(ui::OptionsDialog::Speed, 3, speed, o, messages) && o.scroll_speed() == 90);
+    CHECK(ui::options_dialog_button(ui::OptionsDialog::Speed, 4, speed, o, messages));
+    for (int i = 0; i < 12; ++i) ui::options_dialog_button(ui::OptionsDialog::Speed, 1, speed, o, messages);
+    CHECK(o.speed() == 0);
+    auto sound = ui::options_buttons(ui::OptionsDialog::Sound, o, messages);
+    ui::options_dialog_button(ui::OptionsDialog::Sound, 1, sound, o, messages);
+    ui::options_dialog_button(ui::OptionsDialog::Sound, 2, sound, o, messages);
+    CHECK(!o.tunes() && o.city_sounds_off() && o.effects());
+    auto display = ui::options_buttons(ui::OptionsDialog::Display, o, messages);
+    CHECK(display.size() == 4 && display[2].mode == ui::ButtonMode::Toggle && display[2].state == 0);
+    display[2].state = 1;  // "Cancel messages" pressed in
+    display[1].state = 1;
+    ui::options_dialog_button(ui::OptionsDialog::Display, 2, display, o, messages);
+    ui::options_dialog_button(ui::OptionsDialog::Display, 1, display, o, messages);
+    CHECK(!messages && o.icon_name_off() && !o.position_indicator_off());
+    CHECK(ui::options_buttons(ui::OptionsDialog::None, o, messages).size() == 9);
+
+    // CAESAR.INF round trip.
+    const fs::path tmp = fs::temp_directory_path() / "gaius_test_caesar.inf";
+    CHECK(ui::save_options(tmp.string(), o));
+    ui::GameOptions back;
+    CHECK(ui::load_options(tmp.string(), back) && back.words == o.words);
+    std::error_code ec;
+    fs::remove(tmp, ec);
+
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    ui::GameOptions shipped;
+    if (ui::load_options((fs::path(dir) / "CAESAR.INF").string(), shipped))
+        CHECK(shipped.words == ui::default_options().words);
+    ui::InterfaceArt art;
+    try {
+        art = ui::load_interface_art(dir);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("interface files: ") + e.what());
+        return;
+    }
+    o = ui::default_options();
+    const auto menu = ui::compose_options_screen(art, ui::OptionsDialog::None, o, true);
+    // The speed, sound, display and leaving dialogs clear the screen first:
+    // nothing outside their panel at (0x20, 0x30).
+    for (auto d : {ui::OptionsDialog::Speed, ui::OptionsDialog::Sound, ui::OptionsDialog::Display,
+                   ui::OptionsDialog::Exit}) {
+        const auto img = ui::compose_options_screen(art, d, o, true);
+        const int rows = d == ui::OptionsDialog::Speed || d == ui::OptionsDialog::Exit ? 5 : 6;
+        int outside = 0;
+        for (int y = 0; y < 200; ++y)
+            for (int x = 0; x < 320; ++x) {
+                const bool in = x >= 0x20 && x < 0x20 + 16 * 16 && y >= 0x30 && y < 0x30 + rows * 16;
+                if (!in && img.pixels[static_cast<size_t>(y) * 320 + x] != 0) ++outside;
+            }
+        CHECK(outside == 0);
+    }
+    // The restart question sits over the menu, inside its 14 x 5 panel at (0x30, 0x70).
+    const auto restart = ui::compose_options_screen(art, ui::OptionsDialog::Restart, o, true);
+    int changed = 0, stray = 0;
+    for (int y = 0; y < 200; ++y)
+        for (int x = 0; x < 320; ++x) {
+            const size_t i = static_cast<size_t>(y) * 320 + x;
+            if (restart.pixels[i] == menu.pixels[i]) continue;
+            ++changed;
+            const bool in = x >= 0x30 && x < 0x30 + 14 * 16 && y >= 0x70 && y < 0x70 + 5 * 16;
+            // The menu's buttons are drawn again over the panel at (15, 9) and (15, 10).
+            if (!in) ++stray;
+        }
+    CHECK(changed > 0 && stray == 0);
+
+    // The advisor screens' button tables are the buttons they draw: drawn at
+    // rest over the composed screen, nothing changes.
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    const auto at_rest = [&](gaius::formats::IndexedImage img, std::vector<ui::Button> buttons) {
+        const auto before = img.pixels;
+        ui::ButtonTracker t;
+        ui::draw_buttons(img, art.blocks, buttons, t, ui::Pointer{});
+        return img.pixels == before;
+    };
+    CHECK(at_rest(ui::compose_treasurer_screen(*st, art), ui::treasurer_buttons()));
+    CHECK(at_rest(ui::compose_tribune_screen(*st, art), ui::tribune_buttons()));
+    const auto picture = ui::blank_canvas();
+    CHECK(at_rest(ui::compose_governor_screen(*st, art, picture), ui::governor_buttons()));
+    CHECK(at_rest(ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Salary),
+                  ui::governor_dialog_buttons(ui::GovernorDialog::Salary)));
+    // Held down, a button shows its pressed frame.
+    auto treasurer = ui::compose_treasurer_screen(*st, art);
+    auto buttons = ui::treasurer_buttons();
+    ui::ButtonTracker t;
+    const ui::Pointer down{12 * 16 + 3, 16 + 3, true, false};
+    CHECK(ui::process_buttons(buttons, t, down) == 0);
+    const auto rest = treasurer.pixels;
+    ui::draw_buttons(treasurer, art.blocks, buttons, t, down);
+    CHECK(treasurer.pixels != rest);
+}
+
 void test_governor_dialogs() {
     std::printf("test_governor_dialogs (0x0BE7C requirements, 0x0C06A salary, 0x0C17D donation)\n");
     namespace ui = gaius::ui;
@@ -5809,6 +5971,8 @@ int main() {
     test_name_entry();
     test_forum_screens_art();
     test_governor_dialogs();
+    test_buttons();
+    test_options_screen();
     test_campaign_new_game();
     test_ui_panel_pages();
     test_province_render_corpus();
