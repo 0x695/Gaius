@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "systems/forum.hpp"
+#include "systems/military.hpp"
 
 namespace gaius::ui {
 
@@ -119,6 +120,85 @@ formats::IndexedImage compose_treasurer_screen(const model::CityState& state, co
     draw_block(img, art.blocks, 19, 13 * 16, 16);
     draw_block(img, art.blocks, 18, 16 * 16, 16);
     draw_block(img, art.blocks, 19, 17 * 16, 16);
+    return img;
+}
+
+formats::IndexedImage compose_legion_screen(const model::CityState& state, const InterfaceArt& art,
+                                            const formats::PL8Sheet& cohort_sprites, int frame_counter) {
+    namespace military = systems::military;
+    formats::IndexedImage img = blank_canvas();
+    // 0x0B151, once.
+    draw_panel(img, art, 0, 0, 20, 12);
+    draw_inset(img, art, 0x10, 0x10, 16, 5);
+    draw_text(img, art, Font::Font1, 0x20, 0x06, "          legion");
+    draw_text(img, art, Font::Font1, 0x40, 0x64, "    (     )   Regulars");
+    draw_text(img, art, Font::Font1, 0x40, 0x73, "    (     )   Irregulars");
+    draw_text(img, art, Font::Font1, 0x40, 0x82, "    (     )   Auxiliaries");
+    draw_text(img, art, Font::Font1, 0x20, 0x94, "        Wages bill");
+    draw_text(img, art, Font::Font1, 0x20, 0xA4, "        Conscription");
+    draw_text(img, art, Font::Mini, 0xA0, 0x28, "morale");
+    draw_text(img, art, Font::Mini, 0xA0, 0x3C, "regulars");
+    draw_text(img, art, Font::Mini, 0xA0, 0x46, "irregulars");
+    draw_text(img, art, Font::Mini, 0xA0, 0x50, "auxiliaries");
+    draw_number(img, art, Font::Font1, 0xA8, 0x06, g(state, 0x6CA6), 2, 1);
+    draw_number(img, art, Font::Font1, 0x28, 0x64, g(state, military::kRegulars), 2, 1);
+    draw_number(img, art, Font::Font1, 0x68, 0x64, g(state, military::kRegularsLastYear), 2, 1);
+    draw_number(img, art, Font::Font1, 0x28, 0x73, g(state, military::kIrregulars), 2, 1);
+    draw_number(img, art, Font::Font1, 0x68, 0x73, g(state, military::kIrregularsLastYear), 2, 1);
+    draw_number(img, art, Font::Font1, 0x28, 0x82, g(state, military::kAuxiliaries), 2, 1);
+    draw_number(img, art, Font::Font1, 0x68, 0x82, g(state, military::kAuxiliariesLastYear), 2, 1);
+
+    // 0x0E167, each frame. The buttons (DS:0x0094): the next Cohort (18, 2),
+    // mobilize (18, 3), the previous (18, 4); the wages (16-17, 9) and
+    // conscription (16-17, 10).
+    draw_block(img, art.blocks, 18, 18 * 16, 2 * 16);
+    draw_block(img, art.blocks, 29, 18 * 16, 3 * 16);
+    draw_block(img, art.blocks, 19, 18 * 16, 4 * 16);
+    draw_block(img, art.blocks, 18, 16 * 16, 9 * 16);
+    draw_block(img, art.blocks, 19, 17 * 16, 9 * 16);
+    draw_block(img, art.blocks, 18, 16 * 16, 10 * 16);
+    draw_block(img, art.blocks, 19, 17 * 16, 10 * 16);
+    // The stone under the wages and conscription, repainted every frame
+    // (0x0E19F sets DS:0x6D8B = 2 before 0x0D623); then "    Dn" and "   %"
+    // with the digits written over their start (mode 2)
+    draw_stone(img, art, 0xC0, 0x90, 3, 2);
+    draw_text(img, art, Font::Font1, 0xD0, 0x94, number_text(g(state, military::kArmyWages), 3, 2) + " Dn");
+    draw_text(img, art, Font::Font1, 0xD8, 0xA4, number_text(g(state, military::kConscription), 2, 2) + " %");
+    // 1F6F:21ED: the Cohort's areas cleared with the inset's middle (frame 0xD).
+    const auto clear = [&](int x, int y, int cols, int rows) {
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < cols; ++c) draw_block(img, art.blocks, 0xD, x + c * 16, y + r * 16);
+    };
+    clear(0x14, 0x14, 5, 4);
+    clear(0xA0, 0x14, 6, 1);
+    clear(0xF0, 0x28, 1, 3);
+    // 0x0E54C: the Cohort numbered DS:0x6C0A, if there is one.
+    const int slot = systems::forum::selected_cohort_slot(state);
+    if (slot < 0) return img;
+    const auto& raw = state.objects[static_cast<size_t>(slot)].raw;
+    const int number = static_cast<int8_t>(raw[0x2A]);
+    if (number == 0) {
+        draw_text(img, art, Font::Mini, 0x18, 0x16, "prima cohors");
+    } else {
+        draw_text(img, art, Font::Mini, 0x18, 0x16, number_text(number - 1, 1, 2) + "   cohors");
+    }
+    static constexpr const char* kEmblems[] = {"   Eagle    ", "  Rabbit    ", "   Snake    ", "   Fish     ",
+                                               "   Horse    ", "    Pig     ", "   Wolf     ", "   Hero     ",
+                                               " Explorer   ", " Protector  "};
+    if (number >= 0 && number < 10) draw_text(img, art, Font::Mini, 0x18, 0x4C, kEmblems[number]);
+    const int mode = raw[0x31];
+    static constexpr const char* kStates[] = {"    waiting     ", "   patrolling   ", "   attacking    ",
+                                              "   retiring     ", "  demobilized   "};
+    draw_text(img, art, Font::Mini, 0xA0, 0x16, mode >= 10 && mode <= 14 ? kStates[mode - 10] : "    nothing     ");
+    int frame = number * 4;
+    if (mode != military::kCohortDemobilized) {
+        draw_number(img, art, Font::Mini, 0xF0, 0x28, static_cast<int8_t>(raw[military::kCohortMorale]), 1, 0);
+        draw_number(img, art, Font::Mini, 0xF0, 0x3C, static_cast<int8_t>(raw[military::kCohortRegulars]), 2, 0);
+        draw_number(img, art, Font::Mini, 0xF0, 0x46, static_cast<int8_t>(raw[military::kCohortIrregulars]), 2, 0);
+        draw_number(img, art, Font::Mini, 0xF0, 0x50, static_cast<int8_t>(raw[military::kCohortAuxiliaries]), 2, 0);
+        frame += (frame_counter >> 2) & 3;
+    }
+    draw_sprite(img, cohort_sprites, frame, 0x30, 0x28);
     return img;
 }
 

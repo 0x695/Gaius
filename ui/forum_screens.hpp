@@ -21,6 +21,14 @@ formats::IndexedImage compose_history_screen(const model::CityState& state, cons
 // and the two tax rates with their arrows (DS:0x0404).
 formats::IndexedImage compose_treasurer_screen(const model::CityState& state, const InterfaceArt& art);
 
+// 0x0B151 + 0x0E167, the Military Advisor: the Legion's Centuries, the
+// Cohort on display (DS:0x6C0A) with its standard from SPRITE2.PL8
+// (`cohort_sprites`, loaded at 630D:0000), the wages and conscription, and
+// the buttons (DS:0x0094). `frame_counter` is DS:0x6D3A, which animates the
+// standard.
+formats::IndexedImage compose_legion_screen(const model::CityState& state, const InterfaceArt& art,
+                                            const formats::PL8Sheet& cohort_sprites, int frame_counter);
+
 // 0x09D22, the man in green: the industry report.
 formats::IndexedImage compose_industry_screen(const model::CityState& state, const InterfaceArt& art);
 

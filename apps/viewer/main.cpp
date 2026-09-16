@@ -780,7 +780,8 @@ int main(int argc, char** argv) {
     // The Forum pages Gaius draws in the original's art, when its files are there.
     const auto original_forum_screen = [&]() {
         return screen == Screen::Forum && have_interface_art &&
-               (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry || forum_tab == viewer::kTreasurer);
+               (forum_tab == viewer::kHistory || forum_tab == viewer::kIndustry || forum_tab == viewer::kTreasurer ||
+                (forum_tab == viewer::kLegion && have_province_sprites));
     };
     const auto page_screen = [&]() {
         return screen == Screen::Forum || screen == Screen::Promotion ||
@@ -1184,6 +1185,26 @@ int main(int argc, char** argv) {
                     if (cell == 16) forum::adjust(state, forum::Control::IndustrialTax, 1);
                     if (cell == 17) forum::adjust(state, forum::Control::IndustrialTax, -1);
                     if (cell == 12 || cell == 13 || cell == 16 || cell == 17) return;
+                }
+                if (forum_tab == viewer::kLegion) {
+                    // DS:0x0094's buttons.
+                    namespace forum = systems::forum;
+                    const int cx = lx / 16, cy = ly / 16;
+                    bool hit = true;
+                    if (cx == 18 && cy == 2) {
+                        forum::next_cohort(state);
+                    } else if (cx == 18 && cy == 3) {
+                        forum::toggle_mobilized(state);
+                    } else if (cx == 18 && cy == 4) {
+                        forum::previous_cohort(state);
+                    } else if ((cx == 16 || cx == 17) && cy == 9) {
+                        forum::adjust(state, forum::Control::ArmyWages, cx == 16 ? 1 : -1);
+                    } else if ((cx == 16 || cx == 17) && cy == 10) {
+                        forum::adjust(state, forum::Control::Conscription, cx == 16 ? 1 : -1);
+                    } else {
+                        hit = false;
+                    }
+                    if (hit) return;
                 }
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
                 return;
@@ -1617,7 +1638,10 @@ int main(int argc, char** argv) {
                     const formats::IndexedImage advisor =
                         forum_tab == viewer::kHistory     ? ui::compose_history_screen(state, interface_art)
                         : forum_tab == viewer::kIndustry  ? ui::compose_industry_screen(state, interface_art)
-                                                          : ui::compose_treasurer_screen(state, interface_art);
+                        : forum_tab == viewer::kLegion
+                            ? ui::compose_legion_screen(state, interface_art, province_sprites.units,
+                                                        static_cast<int>(sim.ticks))
+                            : ui::compose_treasurer_screen(state, interface_art);
                     ui::canvas_to_rgb(advisor, interface_art.palette, frame);
                 }
             } else if (save_mode && screen == Screen::Battle && have_battle_art) {

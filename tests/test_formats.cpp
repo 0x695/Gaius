@@ -4148,6 +4148,33 @@ void test_forum_screens_art() {
             CHECK(unmatched == 0 && drawn > 0);
         }
     }
+
+    // The Military Advisor against its capture: "legion 2", the Prima Cohors
+    // (the Eagle) waiting with morale 5 and 2 regular Centuries, wages 20,
+    // conscription 10. The standard's animation frame is whichever matches.
+    const fs::path legion_shot = screens / "2053333-caesar-dos-your-military-might.png";
+    const fs::path sprite2 = fs::path(dir) / "SPRITE2.PL8";
+    if (fs::exists(legion_shot) && fs::exists(sprite2)) {
+        const gaius::formats::PL8Sheet cohort_sprites = gaius::formats::pl8::load(sprite2.string());
+        auto l = std::make_unique<CityState>(gaius::model::blank_state());
+        set_global_word(*l, 0x6CA6, 2);
+        set_global_word(*l, gaius::systems::military::kRegulars, 2);
+        set_global_word(*l, gaius::systems::military::kRegularsLastYear, 2);
+        set_global_word(*l, gaius::systems::military::kArmyWages, 20);
+        set_global_word(*l, gaius::systems::military::kConscription, 10);
+        auto& c = l->objects[0].raw;
+        c[0x06] = 1;
+        c[0x07] = gaius::systems::military::kCohortType;
+        c[0x31] = 10;
+        c[gaius::systems::military::kCohortMorale] = 5;
+        c[gaius::systems::military::kCohortRegulars] = 2;
+        size_t best = SIZE_MAX;
+        for (int counter = 0; counter < 16; counter += 4) {
+            const gaius::formats::IndexedImage legion = gaius::ui::compose_legion_screen(*l, art, cohort_sprites, counter);
+            best = std::min(best, compare_with_capture(legion, art.palette, legion_shot, {{72, 92, 24, 24}}));
+        }
+        CHECK(best == 0);
+    }
 }
 
 // The maps screen against the DOSBox capture of it (road layout, the city
