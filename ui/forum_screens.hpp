@@ -29,6 +29,10 @@ formats::IndexedImage compose_treasurer_screen(const model::CityState& state, co
 formats::IndexedImage compose_legion_screen(const model::CityState& state, const InterfaceArt& art,
                                             const formats::PL8Sheet& cohort_sprites, int frame_counter);
 
+// 0x084B1: the funds warning -- a 20 x 12 panel and the six lines at
+// DS:0x085F in FONT1 from x 0.
+formats::IndexedImage compose_funds_warning_screen(const InterfaceArt& art);
+
 // 0x09D22, the man in green: the industry report.
 formats::IndexedImage compose_industry_screen(const model::CityState& state, const InterfaceArt& art);
 

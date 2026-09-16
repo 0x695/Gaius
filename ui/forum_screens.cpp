@@ -202,6 +202,20 @@ formats::IndexedImage compose_legion_screen(const model::CityState& state, const
     return img;
 }
 
+formats::IndexedImage compose_funds_warning_screen(const InterfaceArt& art) {
+    formats::IndexedImage img = blank_canvas();
+    draw_panel(img, art, 0, 0, 20, 12);
+    struct Line { int y; const char* text; };
+    static constexpr Line kLines[] = {{0x1E, "                WARNING !               "},
+                                      {0x3C, "   The province's funds are now at or   "},
+                                      {0x50, "     below 1,000 Denarii. Excessive     "},
+                                      {0x64, "   spending may bankrupt you, so watch  "},
+                                      {0x78, "          your funds carefully.         "},
+                                      {0xA0, "       THIS IS YOUR ONLY WARNING !!     "}};
+    for (const Line& l : kLines) draw_text(img, art, Font::Font1, 0, l.y, l.text);
+    return img;
+}
+
 formats::IndexedImage compose_industry_screen(const model::CityState& state, const InterfaceArt& art) {
     namespace forum = systems::forum;
     formats::IndexedImage img = blank_canvas();

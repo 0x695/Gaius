@@ -4175,6 +4175,11 @@ void test_forum_screens_art() {
         }
         CHECK(best == 0);
     }
+
+    const fs::path warning_shot = screens / "7907838-caesar-dos-time-to-increase-taxes.png";
+    if (fs::exists(warning_shot))
+        CHECK(compare_with_capture(gaius::ui::compose_funds_warning_screen(art), art.palette, warning_shot,
+                                   {{280, 120, 40, 40}}) == 0);
 }
 
 // The maps screen against the DOSBox capture of it (road layout, the city

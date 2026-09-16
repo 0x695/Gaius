@@ -1209,6 +1209,10 @@ int main(int argc, char** argv) {
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
                 return;
             }
+            if (screen == Screen::Notice && have_interface_art) {
+                apply_page_action(viewer::kActionContinue);  // 0x084B1 waits for a click
+                return;
+            }
             if (page_screen()) {
                 const ui::Page page = current_page();
                 const int action = ui::hit_test(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), lx, ly);
@@ -1633,6 +1637,8 @@ int main(int argc, char** argv) {
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
                 if (screen == Screen::NameEntry) ui::compose_name_entry(name_entry, name_art, frame);
+                if (screen == Screen::Notice && have_interface_art)
+                    ui::canvas_to_rgb(ui::compose_funds_warning_screen(interface_art), interface_art.palette, frame);
                 if (original_forum_screen()) {
                     // The advisors in the original's art.
                     const formats::IndexedImage advisor =
