@@ -1753,7 +1753,7 @@ The start screen's "Choose name" button (`0x27F84`) calls it with the button rec
 - The platform layer gained `CommandType::TextKey` and `set_text_entry`: SDL's text input while a field is open. On a phone that brings up the on-screen keyboard, though the arrows make it unnecessary.
 - The viewer keeps the name like `DS:0x0DD0`: across new games, written into each new game's state, and read back from a loaded game.
 - **Checked** by `test_name_entry`: both arrows including the down arrow's quirk, every key, the clicks, and the name in all 17 saves.
-- **Not modeled:** the governor's screen's own button (the viewer's governor page doesn't show the name).
+- The viewer's governor page shows the name (2026-09-16). **Not modeled:** the governor's screen's own name button.
 
 ### 38.4 MINIFONT's colour (2026-09-16)
 

@@ -28,6 +28,7 @@
 #include "systems/forum.hpp"
 #include "systems/military.hpp"
 #include "systems/plebs.hpp"
+#include "ui/name_entry.hpp"
 #include "ui/panel.hpp"
 
 namespace gaius::viewer {
@@ -68,6 +69,12 @@ inline const char* rank_name(int rank) {
     return rank >= 0 && rank < static_cast<int>(systems::administration::kRankNames.size())
                ? systems::administration::kRankNames[static_cast<size_t>(rank)]
                : "?";
+}
+
+inline std::string trimmed(const std::string& t) {
+    const size_t a = t.find_first_not_of(' ');
+    if (a == std::string::npos) return std::string();
+    return t.substr(a, t.find_last_not_of(' ') - a + 1);
 }
 
 inline std::string year_text(int year) {
@@ -269,6 +276,8 @@ inline ui::Page forum_page(const model::CityState& s, ForumTab tab, int speed = 
         case kGovernor:
         case kForumTabCount: {
             page.title = "The Governor";
+            // 0x0C328: the governor's screen shows the name (DS:0x5858).
+            page.rows.push_back({"Name", trimmed(ui::governor_name(s))});
             page.rows.push_back({"Rank", rank_name(g(s, systems::administration::kRank))});
             page.rows.push_back({"Province", province_name(g(s, 0x6CA6))});
             page.rows.push_back(detail::control_row(s, "Salary", forum::Control::Salary, " Dn"));
@@ -344,12 +353,6 @@ inline ui::Page promotion_page(const model::CityState& s, bool to_caesar) {
 // The start screen (0x27DDF): the funding level and the difficulty, each with
 // its arrows (0x27F54/0x27F60, 0x27F6C/0x27F78), and the governor's name, which
 // the engine keeps at DS:0x5858 ("Octavian" until the player types one).
-inline std::string trimmed(const std::string& t) {
-    const size_t a = t.find_first_not_of(' ');
-    if (a == std::string::npos) return std::string();
-    return t.substr(a, t.find_last_not_of(' ') - a + 1);
-}
-
 // The start screen (0x27DDF). `name` is the governor's 12-character name.
 inline ui::Page start_page(int funding_level, int difficulty, const std::string& name = "  Octavian  ") {
     namespace campaign = systems::campaign;
