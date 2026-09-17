@@ -16,14 +16,24 @@ else()
   add_compile_options(-Wall -Wextra)
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${PROJECT_SOURCE_DIR})
+
+# GAIUS_GAME_LIBRARY: build the libraries and the game as a shared library
+# named "main", which SDL's Android activity loads (android/app/jni/src). No
+# tools, no tests.
+option(GAIUS_GAME_LIBRARY "Build the game as libmain (Android) instead of executables" OFF)
 
 # --- SDL2 (Phase 1+: platform layer and viewer app) -----------------------
-find_package(SDL2 QUIET)
-if(NOT SDL2_FOUND)
-  find_package(PkgConfig QUIET)
-  if(PkgConfig_FOUND)
-    pkg_check_modules(SDL2 REQUIRED sdl2)
+if(TARGET SDL2::SDL2)
+  # Built alongside (Android's jni CMakeLists adds SDL's source first).
+  set(SDL2_LIBRARIES SDL2::SDL2)
+else()
+  find_package(SDL2 QUIET)
+  if(NOT SDL2_FOUND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(SDL2 REQUIRED sdl2)
+    endif()
   endif()
 endif()
 
@@ -50,38 +60,7 @@ add_library(gaius_formats STATIC
   formats/gtl/gtl.cpp
   formats/screen_data/screen_data.cpp
 )
-target_include_directories(gaius_formats PUBLIC ${CMAKE_SOURCE_DIR})
-
-# --- CLI tools -----------------------------------------------------------
-add_executable(dump_vpx tools/dump_vpx.cpp)
-target_link_libraries(dump_vpx PRIVATE gaius_formats)
-target_link_libraries(dump_vpx PRIVATE stb_image_write)
-
-add_executable(dump_vas tools/dump_vas.cpp)
-target_link_libraries(dump_vas PRIVATE gaius_formats stb_image_write)
-
-add_executable(xmi2mid tools/xmi2mid.cpp)
-target_link_libraries(xmi2mid PRIVATE gaius_formats)
-
-add_executable(dump_pl8 tools/dump_pl8.cpp)
-target_link_libraries(dump_pl8 PRIVATE gaius_formats)
-target_link_libraries(dump_pl8 PRIVATE stb_image_write)
-
-add_executable(empire_view tools/empire_view.cpp)
-target_link_libraries(empire_view PRIVATE gaius_formats)
-target_link_libraries(empire_view PRIVATE stb_image_write)
-
-add_executable(save_inspect tools/save_inspect.cpp)
-target_link_libraries(save_inspect PRIVATE gaius_formats gaius_model)
-
-add_executable(bindiff_exe tools/bindiff_exe.cpp)
-target_link_libraries(bindiff_exe PRIVATE gaius_formats)
-
-add_executable(sim_check tools/sim_check.cpp)
-target_link_libraries(sim_check PRIVATE gaius_formats gaius_model gaius_systems)
-
-add_executable(month_check tools/month_check.cpp)
-target_link_libraries(month_check PRIVATE gaius_formats gaius_model gaius_systems)
+target_include_directories(gaius_formats PUBLIC ${PROJECT_SOURCE_DIR})
 
 # --- model library (Phase 2: normalized data model, Layer 2) ---------------
 add_library(gaius_model STATIC
@@ -139,9 +118,6 @@ add_library(gaius_render STATIC
 )
 target_link_libraries(gaius_render PUBLIC gaius_systems)
 
-add_executable(render_city tools/render_city.cpp)
-target_link_libraries(render_city PRIVATE gaius_render stb_image_write)
-
 # --- vendored ymfm (BSD-3-Clause): the YM3812 the music plays on -----------
 add_library(ymfm STATIC
   third_party/ymfm/ymfm_opl.cpp
@@ -163,14 +139,11 @@ add_library(gaius_audio STATIC
 )
 target_link_libraries(gaius_audio PUBLIC gaius_formats ymfm)
 
-add_executable(render_audio tools/render_audio.cpp)
-target_link_libraries(render_audio PRIVATE gaius_audio)
-
 # --- platform layer (Phase 1: window/input/paths) --------------------------
 # The platform rules that need no SDL (where Gaius's folders go), so the tests
 # can link them.
 add_library(gaius_platform_rules STATIC platform/path_rules.cpp)
-target_include_directories(gaius_platform_rules PUBLIC ${CMAKE_SOURCE_DIR})
+target_include_directories(gaius_platform_rules PUBLIC ${PROJECT_SOURCE_DIR})
 
 add_library(gaius_platform STATIC
   platform/window.cpp
@@ -179,16 +152,63 @@ add_library(gaius_platform STATIC
   platform/game_import.cpp
 )
 target_link_libraries(gaius_platform PUBLIC gaius_platform_rules)
-target_include_directories(gaius_platform PUBLIC ${CMAKE_SOURCE_DIR} ${SDL2_INCLUDE_DIRS})
+target_include_directories(gaius_platform PUBLIC ${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(gaius_platform PUBLIC ${SDL2_LIBRARIES})
 target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 
+set(GAIUS_GAME_LIBS gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform
+    stb_image_write)
+
+if(GAIUS_GAME_LIBRARY)
+  # --- the game for Android: libmain.so --------------------------------------
+  add_library(main SHARED apps/viewer/main.cpp)
+  target_link_libraries(main PRIVATE ${GAIUS_GAME_LIBS})
+  return()
+endif()
+
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
-target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform stb_image_write)
+target_link_libraries(gaius_viewer PRIVATE ${GAIUS_GAME_LIBS})
 # The language files sit beside the executable (ui/strings.hpp).
 add_custom_command(TARGET gaius_viewer POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/lang $<TARGET_FILE_DIR:gaius_viewer>/lang)
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/lang $<TARGET_FILE_DIR:gaius_viewer>/lang)
+
+# --- CLI tools -----------------------------------------------------------
+add_executable(dump_vpx tools/dump_vpx.cpp)
+target_link_libraries(dump_vpx PRIVATE gaius_formats)
+target_link_libraries(dump_vpx PRIVATE stb_image_write)
+
+add_executable(dump_vas tools/dump_vas.cpp)
+target_link_libraries(dump_vas PRIVATE gaius_formats stb_image_write)
+
+add_executable(xmi2mid tools/xmi2mid.cpp)
+target_link_libraries(xmi2mid PRIVATE gaius_formats)
+
+add_executable(dump_pl8 tools/dump_pl8.cpp)
+target_link_libraries(dump_pl8 PRIVATE gaius_formats)
+target_link_libraries(dump_pl8 PRIVATE stb_image_write)
+
+add_executable(empire_view tools/empire_view.cpp)
+target_link_libraries(empire_view PRIVATE gaius_formats)
+target_link_libraries(empire_view PRIVATE stb_image_write)
+
+add_executable(save_inspect tools/save_inspect.cpp)
+target_link_libraries(save_inspect PRIVATE gaius_formats gaius_model)
+
+add_executable(bindiff_exe tools/bindiff_exe.cpp)
+target_link_libraries(bindiff_exe PRIVATE gaius_formats)
+
+add_executable(sim_check tools/sim_check.cpp)
+target_link_libraries(sim_check PRIVATE gaius_formats gaius_model gaius_systems)
+
+add_executable(month_check tools/month_check.cpp)
+target_link_libraries(month_check PRIVATE gaius_formats gaius_model gaius_systems)
+
+add_executable(render_city tools/render_city.cpp)
+target_link_libraries(render_city PRIVATE gaius_render stb_image_write)
+
+add_executable(render_audio tools/render_audio.cpp)
+target_link_libraries(render_audio PRIVATE gaius_audio)
 
 # --- tests -----------------------------------------------------------------
 enable_testing()

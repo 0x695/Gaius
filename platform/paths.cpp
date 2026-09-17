@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::string env(const char* name) {
+[[maybe_unused]] std::string env(const char* name) {
     const char* v = std::getenv(name);
     return v ? std::string(v) : std::string();
 }
