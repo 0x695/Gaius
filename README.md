@@ -56,12 +56,15 @@ model/      Layer 2 — normalized data model (Phase 2): CityState/CityMap/Actor
 systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, land-value gate + population), construction.hpp/.cpp (Phase 5, DS:127C command dispatch + placement)
 ui/         scalable toolbar (Phase 5) — metrics/font/toolbar, no SDL dependency
 platform/   window/input/paths abstraction (Phase 1) — see GAIUS_MASTERPLAN.md section 5a
-apps/       gaius_viewer (EMPIRE2 + .SAV) and android_hello (Android platform-layer smoke test)
+apps/       gaius_viewer: the game (a Caesar folder, a save or an EMPIRE2 scenario); with no argument it finds the game or explains where it goes
 android/    Android target — see android/README.md
 tools/      CLI utilities built on formats/ and model/
 tests/      dependency-free test harness (see above)
 docs/       FORMATS.md and findings addenda
 audio/      the game's sound driver (AIL 2.14, transcribed) and sound layer, no SDL dependency
+lang/       Gaius's own texts in other languages (ui/strings.hpp); scripts/extract_strings.py makes the template
+scripts/    small scripts over the tools
+packaging/  the Linux package and Steam Deck notes
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
 third_party/ymfm/  vendored ymfm, the YM3812 emulator the music plays on (BSD-3-Clause)
 ```

@@ -39,12 +39,15 @@ inline std::string find_game_folder(const ui::Settings& settings) {
         candidates.push_back(platform::paths().game);
     } catch (const std::exception&) {
     }
+#if !defined(__ANDROID__)
+    // Beside Gaius and the working folder (an Android app has neither).
     if (char* base = SDL_GetBasePath()) {
         candidates.push_back(base);
         SDL_free(base);
     }
     std::error_code ec;
     candidates.push_back(std::filesystem::current_path(ec).string());
+#endif
     for (const std::string& dir : candidates)
         if (platform::looks_like_game_folder(dir)) return dir;
     return std::string();

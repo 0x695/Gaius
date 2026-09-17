@@ -29,6 +29,7 @@ struct Settings {
     std::string language = "en";
     std::string game_dir;  // empty: look in the usual places
     bool gamepad_cursor = true;  // a pointer moved by the left stick on screens without a map
+    bool touch_hints_seen = false;  // the touch controls page has been shown once
     // Controls: a command's name (platform::command_name) to a key name
     // (SDL_GetKeyName) or a gamepad button name (SDL's), for the commands the
     // player has changed. Commands not listed keep their default.

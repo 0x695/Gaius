@@ -271,6 +271,8 @@ std::vector<ui::Catalog> load_languages() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // A phone or tablet shows the game's 320 x 200 screen in landscape.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     // Gaius's settings (ui/settings.hpp), before anything else: they may name
     // the game's folder.
     ui::Settings settings;
@@ -761,6 +763,7 @@ int main(int argc, char** argv) {
     ui::NameEntry name_entry;
     bool name_return_to_forum = false;  // opened from the governor's screen rather than the start screen
     Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
+    bool notice_is_hints = false;         // the notice page shows the touch hints, not the funds warning
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
     Screen files_return = Screen::Forum;  // where the save / load page goes back to
@@ -919,6 +922,7 @@ int main(int argc, char** argv) {
             case Screen::Forum:
                 return viewer::forum_page(state, forum_tab, sim.speed, rating_hint, have_empire_map && have_icons);
             case Screen::Notice:
+                if (notice_is_hints) return viewer::touch_hints_page();
                 return viewer::notice_page(systems::messages::kFundsWarning.data(),
                                            systems::messages::kFundsWarning.size());
             case Screen::Promotion: return viewer::promotion_page(state, promotion_to_caesar);
@@ -965,7 +969,12 @@ int main(int argc, char** argv) {
         if (screen == Screen::Notice) {
             if (action == viewer::kActionContinue) {
                 screen = notice_return;
-                time_running = true;
+                time_running = !notice_is_hints || (notice_return != Screen::Start && !start_paused);
+                if (notice_is_hints) {
+                    notice_is_hints = false;
+                    settings.touch_hints_seen = true;
+                    if (!settings_path.empty() && screenshot_path.empty()) ui::save_settings(settings_path, settings);
+                }
             }
             return;
         }
@@ -1652,6 +1661,93 @@ int main(int argc, char** argv) {
             city_image_dirty = province_image_dirty = true;
         };
 
+        // Dragging a drag-built command cell by cell (the mouse's SelectMove,
+        // a finger's drag): the engine calls its handler for each cell the
+        // cursor passes over.
+        const auto select_move = [&](int px, int py) {
+        // Dragging a drag-built command: the engine calls its
+        // handler for each cell the cursor passes over, so step
+        // one cell at a time from the last placed cell.
+        if (save_mode && screen == Screen::Province) {
+            // Clear, Road, Wall and Highway follow the pointer cell by cell.
+            const int id = kProvinceCommands[province_command].id;
+            if (province_drag_x < 0 || !(id == 35 || id == 36 || id == 37 || id == 42)) return;
+            int lx = 0, ly = 0;
+            if (!window.window_to_logical(px, py, &lx, &ly) || province_bar.frame.contains(lx, ly))
+                return;
+            const int tx = static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx;
+            const int ty = static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx;
+            while (province_drag_x != tx || province_drag_y != ty) {
+                const int ddx = tx - province_drag_x, ddy = ty - province_drag_y;
+                if (std::abs(ddx) >= std::abs(ddy))
+                    province_drag_x += ddx > 0 ? 1 : -1;
+                else
+                    province_drag_y += ddy > 0 ? 1 : -1;
+                province_place(id, province_drag_x, province_drag_y);
+            }
+            return;
+        }
+        if (!save_mode || screen != Screen::City || drag_last_x < 0) return;
+        const auto tool = kBuildTools[tool_index];
+        if (systems::construction::placement_spec(tool).kind !=
+            systems::construction::PlacementKind::DragAutoTiled) {
+            return;
+        }
+        int lx = 0, ly = 0;
+        if (!window.window_to_logical(px, py, &lx, &ly) || toolbar.contains(lx, ly)) return;
+        const int tx = static_cast<int>(cam.x + lx / cam.zoom) / city_cell_px;
+        const int ty = static_cast<int>(cam.y + ly / cam.zoom) / city_cell_px;
+        while (drag_last_x != tx || drag_last_y != ty) {
+            const int ddx = tx - drag_last_x, ddy = ty - drag_last_y;
+            if (std::abs(ddx) >= std::abs(ddy)) {
+                drag_last_x += ddx > 0 ? 1 : -1;
+            } else {
+                drag_last_y += ddy > 0 ? 1 : -1;
+            }
+            if (place_tool(tool, drag_last_x, drag_last_y)) city_image_dirty = true;
+        }
+        return;
+        };
+        // The original's cancel for a drag-built command, and touch's Undo.
+        const auto cancel_drag = [&]() {
+        // The original's drag-cancel gesture (see DragUndoCell's
+        // comment): put back every cell this drag touched and
+        // refund what it cost. Does nothing outside an active
+        // drag-built placement.
+        if (!save_mode || drag_undo.empty()) return;
+        for (const auto& u : drag_undo) {
+            state.city.tile[u.y][u.x] = u.tile;
+            state.city.operational_state[u.y][u.x] = u.op_state;
+        }
+        systems::economy::refund(state, drag_refund);
+        std::printf("drag cancelled: refunded %d Dn\n", drag_refund);
+        drag_undo.clear();
+        drag_refund = 0;
+        drag_last_x = drag_last_y = -1;
+        city_image_dirty = true;
+        return;
+        };
+        // Touch (platform/input.hpp): a one-finger drag builds with a road-like
+        // tool and pans otherwise; after a built drag, an Undo button stands
+        // in for the right button.
+        bool touch_building = false;
+        bool touch_undo = false;
+        ui::PanelLayout undo_strip = ui::strip_layout({{ui::tr("Undo"), 950}}, page_metrics, kLogicalW);
+        if (!undo_strip.tabs.empty() && !strip.tabs.empty()) {
+            ui::Rect& r = undo_strip.tabs[0];
+            r.x = kLogicalW - r.w - 2;
+            r.y = strip.tabs[0].y + strip.tabs[0].h + 2;
+        }
+        const auto drag_tool_here = [&]() {
+            if (screen == Screen::City)
+                return systems::construction::placement_spec(kBuildTools[tool_index]).kind ==
+                       systems::construction::PlacementKind::DragAutoTiled;
+            if (screen == Screen::Province) {
+                const int id = kProvinceCommands[province_command].id;
+                return id == 35 || id == 36 || id == 37 || id == 42;
+            }
+            return false;
+        };
         // One handler for "the primary action happened at this logical
         // point", shared by the real input path and --test-click. The
         // toolbar gets first refusal: a click on the panel selects a tool
@@ -1663,6 +1759,13 @@ int main(int argc, char** argv) {
                 time_running = true;
                 return;
             }
+            if (touch_undo && !undo_strip.tabs.empty() && undo_strip.tabs[0].contains(lx, ly) &&
+                (screen == Screen::City || screen == Screen::Province)) {
+                cancel_drag();
+                touch_undo = false;
+                return;
+            }
+            touch_undo = false;
             drag_last_x = drag_last_y = -1;
             province_drag_x = province_drag_y = -1;
             drag_undo.clear();
@@ -1697,7 +1800,7 @@ int main(int argc, char** argv) {
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
                 return;
             }
-            if (screen == Screen::Notice && have_interface_art) {
+            if (screen == Screen::Notice && have_interface_art && !notice_is_hints) {
                 apply_page_action(viewer::kActionContinue);  // 0x084B1 waits for a click
                 return;
             }
@@ -1894,6 +1997,14 @@ int main(int argc, char** argv) {
             } else if (save_mode && page_screen()) {
                 apply_page_action(action);
             }
+        }
+
+        // The touch hints, once, on a touch screen.
+        if (save_mode && has_touch && !settings.touch_hints_seen && screenshot_path.empty()) {
+            notice_return = screen;
+            notice_is_hints = true;
+            screen = Screen::Notice;
+            time_running = false;
         }
 
         Uint32 last_step_ms = SDL_GetTicks();
@@ -2102,68 +2213,12 @@ int main(int argc, char** argv) {
                         handle_select_logical(lx, ly, false);
                         break;
                     }
-                    case platform::CommandType::SelectMove: {
-                        // Dragging a drag-built command: the engine calls its
-                        // handler for each cell the cursor passes over, so step
-                        // one cell at a time from the last placed cell.
-                        if (save_mode && screen == Screen::Province) {
-                            // Clear, Road, Wall and Highway follow the pointer cell by cell.
-                            const int id = kProvinceCommands[province_command].id;
-                            if (province_drag_x < 0 || !(id == 35 || id == 36 || id == 37 || id == 42)) break;
-                            int lx = 0, ly = 0;
-                            if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly) || province_bar.frame.contains(lx, ly))
-                                break;
-                            const int tx = static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx;
-                            const int ty = static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx;
-                            while (province_drag_x != tx || province_drag_y != ty) {
-                                const int ddx = tx - province_drag_x, ddy = ty - province_drag_y;
-                                if (std::abs(ddx) >= std::abs(ddy))
-                                    province_drag_x += ddx > 0 ? 1 : -1;
-                                else
-                                    province_drag_y += ddy > 0 ? 1 : -1;
-                                province_place(id, province_drag_x, province_drag_y);
-                            }
-                            break;
-                        }
-                        if (!save_mode || screen != Screen::City || drag_last_x < 0) break;
-                        const auto tool = kBuildTools[tool_index];
-                        if (systems::construction::placement_spec(tool).kind !=
-                            systems::construction::PlacementKind::DragAutoTiled) {
-                            break;
-                        }
-                        int lx = 0, ly = 0;
-                        if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly) || toolbar.contains(lx, ly)) break;
-                        const int tx = static_cast<int>(cam.x + lx / cam.zoom) / city_cell_px;
-                        const int ty = static_cast<int>(cam.y + ly / cam.zoom) / city_cell_px;
-                        while (drag_last_x != tx || drag_last_y != ty) {
-                            const int ddx = tx - drag_last_x, ddy = ty - drag_last_y;
-                            if (std::abs(ddx) >= std::abs(ddy)) {
-                                drag_last_x += ddx > 0 ? 1 : -1;
-                            } else {
-                                drag_last_y += ddy > 0 ? 1 : -1;
-                            }
-                            if (place_tool(tool, drag_last_x, drag_last_y)) city_image_dirty = true;
-                        }
+                    case platform::CommandType::SelectMove:
+                        select_move(cmd->x, cmd->y);
                         break;
-                    }
-                    case platform::CommandType::CancelDrag: {
-                        // The original's drag-cancel gesture (see DragUndoCell's
-                        // comment): put back every cell this drag touched and
-                        // refund what it cost. Does nothing outside an active
-                        // drag-built placement.
-                        if (!save_mode || drag_undo.empty()) break;
-                        for (const auto& u : drag_undo) {
-                            state.city.tile[u.y][u.x] = u.tile;
-                            state.city.operational_state[u.y][u.x] = u.op_state;
-                        }
-                        systems::economy::refund(state, drag_refund);
-                        std::printf("drag cancelled: refunded %d Dn\n", drag_refund);
-                        drag_undo.clear();
-                        drag_refund = 0;
-                        drag_last_x = drag_last_y = -1;
-                        city_image_dirty = true;
+                    case platform::CommandType::CancelDrag:
+                        cancel_drag();
                         break;
-                    }
                     case platform::CommandType::Hover: {
                         if (!save_mode) break;
                         int lx = 0, ly = 0;
@@ -2178,14 +2233,29 @@ int main(int argc, char** argv) {
                         }
                         break;
                     }
-                    case platform::CommandType::PanBegin:
+                    case platform::CommandType::PanBegin: {
+                        if (!cmd->touch || cmd->fingers != 1 || !save_mode || !drag_tool_here()) break;
+                        int lx = 0, ly = 0;
+                        if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly)) break;
+                        if (screen == Screen::City && toolbar.contains(lx, ly)) break;
+                        touch_building = true;
+                        touch_undo = false;
+                        handle_select_logical(lx, ly, false);
                         break;
+                    }
                     case platform::CommandType::PanEnd:
+                        if (touch_building) touch_undo = !drag_undo.empty();
+                        touch_building = false;
                         break;
                     case platform::CommandType::PanMove: {
+                        if (touch_building && cmd->fingers == 1) {
+                            select_move(cmd->x, cmd->y);
+                            break;
+                        }
                         Camera& c = screen == Screen::Province ? pcam : cam;
                         c.x -= cmd->dx / c.zoom;
                         c.y -= cmd->dy / c.zoom;
+                        if (cmd->zoom_delta != 0) c.zoom *= std::pow(1.1, cmd->zoom_delta);  // a pinch
                         c.clamp();
                         break;
                     }
@@ -2337,7 +2407,7 @@ int main(int argc, char** argv) {
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
                 if (screen == Screen::NameEntry) ui::compose_name_entry(name_entry, name_art, frame);
-                if (screen == Screen::Notice && have_interface_art)
+                if (screen == Screen::Notice && have_interface_art && !notice_is_hints)
                     ui::canvas_to_rgb(ui::compose_funds_warning_screen(interface_art), interface_art.palette, frame);
                 if (original_forum_screen()) {
                     // The advisors in the original's art.
@@ -2505,6 +2575,9 @@ int main(int argc, char** argv) {
             }
             if (save_mode && screen == Screen::City)
                 ui::render_strip(screen_tabs, 0, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+            if (save_mode && touch_undo && !drag_undo.empty() && (screen == Screen::City || screen == Screen::Province))
+                ui::render_strip({{ui::tr("Undo"), 950}}, -1, undo_strip, frame, kLogicalW, kLogicalH, page_metrics,
+                                 font);
             if (save_mode && message_visible()) {
                 // 0x279AC: the message's two 28-character lines. The original
                 // draws them at (16, 14) and (16, 30); here they sit below the

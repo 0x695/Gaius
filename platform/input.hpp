@@ -87,6 +87,18 @@ struct Command {
     char ch = 0;                            // for TextKey::Character: printable ASCII
     CommandType rebound = CommandType::Quit;  // for Rebound
     bool from_gamepad = false;
+    // Touch (Phase 9). SDL also reports touches as mouse events; those are
+    // ignored, and the fingers make these instead:
+    //   a tap                  Select where it lifted
+    //   one finger dragged     PanBegin at where it went down, then PanMove
+    //                          (x, y the finger, dx, dy the step), PanEnd --
+    //                          the viewer pans, or builds along it with a
+    //                          road-like tool
+    //   two fingers dragged    PanMove with fingers = 2: the step of their
+    //                          middle, and zoom_delta for the pinch
+    //   two fingers tapped     Secondary (the right button: back, dismiss)
+    bool touch = false;
+    int fingers = 0;
 };
 
 // --- Bindings (Phase 9) ------------------------------------------------------

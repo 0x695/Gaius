@@ -9,23 +9,34 @@ else {
 
 android {
     if (buildAsApplication) {
-        namespace "org.gaius.hello"
+        namespace "org.gaius.game"
     }
     compileSdkVersion 34
     ndkVersion "29.0.14206865"
     defaultConfig {
-        applicationId "org.gaius.hello"
+        applicationId "org.gaius.game"
         minSdkVersion 21
         targetSdkVersion 34
         versionCode 1
-        versionName "1.0"
+        versionName "0.9"
         externalNativeBuild {
-            // x86_64-only: matches the emulator this was verified against
-            // (Medium_Phone AVD). Widen abiFilters before shipping to a
-            // real device.
+            // Phones and tablets (arm64-v8a) and the emulator (x86_64).
             cmake {
                 arguments "-DANDROID_STL=c++_shared"
-                abiFilters 'x86_64'
+                abiFilters 'arm64-v8a', 'x86_64'
+            }
+        }
+    }
+    // A release is signed when GAIUS_KEYSTORE names a keystore (with
+    // GAIUS_KEYSTORE_PASSWORD, GAIUS_KEY_ALIAS, GAIUS_KEY_PASSWORD); without it
+    // the release APK and bundle are unsigned.
+    signingConfigs {
+        if (System.getenv("GAIUS_KEYSTORE")) {
+            release {
+                storeFile file(System.getenv("GAIUS_KEYSTORE"))
+                storePassword System.getenv("GAIUS_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("GAIUS_KEY_ALIAS")
+                keyPassword System.getenv("GAIUS_KEY_PASSWORD")
             }
         }
     }
@@ -33,9 +44,15 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv("GAIUS_KEYSTORE")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
+    // Gaius's language files (lang/) go into the APK's assets as lang/.
+    sourceSets.main.assets.srcDirs += "$buildDir/gaius-assets"
     applicationVariants.all { variant ->
+        tasks["merge${variant.name.capitalize()}Assets"].dependsOn("copyGaiusLanguages")
         tasks["merge${variant.name.capitalize()}Assets"]
             .dependsOn("externalNativeBuild${variant.name.capitalize()}")
     }
@@ -70,3 +87,11 @@ android {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
 }
+
+task copyGaiusLanguages(type: Copy) {
+    from "${rootProject.projectDir}/../lang"
+    into "$buildDir/gaius-assets/lang"
+}
+
+// Every task that reads the assets sees the languages.
+preBuild.dependsOn copyGaiusLanguages

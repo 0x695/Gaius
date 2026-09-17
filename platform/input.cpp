@@ -45,6 +45,17 @@ std::map<CommandType, Binding>& bindings() {
     return b;
 }
 
+// The fingers down and the gesture they make.
+struct Finger {
+    SDL_FingerID id;
+    float x, y;  // physical pixels
+};
+std::vector<Finger> g_fingers;
+float g_touch_start_x = 0, g_touch_start_y = 0;
+bool g_touch_moved = false;
+int g_touch_most = 0;       // the most fingers down during the gesture
+float g_pinch_distance = 0;  // two fingers apart, at the last step
+
 bool g_capturing = false;
 bool g_capture_gamepad = false;
 CommandType g_capture_type = CommandType::Quit;
@@ -299,6 +310,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
 
         // --- Mouse: left=Select, right=Secondary, middle=Pan ---
         case SDL_MOUSEBUTTONDOWN: {
+            if (event.button.which == SDL_TOUCH_MOUSEID) return std::nullopt;  // the fingers speak for touch
             Command c;
             c.x = event.button.x;
             c.y = event.button.y;
@@ -322,6 +334,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
         }
 
         case SDL_MOUSEMOTION: {
+            if (event.motion.which == SDL_TOUCH_MOUSEID) return std::nullopt;
             if ((event.motion.state & SDL_BUTTON_LMASK) && !(event.motion.state & SDL_BUTTON_MMASK)) {
                 Command drag;
                 drag.type = CommandType::SelectMove;
@@ -346,6 +359,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
         }
 
         case SDL_MOUSEBUTTONUP:
+            if (event.button.which == SDL_TOUCH_MOUSEID) return std::nullopt;
             if (event.button.button == SDL_BUTTON_MIDDLE) {
                 Command c;
                 c.type = CommandType::PanEnd;
@@ -356,31 +370,100 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
             return std::nullopt;
 
         case SDL_MOUSEWHEEL: {
+            if (event.wheel.which == SDL_TOUCH_MOUSEID) return std::nullopt;
             Command c;
             c.type = CommandType::Zoom;
             c.zoom_delta = static_cast<float>(event.wheel.y);
             return c;
         }
 
-        // --- Touch: single finger drag = pan. Tap-vs-drag / pinch-to-
-        // zoom / two-finger-secondary gestures are intentionally NOT
-        // implemented yet -- masterplan section 5a flags this as a real
-        // design decision to make deliberately (point 7: "drag-to-build
-        // needs a touch gesture that doesn't fight with map-panning"),
-        // not something to bolt on casually here. SDL also reports each
-        // tap as a mouse click, which is how a tap selects.
+        // --- Touch: taps, drags, pinches (see Command's comment). A finger
+        // has to travel 1.5% of the screen's width before a touch is a drag
+        // rather than a tap. Masterplan 5a point 7's question -- a drag that
+        // builds without fighting a drag that pans -- is answered by the
+        // viewer: one finger builds with a road-like tool and pans otherwise;
+        // two fingers always pan.
         case SDL_FINGERDOWN:
         case SDL_FINGERMOTION:
         case SDL_FINGERUP: {
             if (physical_w <= 0 || physical_h <= 0) return std::nullopt;
+            const float fx = event.tfinger.x * physical_w, fy = event.tfinger.y * physical_h;
+            const float threshold = 0.015f * static_cast<float>(physical_w);
+            const auto centroid = [](float* cx, float* cy) {
+                *cx = *cy = 0;
+                for (const Finger& f : g_fingers) {
+                    *cx += f.x / static_cast<float>(g_fingers.size());
+                    *cy += f.y / static_cast<float>(g_fingers.size());
+                }
+            };
+            const auto spread = []() {
+                if (g_fingers.size() < 2) return 0.0f;
+                return std::hypot(g_fingers[0].x - g_fingers[1].x, g_fingers[0].y - g_fingers[1].y);
+            };
             Command c;
-            c.x = static_cast<int>(event.tfinger.x * physical_w);
-            c.y = static_cast<int>(event.tfinger.y * physical_h);
-            c.dx = static_cast<int>(event.tfinger.dx * physical_w);
-            c.dy = static_cast<int>(event.tfinger.dy * physical_h);
-            c.type = (event.type == SDL_FINGERDOWN)   ? CommandType::PanBegin
-                     : (event.type == SDL_FINGERMOTION) ? CommandType::PanMove
-                                                          : CommandType::PanEnd;
+            c.touch = true;
+            if (event.type == SDL_FINGERDOWN) {
+                if (g_fingers.empty()) {
+                    g_touch_start_x = fx;
+                    g_touch_start_y = fy;
+                    g_touch_moved = false;
+                    g_touch_most = 0;
+                }
+                g_fingers.push_back({event.tfinger.fingerId, fx, fy});
+                g_touch_most = std::max(g_touch_most, static_cast<int>(g_fingers.size()));
+                g_pinch_distance = spread();
+                return std::nullopt;
+            }
+            auto it = std::find_if(g_fingers.begin(), g_fingers.end(),
+                                   [&](const Finger& f) { return f.id == event.tfinger.fingerId; });
+            if (it == g_fingers.end()) return std::nullopt;
+            if (event.type == SDL_FINGERMOTION) {
+                float before_x = 0, before_y = 0;
+                centroid(&before_x, &before_y);
+                it->x = fx;
+                it->y = fy;
+                float after_x = 0, after_y = 0;
+                centroid(&after_x, &after_y);
+                const bool was_moving = g_touch_moved;
+                if (!g_touch_moved &&
+                    std::hypot(after_x - g_touch_start_x, after_y - g_touch_start_y) > threshold) {
+                    g_touch_moved = true;
+                }
+                if (!g_touch_moved) return std::nullopt;
+                c.fingers = static_cast<int>(g_fingers.size());
+                c.x = static_cast<int>(after_x);
+                c.y = static_cast<int>(after_y);
+                if (!was_moving && g_touch_most == 1) {
+                    // The drag starts where the finger went down.
+                    c.type = CommandType::PanBegin;
+                    c.x = static_cast<int>(g_touch_start_x);
+                    c.y = static_cast<int>(g_touch_start_y);
+                    return c;
+                }
+                c.type = CommandType::PanMove;
+                c.dx = static_cast<int>(after_x - before_x);
+                c.dy = static_cast<int>(after_y - before_y);
+                if (g_fingers.size() >= 2) {
+                    const float d = spread();
+                    if (g_pinch_distance > 1 && d > 1) c.zoom_delta = std::log(d / g_pinch_distance) / std::log(1.1f);
+                    g_pinch_distance = d;
+                }
+                return c;
+            }
+            // SDL_FINGERUP
+            g_fingers.erase(it);
+            g_pinch_distance = spread();
+            if (!g_fingers.empty()) return std::nullopt;
+            c.x = static_cast<int>(fx);
+            c.y = static_cast<int>(fy);
+            c.fingers = g_touch_most;
+            if (g_touch_moved) {
+                c.type = CommandType::PanEnd;
+            } else if (g_touch_most >= 2) {
+                c.type = CommandType::Secondary;
+            } else {
+                c.type = CommandType::Select;
+            }
             return c;
         }
 

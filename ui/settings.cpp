@@ -39,6 +39,7 @@ std::string settings_text(const Settings& s) {
     o << "language = " << s.language << "\n";
     o << "game_dir = " << s.game_dir << "\n";
     o << "gamepad_cursor = " << (s.gamepad_cursor ? 1 : 0) << "\n";
+    o << "touch_hints_seen = " << (s.touch_hints_seen ? 1 : 0) << "\n";
     for (const auto& [command, key] : s.keys) o << "key." << command << " = " << key << "\n";
     for (const auto& [command, button] : s.buttons) o << "button." << command << " = " << button << "\n";
     return o.str();
@@ -73,6 +74,8 @@ Settings parse_settings(const std::string& text) {
             s.game_dir = value;
         } else if (key == "gamepad_cursor" && to_int(value, n)) {
             s.gamepad_cursor = n != 0;
+        } else if (key == "touch_hints_seen" && to_int(value, n)) {
+            s.touch_hints_seen = n != 0;
         } else if (key.rfind("key.", 0) == 0 && key.size() > 4 && !value.empty()) {
             s.keys[key.substr(4)] = value;
         } else if (key.rfind("button.", 0) == 0 && key.size() > 7 && !value.empty()) {

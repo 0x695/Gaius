@@ -10,27 +10,27 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 ## At a glance
 
-*As of 2026-09-16.*
+*As of 2026-09-17.*
 
 | Phase | Area | Status | What's left |
 |---|---|---|---|
 | 0 | Repo & format library | **Done** | — |
-| 1 | Viewer & platform skeleton | **Done** | Android: real-device ABI, viewer port |
+| 1 | Viewer & platform skeleton | **Done** | — |
 | 2 | Data model & save round trip | **Done** | — |
 | 3 | Service propagation | **Done**, validated | — |
 | 4 | Housing & population | **Done**, validated | — |
-| 5 | Construction & build mode | **Done** | Touch drag gesture, a walker path check; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
+| 5 | Construction & build mode | **Done** | A walker path check; see [Still open in Phases 0-5](#still-open-in-phases-0-5) |
 | 6 | Economy & military | **Done** | — |
 | 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
-| 9 | Packaging & polish | In progress | Settings, Steam Deck, Android packaging, paths, localization, toolbar past 2× |
+| 9 | Packaging & polish | **Done** | Checks on real hardware: an Android phone, a Steam Deck |
 | 10 | Tooling scripts | Not started | Everything |
 
 **1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3719 checks. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3887 checks, on Windows and, in CI, Linux. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
-**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Next is the rest of Phase 9 -- packaging and the platform pass; its sound is done (2026-09-17).
+**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Phase 9 is done (2026-09-17): sound, the Settings screen, per-OS folders, rebindable controls and gamepads, touch gestures, a paged toolbar, languages, a Linux package with Steam Deck notes and an Android APK / bundle. Next is Phase 10, the tooling scripts.
 
 ---
 
@@ -71,12 +71,9 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 - [x] **Save viewer** (2026-09-08) — `apps/viewer/save_view.hpp`: the 100×100 tile grid and four service layers as heatmaps; the file size picks the mode (1602 bytes EMPIRE2, 57126 `.SAV`). Real saves open since 2026-09-12, and the first view is the city in the game's own sprites, with walkers.
 - [x] **Input abstraction** (masterplan 5a point 4) — `platform/input`: mouse, touch and gamepad all become one `Command` stream.
 
-**Open**
-- [ ] **Android on a real device** — only the `x86_64` emulator ABI is built; widen `abiFilters`.
-- [ ] **`gaius_viewer` on Android** — asset loading needs `AAssetManager` (an APK can't be `fopen`ed).
-- [ ] **Touch gestures** beyond single-finger drag and tap (pinch zoom, two-finger secondary) — undesigned.
+**Closed in Phase 9 (2026-09-17):** the whole game on Android for `arm64-v8a` and `x86_64`, with the player's files imported into app storage (no `AAssetManager` needed: Gaius ships none), and touch gestures (pinch, two-finger back). See Phase 9.
 
-**Deliverable:** a "look at your data" tool, the base of the later editor, and the first proof that the resolution and input abstractions hold cross-platform. **Met**, with Android limited to the emulator.
+**Deliverable:** a "look at your data" tool, the base of the later editor, and the first proof that the resolution and input abstractions hold cross-platform. **Met.**
 
 **RE blockers:** none. The tile→sprite rules, once tracked as tech debt, were transcribed on 2026-09-13 and match DOSBox captures pixel for pixel (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`).
 
@@ -226,12 +223,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - **Needs new saves**
   - A walker's path, and the random draws' timing. Saves don't carry the generator's state; checking needs it, or an event (a fire, a collapse) caught between two saves.
 - **Closed since:** the random draws on frames between steps (the speed gate, `month::run_frame`, dispatch findings section 35.2); the game's messages (`systems::messages`, 35.1); every routine the calendar calls (Phases 6-7); what the loader does after reading (33.1); the record tables demolition updates (`construction::remove_forum` and its siblings).
-- **Build mode**
-  - A touch drag gesture for roads and walls.
-- **Platform**
-  - Android: real-device ABI and a `gaius_viewer` port (Phase 1).
-  - Touch gestures beyond single-finger drag and tap.
-  - The toolbar can't scale past 2× in the 320-wide logical framebuffer (Phase 9).
+- **Closed in Phase 9 (2026-09-17):** the touch drag for roads and walls, the other touch gestures, Android on devices, and the toolbar past 2×.
 
 ---
 
@@ -322,20 +314,20 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 
 ## Phase 9 — Platform packaging & polish
 
-**Status: In progress.** Sound is done (2026-09-17). The rest is pure engineering.
+**Status: Done** (2026-09-17). Left for real hardware: a run on a physical Android phone and on a Steam Deck (the emulator, Windows and Linux CI are checked).
 
 **Goal:** turn "runs on the platform" into "ships on the platform" — packaging, input polish and settings, not new architecture.
 
 **Done**
 - [x] **Sound** (2026-09-17, findings section 45) — the game's music driver is AIL 2.14's `SBFM.ADV`, byte for byte, and its source is public, so `audio::AilXmidi` transcribes it; its register writes play on ymfm's YM3812. `audio::GameAudio` is the game's sound layer: the tunes each screen starts, the 20 effects and who plays them, one sound at a time, the Sound Blaster's halving, the city sounds, and the options screen's switches. `gaius_viewer` plays them all; `tools/render_audio` writes them to WAV.
 
-**Open**
-- [ ] **Settings screen** — resolution and window mode, UI scale, input remapping, frame-rate cap, audio volume.
-- [ ] **Steam Deck** — gamepad-only navigation end to end, Steam Input glyphs if feasible, a Deck control layout.
-- [ ] **Android** — touch-first onboarding (masterplan 5a point 7), on-screen build and cancel controls, safe areas, packaging (APK/AAB), storage permissions for the user's game files.
-- [ ] **Save and config paths** — confirm each OS's conventions, and no collision with the original's saves.
-- [ ] **Localization readiness** — externalize UI strings before packaging multiplies the surface.
-- [ ] **Toolbar past 2×** — a logical framebuffer that grows with the display, or a paged toolbar.
+- [x] **Settings screen** (2026-09-17) — `apps/viewer/settings_page.hpp`, in place of the original's Options screen, which it absorbs: tabs Game (speed, scroll speed, messages; resume, pause, load, save, restart, exit), Sound (tunes, effects, city sounds, music and effects volumes), Video (window mode, UI scale 1-4, frame rate, position indicator, icon names), Keys (every command's key and gamepad button, the gamepad pointer), Lang and Files. The original's options stay in `CAESAR.INF`, Gaius's in `gaius.cfg` (`ui::Settings`); changes apply at once. Escape, gamepad Start and Android's Back open it instead of quitting.
+- [x] **Save and config paths** (2026-09-17) — `platform::paths`: `%APPDATA%\Gaius\{settings,saves,game}`; on Linux and the Deck `$XDG_CONFIG_HOME/gaius` and `$XDG_DATA_HOME/gaius/{saves,game}`; on Android the app's storage. Never the game's folder, where the original writes `CAESAR??.SAV` and `CAESAR.INF` (the Cohort 2 hand-over excepted, by design). The old `Gaius/Gaius` layout's files move over once. `test_platform_paths`.
+- [x] **Input** (2026-09-17) — rebindable keys and buttons (`platform::bind_key`/`bind_button`, stored in `gaius.cfg`); gamepads are opened at all (they weren't: SDL sends nothing before `SDL_GameControllerOpen`); button names follow the pad (A / Cross / B).
+- [x] **Steam Deck** (2026-09-17) — gamepad-only play: the left stick moves a pointer (the mouse), A clicks and drags, B is back, the right stick and d-pad scroll, triggers zoom, Menu opens Settings; fullscreen on first start (`SteamDeck=1`). `packaging/linux/`: a tarball with launcher, desktop entry and `STEAM_DECK.md` (install as a non-Steam game, the control table). CI builds and tests Linux and Windows (`.github/workflows/build.yml`).
+- [x] **Toolbar past 2×** (2026-09-17) — paging: at most half the screen, page arrows at the row ends (`ui::Toolbar::paged`, `test_ui_toolbar_paging`). A growing framebuffer was rejected: every original screen is 320 x 200 art.
+- [x] **Localization readiness** (2026-09-17) — `ui::tr` with English as the key, `lang/<code>.txt` files, `scripts/extract_strings.py` for `lang/template.txt`, and a German translation (ASCII: the game's fonts have no umlauts). The game's own texts stay English.
+- [x] **Android** (2026-09-17) — the whole game as `libmain.so` from the root CMake project (`GAIUS_GAME_LIBRARY`), `arm64-v8a` and `x86_64`, landscape; the player's files imported through the system folder picker into app storage (`GaiusActivity`, no storage permission); touch gestures (tap, one-finger drag pans or lays roads, two-finger scroll and pinch, two-finger tap back) with an on-screen Undo for a touch-built drag; a one-time touch hints page; release APK and AAB, signed from `GAIUS_KEYSTORE`. Safe areas: the 16:10 picture is letterboxed inside the display, clear of cutouts on phones. Checked on the emulator: import, a career, a road and its Undo. `android/README.md`.
 
 **Deliverable:** installable builds for Windows, Linux, Steam Deck and Android (masterplan 5a), each with settings and no input dead ends.
 

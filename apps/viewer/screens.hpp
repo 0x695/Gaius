@@ -397,6 +397,23 @@ inline ui::Page notice_page(const char* const* lines, size_t count) {
     return page;
 }
 
+// Shown once on a touch screen (Phase 9: touch-first onboarding): how the
+// fingers play the game (platform/input.hpp's Command).
+inline ui::Page touch_hints_page() {
+    ui::Page page;
+    page.title = ui::tr("Playing by touch");
+    page.rows.push_back({ui::tr("Tap - choose, build, press"), ""});
+    page.rows.push_back({ui::tr("Drag one finger - scroll the map"), ""});
+    page.rows.push_back({ui::tr("With a road, wall or clearing tool"), ""});
+    page.rows.push_back({std::string("  ") + ui::tr("one finger lays it along the drag"), ""});
+    page.rows.push_back({std::string("  ") + ui::tr("and Undo takes the drag back"), ""});
+    page.rows.push_back({ui::tr("Two fingers - scroll, pinch to zoom"), ""});
+    page.rows.push_back({ui::tr("Tap with two fingers - back"), ""});
+    page.rows.push_back({ui::tr("Settings - speed, sound, save, load"), ""});
+    page.buttons.push_back({ui::tr("Continue"), kActionContinue});
+    return page;
+}
+
 // The end of a career: dismissed after three missed tributes (the settlement's
 // DS:0x6D6A = 0x3C), or hailed as Caesar (0x29100). The texts are Gaius's own.
 inline ui::Page ending_page(const model::CityState& s, bool caesar) {
