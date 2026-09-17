@@ -99,12 +99,15 @@ Breakpoint breakpoint_for(int physical_w, int physical_h, bool has_touch);
 // icons, which is the masterplan's stated floor and is comfortable for a
 // mouse. Touch targets go above that floor, never below it.
 //
-// Phone and Handheld both land on 2x rather than Phone going higher, and
-// that is a real constraint rather than an oversight: the logical
-// framebuffer is 320 px wide, so a 3x (48px) button only fits 6 per row
-// and 16 tools would wrap to 3 rows -- 144 of the 200 logical rows,
-// leaving no usable map. See ui/toolbar.hpp's header for the full
-// writeup of this tension and what would actually fix it.
+// Phone and Handheld land on 2x: the logical framebuffer is 320 x 200 and
+// already scaled up to fill the screen, so 2x buttons are comfortable touch
+// targets there. Tv gets 3x, paged (ui/toolbar.hpp), for reading at a
+// distance; the Settings screen's UI scale can pick any of 1-4.
 Metrics metrics_for(Breakpoint b);
+
+// Metrics at an explicit scale, 1-4 (the Settings screen's UI scale).
+// Past 2x the toolbar pages rather than wrapping (ui/toolbar.hpp). The
+// toolbar's label text stops growing at 2x, so it stays one line.
+Metrics metrics_for_scale(int scale);
 
 }  // namespace gaius::ui

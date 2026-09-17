@@ -64,6 +64,8 @@
 #include "apps/viewer/save_view.hpp"
 #include "audio/game_audio.hpp"
 #include "apps/viewer/screens.hpp"
+#include "apps/viewer/settings_page.hpp"
+#include "apps/viewer/setup_screen.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 #include "formats/p32/p32.hpp"
@@ -89,6 +91,7 @@
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
+#include "platform/game_import.hpp"
 #include "platform/input.hpp"
 #include "platform/paths.hpp"
 #include "platform/window.hpp"
@@ -96,6 +99,8 @@
 #include "systems/construction.hpp"
 #include "systems/economy.hpp"
 #include "ui/metrics.hpp"
+#include "ui/settings.hpp"
+#include "ui/strings.hpp"
 #include "ui/toolbar.hpp"
 
 using namespace gaius;
@@ -225,12 +230,91 @@ void render_sprite_view(const formats::IndexedImage& img, const formats::Palette
 
 }  // namespace
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <EMPIRE2.0xx | CAESARxx.SAV> [--screenshot out.png --frames N]\n", argv[0]);
-        return 1;
+namespace {
+
+// The languages lang/languages.txt lists, read through SDL so Android finds
+// them among the APK's assets: English first.
+std::vector<ui::Catalog> load_languages() {
+    std::vector<ui::Catalog> out{ui::Catalog{"en", "English", {}}};
+    std::string base;
+#if !defined(__ANDROID__)
+    if (char* b = SDL_GetBasePath()) {
+        base = b;
+        SDL_free(b);
     }
-    std::string in_path = argv[1];
+#endif
+    const auto read = [&](const std::string& name) {
+        std::string text;
+        SDL_RWops* rw = SDL_RWFromFile((base + "lang/" + name).c_str(), "rb");
+        if (!rw) return text;
+        char buf[4096];
+        size_t n = 0;
+        while ((n = SDL_RWread(rw, buf, 1, sizeof buf)) > 0) text.append(buf, n);
+        SDL_RWclose(rw);
+        return text;
+    };
+    std::string index = read("languages.txt");
+    size_t at = 0;
+    while (at < index.size()) {
+        size_t end = index.find('\n', at);
+        if (end == std::string::npos) end = index.size();
+        std::string code = index.substr(at, end - at);
+        at = end + 1;
+        while (!code.empty() && (code.back() == '\r' || code.back() == ' ')) code.pop_back();
+        if (code.empty() || code[0] == '#' || code == "en") continue;
+        const std::string text = read(code + ".txt");
+        if (!text.empty()) out.push_back(ui::parse_catalog(code, text));
+    }
+    return out;
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+    // Gaius's settings (ui/settings.hpp), before anything else: they may name
+    // the game's folder.
+    ui::Settings settings;
+    std::string settings_path;
+    bool settings_existed = false;
+    try {
+        settings_path = (fs::path(platform::paths().settings) / "gaius.cfg").string();
+        settings_existed = ui::load_settings(settings_path, settings);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "note: no settings folder: %s\n", e.what());
+    }
+    // The Steam Deck (Steam sets SteamDeck=1): fullscreen on a first start.
+    const char* deck = std::getenv("SteamDeck");
+    const bool steam_deck = deck && std::strcmp(deck, "1") == 0;
+    if (steam_deck && !settings_existed) settings.window_mode = ui::WindowModeSetting::Fullscreen;
+#if defined(__ANDROID__)
+    settings.window_mode = ui::WindowModeSetting::Fullscreen;
+#endif
+    const std::vector<ui::Catalog> languages = load_languages();
+    for (const ui::Catalog& c : languages)
+        if (c.code == settings.language) ui::set_catalog(c);
+    viewer::apply_bindings(settings);
+
+    std::string in_path = argc >= 2 ? argv[1] : std::string();
+    if (in_path.empty() || in_path.rfind("--", 0) == 0) {
+        // No folder or file given: a career from the game's files, wherever
+        // they are, or the setup screen that explains where they go.
+        in_path = viewer::find_game_folder(settings);
+        if (in_path.empty()) {
+            if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+                std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+                return 3;
+            }
+            try {
+                in_path = viewer::run_setup_screen(settings, settings_path, kLogicalW, kLogicalH);
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "fatal: %s\n", e.what());
+            }
+            if (in_path.empty()) {
+                SDL_Quit();
+                return 0;
+            }
+        }
+    }
     std::string screenshot_path;
     int screenshot_frames = 0;
     double test_pan_x = 0, test_pan_y = 0, test_zoom = 1.0;
@@ -254,7 +338,7 @@ int main(int argc, char** argv) {
     std::string cohort_command;     // --cohort-command: runs Cohort 2 for a battle (findings section 44)
     int start_speed = -1;           // --speed 0-100: DS:0x5292 (default: the options' CAESAR.INF)
     int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
-    for (int i = 2; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--paused") == 0) start_paused = true;
@@ -381,7 +465,6 @@ int main(int argc, char** argv) {
     formats::IndexedImage governor_picture;  // C_VITAE.VPX
     bool have_governor_picture = false;
     ui::GovernorDialog governor_dialog = ui::GovernorDialog::None;  // open over the governor's screen
-    ui::OptionsDialog options_dialog = ui::OptionsDialog::None;     // open on the Options screen
     bool pause_until_click = false;  // "Pause the game" (0x0F01E): a click or T resumes
     char key_last = 0, key_prev = 0;  // 2EF9:002F and 2EF9:0031: the last key typed and the one before
     // The original screens' buttons, run once a frame (0x0D41D / 0x0D521).
@@ -503,7 +586,7 @@ int main(int argc, char** argv) {
     ui::GameOptions game_options = ui::default_options();
     std::string options_path;
     try {
-        options_path = (fs::path(platform::data_path("settings")) / "caesar.inf").string();
+        options_path = (fs::path(platform::paths().settings) / "caesar.inf").string();
     } catch (const std::exception&) {
     }
     if (options_path.empty() || !ui::load_options(options_path, game_options)) {
@@ -664,8 +747,15 @@ int main(int argc, char** argv) {
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
     enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap,
-                        NameEntry, Options };
-    Screen options_return = Screen::City;  // where "Resume game" goes back to
+                        NameEntry, Settings };
+    Screen settings_return = Screen::City;  // where Resume goes back to
+    viewer::SettingsView settings_view;
+    settings_view.languages = languages;
+    settings_view.game_dir = game_dir;
+#if defined(__ANDROID__)
+    settings_view.windowed_platform = false;
+#endif
+    settings_view.can_import = platform::can_import_game_folder();
     // DS:0x0DD0: the governor's name, kept across new games and saved with each.
     std::string governor_name = ui::governor_name(state);
     ui::NameEntry name_entry;
@@ -687,6 +777,7 @@ int main(int argc, char** argv) {
     bool ending_caesar = false;  // the ending page: Caesar, or dismissed
     bool quit_requested = false;
     if (start_screen == "maps") screen = Screen::Maps;
+    if (start_screen == "settings") screen = Screen::Settings;
     if (start_screen == "province") screen = Screen::Province;
     if (start_screen == "forum") screen = have_forum_picture ? Screen::ForumHall : Screen::Forum;
     if (start_screen == "forum-page") screen = Screen::Forum;
@@ -779,7 +870,7 @@ int main(int argc, char** argv) {
         std::string dir = save_dir_option;
         if (dir.empty()) {
             try {
-                dir = platform::data_path("saves");
+                dir = platform::paths().saves;
             } catch (const std::exception&) {
                 dir = game_dir;
             }
@@ -838,6 +929,14 @@ int main(int argc, char** argv) {
                 return name_return_to_forum ? viewer::forum_page(state, forum_tab, sim.speed, rating_hint)
                                             : viewer::start_page(funding_level, start_difficulty, governor_name);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons);
+            case Screen::Settings: {
+                viewer::SettingsView v = settings_view;
+                v.messages_on = model::global_word(state, 0x6C78) != 0;
+                v.in_game = settings_return != Screen::Start;
+                v.game_found = platform::looks_like_game_folder(game_dir);
+                v.game_dir = viewer::tail(game_dir, 30);
+                return viewer::settings_page(settings, game_options, v);
+            }
             default: return ui::Page{};
         }
     };
@@ -853,7 +952,7 @@ int main(int argc, char** argv) {
         return screen == Screen::Forum || screen == Screen::Promotion ||
                (screen == Screen::Battle && !have_battle_art) ||
                screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files ||
-               screen == Screen::Notice;
+               screen == Screen::Notice || screen == Screen::Settings;
     };
     auto apply_page_action = [&](int action) {
         namespace admin = systems::administration;
@@ -1109,7 +1208,7 @@ int main(int argc, char** argv) {
     };
     auto province_label = [&]() -> std::string {
         const ProvinceCommand& command = kProvinceCommands[province_command];
-        std::string s = command.label;
+        std::string s = ui::tr(command.label);
         const int cost = systems::economy::kConstructionCost[static_cast<size_t>(command.id)];
         if (cost > 0) s += ", " + std::to_string(cost) + " Dn";
         if (command.id >= 30 && command.id <= 33) {
@@ -1117,9 +1216,9 @@ int main(int argc, char** argv) {
             if (order_cohort < 0)
                 s += ", pick a Cohort";
             else if (command.id == 31)
-                s += patrol_x < 0 ? ", first point" : ", second point";
+                s += std::string(", ") + ui::tr(patrol_x < 0 ? "first point" : "second point");
             else
-                s += ", pick an army";
+                s += std::string(", ") + ui::tr("pick an army");
         }
         return s + " - Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn";
     };
@@ -1129,15 +1228,13 @@ int main(int argc, char** argv) {
         return 3;
     }
 
-    // Prove platform::paths works even though this app doesn't save
-    // anything yet -- Phase 1's scope per the roadmap is wiring these up,
-    // not yet using them for real persistence (that's Phase 2+).
     try {
-        std::string prefs = platform::data_path("viewer-scratch");
-        std::printf("prefs directory resolved to: %s\n", prefs.c_str());
+        const platform::GaiusPaths& gaius_paths = platform::paths();
+        std::printf("settings: %s\nsaves: %s\n", gaius_paths.settings.c_str(), gaius_paths.saves.c_str());
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "note: platform::data_path unavailable in this environment: %s\n", e.what());
+        std::fprintf(stderr, "note: Gaius's folders are unavailable: %s\n", e.what());
     }
+    platform::open_gamepads();
 
     if (save_mode) {
         std::printf("save mode -- layer: %s (right-click / two-finger-tap / gamepad B to cycle)\n",
@@ -1159,7 +1256,15 @@ int main(int argc, char** argv) {
     }
 
     try {
-        platform::Window window("Gaius Viewer - " + in_path, kLogicalW, kLogicalH, 960, 600);
+        const auto window_mode_of = [](ui::WindowModeSetting m) {
+            return m == ui::WindowModeSetting::Fullscreen   ? platform::WindowMode::Fullscreen
+                   : m == ui::WindowModeSetting::Borderless ? platform::WindowMode::Borderless
+                                                            : platform::WindowMode::Windowed;
+        };
+        platform::Window window("Gaius", kLogicalW, kLogicalH, 960, 600,
+                                screenshot_path.empty() ? window_mode_of(settings.window_mode)
+                                                        : platform::WindowMode::Windowed);
+        window.set_vsync(settings.frame_cap == 0);
 
         // Toolbar. Sized from the physical window (or an explicit
         // --ui-scale), but laid out in LOGICAL coordinates, which is what
@@ -1173,7 +1278,12 @@ int main(int argc, char** argv) {
         bool has_touch = SDL_GetNumTouchDevices() > 0;
         ui::Breakpoint bp = ui_scale_override >= 0 ? static_cast<ui::Breakpoint>(ui_scale_override)
                                                    : ui::breakpoint_for(pw0, ph0, has_touch);
-        ui::Metrics metrics = ui::metrics_for(bp);
+        // The Settings screen's UI scale, unless --ui-scale names one.
+        const auto toolbar_metrics = [&]() {
+            if (ui_scale_override < 0 && settings.ui_scale > 0) return ui::metrics_for_scale(settings.ui_scale);
+            return ui::metrics_for(bp);
+        };
+        ui::Metrics metrics = toolbar_metrics();
         ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH);
         int hovered = -1;
         if (save_mode) {
@@ -1198,14 +1308,14 @@ int main(int argc, char** argv) {
         // page's dozen rows would not fit the logical screen.
         const ui::Metrics page_metrics = ui::metrics_for(ui::Breakpoint::Desktop);
         const std::vector<ui::PanelButton> screen_tabs = {
-            {"City", 900}, {"Province", 901}, {"Maps", 902}, {"Forum", 903}, {"Options", 904}};
+            {ui::tr("City"), 900}, {ui::tr("Province"), 901}, {ui::tr("Maps"), 902}, {ui::tr("Forum"), 903}, {ui::tr("Settings"), 904}};
         std::vector<ui::PanelButton> overlay_buttons;
-        for (int i = 0; i < viewer::kOverlayCount; ++i) overlay_buttons.push_back({viewer::kOverlayNames[i], 1100 + i});
+        for (int i = 0; i < viewer::kOverlayCount; ++i) overlay_buttons.push_back({ui::tr(viewer::kOverlayNames[i]), 1100 + i});
         const ui::PanelLayout overlay_bar = ui::bar_layout(overlay_buttons, page_metrics, kLogicalW, kLogicalH);
         const ui::PanelLayout hall_bar = ui::bar_layout({}, page_metrics, kLogicalW, kLogicalH);
         const ui::PanelLayout strip = ui::strip_layout(screen_tabs, page_metrics, kLogicalW);
         std::vector<ui::PanelButton> province_buttons;
-        for (int i = 0; i < kProvinceCommandCount; ++i) province_buttons.push_back({kProvinceCommands[i].label, 1000 + i});
+        for (int i = 0; i < kProvinceCommandCount; ++i) province_buttons.push_back({ui::tr(kProvinceCommands[i].label), 1000 + i});
         const ui::PanelLayout province_bar = ui::bar_layout(province_buttons, page_metrics, kLogicalW, kLogicalH);
         Camera pcam(40.0 * render::kProvincePx, 40.0 * render::kProvincePx);
         pcam.visible_h = kLogicalH - province_bar.frame.h;
@@ -1237,10 +1347,18 @@ int main(int argc, char** argv) {
                 static_cast<audio::GameAudio*>(user)->render(reinterpret_cast<int16_t*>(stream),
                                                             static_cast<size_t>(len) / 2, 44100);
             };
+            game_audio.set_volumes(settings.music_volume, settings.effects_volume);
             audio_device = SDL_OpenAudioDevice(nullptr, 0, &want, nullptr, 0);
             if (audio_device == 0) std::printf("audio: %s\n", SDL_GetError());
             else SDL_PauseAudioDevice(audio_device, 0);
         }
+        // The device is closed before game_audio goes: its thread renders from it.
+        struct AudioDeviceCloser {
+            SDL_AudioDeviceID& id;
+            ~AudioDeviceCloser() {
+                if (id != 0) SDL_CloseAudioDevice(id);
+            }
+        } audio_device_closer{audio_device};
         const auto play_effect = [&](int effect) {
             if (audio_device == 0) return;
             SDL_LockAudioDevice(audio_device);
@@ -1292,8 +1410,9 @@ int main(int argc, char** argv) {
                         if (const char* tune = advisor_tune(forum_tab)) play_music(tune);
                     }
                     break;
-                case Screen::Options:
-                    if (from != Screen::Options) play_music("czarjin5.xmi");
+                case Screen::Settings:
+                    // The original's Options screen tune (0x0ECA3).
+                    if (from != Screen::Settings && from != Screen::Files) play_music("czarjin5.xmi");
                     break;
                 case Screen::Promotion: play_music(promotion_to_caesar ? "emptune.xmi" : "czarjin1.xmi"); break;
                 case Screen::Ending:
@@ -1309,11 +1428,14 @@ int main(int argc, char** argv) {
         };
         const auto switch_to = [&](int i) {
             if (i == 4) {
-                // The control panel's "Game Options" (command 40, 0x1739D -> 0x0ECA3).
-                if (!have_interface_art) return;
-                if (screen != Screen::Options) options_return = screen;
-                options_dialog = ui::OptionsDialog::None;
-                screen = Screen::Options;
+                // The control panel's "Game Options" (command 40, 0x1739D ->
+                // 0x0ECA3): Gaius's Settings screen, which holds the original's
+                // options (apps/viewer/settings_page.hpp).
+                if (screen != Screen::Settings) settings_return = screen;
+                settings_view.tab = viewer::kSettingsGame;
+                settings_view.confirm = viewer::SettingsView::Confirm::None;
+                settings_view.capturing = -1;
+                screen = Screen::Settings;
                 return;
             }
             screen = i == 0   ? Screen::City
@@ -1328,7 +1450,6 @@ int main(int argc, char** argv) {
         // what each button does (its handler).
         const auto buttons_key = [&]() -> int {
             if (!save_mode) return -1;
-            if (screen == Screen::Options && have_interface_art) return 100 + static_cast<int>(options_dialog);
             if (!original_forum_screen()) return -1;
             if (forum_tab == viewer::kGovernor) return 200 + static_cast<int>(governor_dialog);
             if (forum_tab == viewer::kTreasurer) return 1;
@@ -1356,6 +1477,89 @@ int main(int argc, char** argv) {
             }
             if (!options_path.empty() && !ui::save_options(options_path, game_options))
                 std::printf("options: can't write %s\n", options_path.c_str());
+        };
+        const auto save_settings_now = [&]() {
+            // Headless runs (--screenshot) never write the player's settings.
+            if (!settings_path.empty() && screenshot_path.empty() && !ui::save_settings(settings_path, settings))
+                std::printf("settings: can't write %s\n", settings_path.c_str());
+        };
+        // Gaius's settings take effect at once.
+        const auto apply_settings = [&]() {
+            if (screenshot_path.empty()) window.set_mode(window_mode_of(settings.window_mode));
+            window.set_vsync(settings.frame_cap == 0);
+            metrics = toolbar_metrics();
+            toolbar = ui::Toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH);
+            toolbar.show_tool(tool_index);
+            cam.visible_h = kLogicalH - toolbar.panel().h;
+            cam.clamp();
+            for (const ui::Catalog& c : languages)
+                if (c.code == settings.language) ui::set_catalog(c);
+            if (audio_device != 0) {
+                SDL_LockAudioDevice(audio_device);
+                game_audio.set_volumes(settings.music_volume, settings.effects_volume);
+                SDL_UnlockAudioDevice(audio_device);
+            }
+            save_settings_now();
+        };
+        // The Settings screen's buttons and arrows (apps/viewer/settings_page.hpp).
+        const auto on_settings_action = [&](int action) {
+            using Confirm = viewer::SettingsView::Confirm;
+            if (action >= viewer::kActionSettingsTab && action < viewer::kActionSettingsTab + viewer::kSettingsTabCount) {
+                settings_view.tab = static_cast<viewer::SettingsTab>(action - viewer::kActionSettingsTab);
+                settings_view.capturing = -1;
+                platform::cancel_capture();
+                return;
+            }
+            switch (action) {
+                case viewer::kActionResume:  // 0x0F0CC
+                    screen = settings_return;
+                    return;
+                case viewer::kActionPause:  // 0x0F01E: the view without steps until a click or T
+                    screen = settings_return;
+                    time_running = false;
+                    pause_until_click = true;
+                    return;
+                case viewer::kActionSettingsLoad:
+                case viewer::kActionSettingsSave:
+                    // 0x0EE07 / 0x0EE93: the original's file dialog (0x0C558);
+                    // Gaius's slot page stands in for it.
+                    files_return = Screen::Settings;
+                    files_saving = action == viewer::kActionSettingsSave;
+                    refresh_slots();
+                    screen = Screen::Files;
+                    return;
+                case viewer::kActionRestart: settings_view.confirm = Confirm::Restart; return;  // 0x0F43F
+                case viewer::kActionExit: settings_view.confirm = Confirm::Exit; return;        // 0x0ED2C
+                case viewer::kActionYes:
+                    if (settings_view.confirm == Confirm::Restart) {
+                        screen = Screen::Start;
+                        time_running = false;
+                    } else if (settings_view.confirm == Confirm::Exit) {
+                        running = false;
+                    }
+                    settings_view.confirm = Confirm::None;
+                    return;
+                case viewer::kActionNo: settings_view.confirm = Confirm::None; return;
+                case viewer::kActionResetControls:
+                    platform::reset_bindings();
+                    viewer::store_bindings(settings);
+                    save_settings_now();
+                    return;
+                case viewer::kActionImportGame: platform::import_game_folder(); return;
+                case viewer::kActionRescanGame: return;  // the page looks each time it's drawn
+                default: break;
+            }
+            bool messages_on = model::global_word(state, 0x6C78) != 0;
+            int capture = -1;
+            const ui::GameOptions before = game_options;
+            if (viewer::adjust_setting(action, settings, game_options, messages_on, languages, &capture)) {
+                model::set_global_word(state, 0x6C78, messages_on ? 1 : 0);
+                if (game_options.words != before.words) options_changed();
+                apply_settings();
+            } else if (capture >= 0) {
+                settings_view.capturing = capture;
+                platform::capture_binding(platform::kBindable[capture / 2], capture % 2 != 0);
+            }
         };
         const auto on_button = [&](int key, int index) {
             namespace forum = systems::forum;
@@ -1398,49 +1602,6 @@ int main(int argc, char** argv) {
                               governor_dialog == ui::GovernorDialog::Salary ? forum::Control::Salary
                                                                             : forum::Control::Donation,
                               index == 0 ? 1 : -1);
-            } else if (key == 100 + static_cast<int>(ui::OptionsDialog::None)) {
-                // DS:0x0564, the Options menu.
-                switch (static_cast<ui::OptionsItem>(index)) {
-                    case ui::OptionsItem::Resume: screen = options_return; break;  // 0x0F0CC
-                    case ui::OptionsItem::GameSpeed: options_dialog = ui::OptionsDialog::Speed; break;
-                    case ui::OptionsItem::Sound: options_dialog = ui::OptionsDialog::Sound; break;
-                    case ui::OptionsItem::Display: options_dialog = ui::OptionsDialog::Display; break;
-                    case ui::OptionsItem::Load:
-                    case ui::OptionsItem::Save:
-                        // 0x0EE07 / 0x0EE93: the original's file dialog (0x0C558);
-                        // Gaius's own slot page stands in for it.
-                        files_return = Screen::Options;
-                        files_saving = static_cast<ui::OptionsItem>(index) == ui::OptionsItem::Save;
-                        refresh_slots();
-                        screen = Screen::Files;
-                        break;
-                    case ui::OptionsItem::Pause:
-                        // 0x0F01E: the view without steps until a click or T.
-                        screen = options_return;
-                        time_running = false;
-                        pause_until_click = true;
-                        break;
-                    case ui::OptionsItem::Restart: options_dialog = ui::OptionsDialog::Restart; break;
-                    case ui::OptionsItem::Exit: options_dialog = ui::OptionsDialog::Exit; break;
-                }
-            } else if (key == 100 + static_cast<int>(ui::OptionsDialog::Restart)) {
-                // 0x0F53A OK: DS:0x6D6F ends the menu into a new game; 0x0F541 Cancel.
-                options_dialog = ui::OptionsDialog::None;
-                if (index == 0) {
-                    screen = Screen::Start;
-                    time_running = false;
-                }
-            } else if (key == 100 + static_cast<int>(ui::OptionsDialog::Exit)) {
-                // 0x0EDE3 resumes the game; 0x0EDF0 leaves it (DS:0x6D70).
-                options_dialog = ui::OptionsDialog::None;
-                if (index == 0) screen = options_return;
-                if (index == 1) running = false;
-            } else if (key > 100 && key < 200) {
-                bool messages_on = model::global_word(state, 0x6C78) != 0;
-                if (ui::options_dialog_button(options_dialog, index, active_buttons, game_options, messages_on))
-                    options_dialog = ui::OptionsDialog::None;
-                model::set_global_word(state, 0x6C78, messages_on ? 1 : 0);
-                options_changed();
             }
         };
         // A headless click on a button: held for a frame, then let go.
@@ -1513,7 +1674,6 @@ int main(int argc, char** argv) {
                 if (synthetic) press_button_now(lx, ly);
                 return;
             }
-            if (screen == Screen::Options) return;  // the original ignores other clicks here
             if (original_forum_screen() && governor_dialog != ui::GovernorDialog::None) {
                 // Any other click ends a governor dialog (the original ends
                 // it on a right-click).
@@ -1544,7 +1704,13 @@ int main(int argc, char** argv) {
             if (page_screen()) {
                 const ui::Page page = current_page();
                 const int action = ui::hit_test(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), lx, ly);
-                if (action >= 0) apply_page_action(action);
+                if (action >= 0) {
+                    if (screen == Screen::Settings) {
+                        on_settings_action(action);
+                    } else {
+                        apply_page_action(action);
+                    }
+                }
                 return;
             }
             if (screen == Screen::EmpireMap) {
@@ -1663,6 +1829,10 @@ int main(int argc, char** argv) {
                 return;
             }
             int hit = toolbar.hit_test(lx, ly);
+            if (hit == ui::kPreviousPage || hit == ui::kNextPage) {
+                toolbar.turn_page(hit == ui::kNextPage ? 1 : -1);
+                return;
+            }
             if (hit >= 0) {
                 if (hit == tool_index && cycle_variant()) return;  // tapping the selected button again
                 tool_index = hit;
@@ -1719,10 +1889,18 @@ int main(int argc, char** argv) {
         }
         for (int action : test_actions) {
             std::printf("--test-action %d\n", action);
-            if (save_mode && page_screen()) apply_page_action(action);
+            if (save_mode && screen == Screen::Settings) {
+                on_settings_action(action);
+            } else if (save_mode && page_screen()) {
+                apply_page_action(action);
+            }
         }
 
         Uint32 last_step_ms = SDL_GetTicks();
+        Uint32 last_pad_ms = SDL_GetTicks();
+        Uint32 last_frame_ms = SDL_GetTicks();
+        double pad_pointer_x = 0, pad_pointer_y = 0;
+        bool pad_pointer_moved = false;
         while (running) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
@@ -1765,6 +1943,36 @@ int main(int argc, char** argv) {
                     case platform::CommandType::Quit:
                         running = false;
                         break;
+                    case platform::CommandType::Menu:
+                        // Escape, gamepad Start, Android's Back: the Settings
+                        // screen, or back out of it.
+                        if (!save_mode) {
+                            running = false;
+                        } else if (screen == Screen::Settings) {
+                            if (settings_view.confirm != viewer::SettingsView::Confirm::None)
+                                settings_view.confirm = viewer::SettingsView::Confirm::None;
+                            else if (settings_return != Screen::Start)
+                                screen = settings_return;
+                        } else if (screen != Screen::NameEntry) {
+                            switch_to(4);
+                        }
+                        break;
+                    case platform::CommandType::Rebound:
+                        settings_view.capturing = -1;
+                        viewer::store_bindings(settings);
+                        save_settings_now();
+                        break;
+                    case platform::CommandType::PreviousTool:
+                        if (save_mode && screen == Screen::Province) {
+                            province_command = (province_command + kProvinceCommandCount - 1) % kProvinceCommandCount;
+                            order_cohort = patrol_x = patrol_y = -1;
+                            play_effect(0);
+                        } else if (save_mode && screen == Screen::City) {
+                            tool_index = (tool_index + kBuildToolCount - 1) % kBuildToolCount;
+                            toolbar.show_tool(tool_index);
+                            play_effect(0);
+                        }
+                        break;
                     case platform::CommandType::ToggleWindowMode: {
                         auto next = window.mode() == platform::WindowMode::Windowed ? platform::WindowMode::Borderless
                                     : window.mode() == platform::WindowMode::Borderless
@@ -1785,14 +1993,17 @@ int main(int argc, char** argv) {
                             time_running = true;
                             break;
                         }
-                        if (save_mode && screen == Screen::Options) {
+                        if (save_mode && screen == Screen::Settings) {
                             // DS:0x6D4C: a right click leaves the menu, or a
-                            // dialog back to it (the restart question waits
-                            // for its buttons).
-                            if (options_dialog == ui::OptionsDialog::None)
-                                screen = options_return;
-                            else if (options_dialog != ui::OptionsDialog::Restart)
-                                options_dialog = ui::OptionsDialog::None;
+                            // question back to it.
+                            if (settings_view.capturing >= 0) {
+                                settings_view.capturing = -1;
+                                platform::cancel_capture();
+                            } else if (settings_view.confirm != viewer::SettingsView::Confirm::None) {
+                                settings_view.confirm = viewer::SettingsView::Confirm::None;
+                            } else if (settings_return != Screen::Start) {
+                                screen = settings_return;
+                            }
                             break;
                         }
                         if (save_mode && message_visible()) {
@@ -1874,6 +2085,7 @@ int main(int argc, char** argv) {
                             play_effect(0);
                         } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + 1) % kBuildToolCount;
+                            toolbar.show_tool(tool_index);
                             std::printf("build tool: %s\n",
                                         systems::construction::command_name(kBuildTools[tool_index]));
                             play_effect(0);
@@ -2001,12 +2213,78 @@ int main(int argc, char** argv) {
                 if (!window.window_to_logical(wx, wy, &lx, &ly)) lx = ly = -1;
                 pointer.x = lx;
                 pointer.y = ly;
-                pointer.left_held = (mouse & SDL_BUTTON_LMASK) != 0;
+                pointer.left_held = (mouse & SDL_BUTTON_LMASK) != 0 ||
+                                    platform::gamepad_button_down(platform::button_for(platform::CommandType::Select));
                 pointer.left_released = pointer_was_held && !pointer.left_held;
                 pointer_was_held = pointer.left_held;
                 if (key >= 0 && !active_buttons.empty()) {
                     const int fired = ui::process_buttons(active_buttons, button_tracker, pointer);
                     if (fired >= 0) on_button(key, fired);
+                }
+            }
+
+            // Gamepads (Phase 9): the left stick moves the pointer -- the
+            // mouse, so every screen answers it as it answers a mouse -- and
+            // holding A drags; the right stick and the d-pad pan the map, the
+            // triggers zoom. With the pointer off, the left stick pans too.
+            if (platform::gamepad_connected()) {
+                const Uint32 pad_now = SDL_GetTicks();
+                const double dt = std::min(0.1, (pad_now - last_pad_ms) / 1000.0);
+                last_pad_ms = pad_now;
+                const platform::GamepadAxes axes = platform::gamepad_axes();
+                double pan_x = axes.right_x, pan_y = axes.right_y;
+                if (platform::gamepad_button_down(SDL_CONTROLLER_BUTTON_DPAD_LEFT)) pan_x = -1;
+                if (platform::gamepad_button_down(SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) pan_x = 1;
+                if (platform::gamepad_button_down(SDL_CONTROLLER_BUTTON_DPAD_UP)) pan_y = -1;
+                if (platform::gamepad_button_down(SDL_CONTROLLER_BUTTON_DPAD_DOWN)) pan_y = 1;
+                if (!settings.gamepad_cursor) {
+                    pan_x += axes.left_x;
+                    pan_y += axes.left_y;
+                }
+                const bool map_screen = screen == Screen::City || screen == Screen::Province;
+                if (map_screen && (pan_x != 0 || pan_y != 0 || axes.left_trigger > 0 || axes.right_trigger > 0)) {
+                    Camera& c = screen == Screen::Province ? pcam : cam;
+                    constexpr double kPanPerSecond = 240.0;  // logical pixels at full tilt
+                    c.x += pan_x * kPanPerSecond * dt / c.zoom;
+                    c.y += pan_y * kPanPerSecond * dt / c.zoom;
+                    c.zoom *= std::pow(2.0, (axes.right_trigger - axes.left_trigger) * dt);
+                    c.clamp();
+                }
+                if (settings.gamepad_cursor && (axes.left_x != 0 || axes.left_y != 0)) {
+                    int pw = 0, ph = 0;
+                    window.physical_size(&pw, &ph);
+                    int mx = 0, my = 0;
+                    SDL_GetMouseState(&mx, &my);
+                    // Half the screen's width a second at full tilt.
+                    const double speed = pw * 0.5;
+                    pad_pointer_x = std::clamp(pad_pointer_x + axes.left_x * speed * dt, 0.0, pw - 1.0);
+                    pad_pointer_y = std::clamp(pad_pointer_y + axes.left_y * speed * dt, 0.0, ph - 1.0);
+                    if (std::abs(static_cast<int>(pad_pointer_x) - mx) > 2 || std::abs(static_cast<int>(pad_pointer_y) - my) > 2) {
+                        // Not where the mouse is: someone moved the mouse; start from it.
+                        if (!pad_pointer_moved) {
+                            pad_pointer_x = mx + axes.left_x * speed * dt;
+                            pad_pointer_y = my + axes.left_y * speed * dt;
+                        }
+                    }
+                    pad_pointer_moved = true;
+                    const int nx = static_cast<int>(pad_pointer_x), ny = static_cast<int>(pad_pointer_y);
+                    SDL_WarpMouseInWindow(window.sdl_window(), nx, ny);
+                    // Holding the Select button drags, as a held mouse button does.
+                    if (platform::gamepad_button_down(platform::button_for(platform::CommandType::Select))) {
+                        SDL_Event motion{};
+                        motion.type = SDL_MOUSEMOTION;
+                        motion.motion.windowID = SDL_GetWindowID(window.sdl_window());
+                        motion.motion.x = nx;
+                        motion.motion.y = ny;
+                        motion.motion.state = SDL_BUTTON_LMASK;
+                        SDL_PushEvent(&motion);
+                    }
+                } else {
+                    pad_pointer_moved = false;
+                    int mx = 0, my = 0;
+                    SDL_GetMouseState(&mx, &my);
+                    pad_pointer_x = mx;
+                    pad_pointer_y = my;
                 }
             }
 
@@ -2050,17 +2328,10 @@ int main(int argc, char** argv) {
 
             const std::string tool_text = save_mode ? tool_label() : std::string();
             const std::string funds_text =
-                save_mode ? "Funds " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn"
+                save_mode ? std::string(ui::tr("Funds")) + " " + std::to_string(model::global_word(state, systems::economy::kFunds)) + " Dn"
                           : std::string();
             const ui::GameFont* font = have_font ? &game_font : nullptr;
-            if (save_mode && screen == Screen::Options && have_interface_art) {
-                formats::IndexedImage options_image = ui::compose_options_screen(
-                    interface_art, options_dialog, game_options, model::global_word(state, 0x6C78) != 0);
-                if (buttons_key() == active_buttons_key)
-                    ui::draw_buttons(options_image, interface_art.blocks, active_buttons, button_tracker, pointer);
-                frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
-                ui::canvas_to_rgb(options_image, interface_art.palette, frame);
-            } else if (save_mode && (page_screen() || screen == Screen::NameEntry)) {
+            if (save_mode && (page_screen() || screen == Screen::NameEntry)) {
                 const ui::Page page = current_page();
                 frame.assign(static_cast<size_t>(kLogicalW) * kLogicalH * 3, 0);
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
@@ -2261,6 +2532,13 @@ int main(int argc, char** argv) {
                 }
             }
             window.present_rgb24(frame);
+            // The Settings screen's frame rate: vsync, or a cap (SDL_Delay).
+            if (settings.frame_cap > 0 && screenshot_path.empty()) {
+                const Uint32 target = 1000 / static_cast<Uint32>(settings.frame_cap);
+                const Uint32 spent = SDL_GetTicks() - last_frame_ms;
+                if (spent < target) SDL_Delay(target - spent);
+            }
+            last_frame_ms = SDL_GetTicks();
             if (quit_requested) running = false;
             ++frame_count;
 

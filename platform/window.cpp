@@ -66,6 +66,8 @@ void Window::set_mode(WindowMode mode) {
     recompute_viewport();
 }
 
+void Window::set_vsync(bool on) { SDL_RenderSetVSync(renderer_, on ? 1 : 0); }
+
 void Window::resize(int w, int h) {
     if (mode_ != WindowMode::Windowed) return;  // fullscreen/borderless follow the desktop size
     SDL_SetWindowSize(window_, w, h);

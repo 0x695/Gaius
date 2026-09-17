@@ -1,0 +1,3 @@
+# The languages Gaius offers, one code a line (lang/<code>.txt). English is built in.
+en
+de

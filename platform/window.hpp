@@ -42,6 +42,8 @@ public:
     Window& operator=(const Window&) = delete;
 
     void set_mode(WindowMode mode);
+    // Waiting for the display's refresh when presenting (on by default).
+    void set_vsync(bool on);
     WindowMode mode() const { return mode_; }
 
     // No-op outside Windowed mode.

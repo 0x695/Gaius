@@ -7,6 +7,7 @@
 #include <string>
 
 #include "ui/font.hpp"
+#include "ui/strings.hpp"
 
 namespace gaius::ui {
 
@@ -126,14 +127,25 @@ Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metri
     const int pad = std::max(1, m_.pad_px);
     const int stride = m_.button_px() + m_.gap_px;
     const int avail = std::max(m_.button_px(), screen_w - 2 * pad);
+    const int n = std::max(1, count);
+    const int label_block = m_.label_h + pad;
 
-    cols_ = std::max(1, (avail + m_.gap_px) / stride);
-    cols_ = std::min(cols_, std::max(1, count));
-    rows_ = std::max(1, (std::max(1, count) + cols_ - 1) / cols_);
+    const int fit_cols = std::max(1, (avail + m_.gap_px) / stride);
+    // The rows the panel may have: as many as fit in kMaxPanelShare, at least one.
+    const int budget = static_cast<int>(screen_h * kMaxPanelShare) - (pad + label_block + pad) + m_.gap_px;
+    const int max_rows = std::max(1, budget / stride);
+    cols_ = std::min(fit_cols, n);
+    rows_ = std::max(1, (n + cols_ - 1) / cols_);
+    per_page_ = n;
+    if (rows_ > max_rows) {
+        // Paged: an arrow at each end of the rows, the tools between.
+        cols_ = std::max(3, fit_cols);
+        rows_ = max_rows;
+        per_page_ = std::max(1, (cols_ - 2) * rows_);
+    }
 
     const int grid_w = cols_ * stride - m_.gap_px;
     const int grid_h = rows_ * stride - m_.gap_px;
-    const int label_block = m_.label_h + pad;
     const int panel_h = pad + label_block + grid_h + pad;
 
     panel_ = Rect{0, screen_h - panel_h, screen_w, panel_h};
@@ -141,15 +153,43 @@ Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metri
     grid_y0_ = panel_.y + pad + label_block;
 }
 
+void Toolbar::turn_page(int delta) {
+    const int n = pages();
+    page_ = ((page_ + delta) % n + n) % n;
+}
+
+void Toolbar::show_tool(int i) {
+    if (i >= 0 && i < count() && paged()) page_ = i / per_page_;
+}
+
+Rect Toolbar::previous_arrow() const {
+    if (!paged()) return Rect{};
+    return Rect{grid_x0_, grid_y0_, m_.button_px(), rows_ * (m_.button_px() + m_.gap_px) - m_.gap_px};
+}
+
+Rect Toolbar::next_arrow() const {
+    if (!paged()) return Rect{};
+    const int stride = m_.button_px() + m_.gap_px;
+    return Rect{grid_x0_ + (cols_ - 1) * stride, grid_y0_, m_.button_px(), rows_ * stride - m_.gap_px};
+}
+
 Rect Toolbar::button(int i) const {
     if (i < 0 || i >= count()) return Rect{};
     const int stride = m_.button_px() + m_.gap_px;
-    const int col = i % cols_;
-    const int row = i / cols_;
-    return Rect{grid_x0_ + col * stride, grid_y0_ + row * stride, m_.button_px(), m_.button_px()};
+    if (!paged()) {
+        const int col = i % cols_;
+        const int row = i / cols_;
+        return Rect{grid_x0_ + col * stride, grid_y0_ + row * stride, m_.button_px(), m_.button_px()};
+    }
+    if (i / per_page_ != page_) return Rect{};
+    const int k = i % per_page_;
+    const int inner = cols_ - 2;
+    return Rect{grid_x0_ + (1 + k % inner) * stride, grid_y0_ + (k / inner) * stride, m_.button_px(), m_.button_px()};
 }
 
 int Toolbar::hit_test(int lx, int ly) const {
+    if (previous_arrow().contains(lx, ly)) return kPreviousPage;
+    if (next_arrow().contains(lx, ly)) return kNextPage;
     for (int i = 0; i < count(); ++i) {
         if (button(i).contains(lx, ly)) return i;
     }
@@ -176,7 +216,7 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
     int label_for = (hovered >= 0) ? hovered : selected;
     const char* label = (label_for >= 0 && label_for < bar.count())
                             ? systems::construction::command_name(bar.tool(label_for))
-                            : "SELECT A BUILDING";
+                            : tr("SELECT A BUILDING");
     const char* shown = (selected_label && label_for == selected) ? selected_label : label;
 
     // Try the label with the funds figure appended; fall back to the label
@@ -203,8 +243,32 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
         draw_text(rgb, w, h, p.x + (p.w - tw) / 2, p.y + std::max(1, m.pad_px), candidate, m.glyph_scale, kLabelText);
     }
 
+    // The page arrows: a triangle in each end column, and the page as dots.
+    if (bar.paged()) {
+        for (const bool next : {false, true}) {
+            const Rect a = next ? bar.next_arrow() : bar.previous_arrow();
+            fill_rect(rgb, w, h, a, kButtonFill);
+            stroke_rect(rgb, w, h, a, hovered == (next ? kNextPage : kPreviousPage) ? kHoverEdge : kButtonEdge);
+            const int half = std::max(2, std::min(a.w, a.h) / 4);
+            const int cx = a.x + a.w / 2, cy = a.y + a.h / 2;
+            for (int dy = -half; dy <= half; ++dy) {
+                const int len = half - (dy < 0 ? -dy : dy);
+                for (int dx = 0; dx <= len; ++dx) put(rgb, w, h, next ? cx - half / 2 + dx : cx + half / 2 - dx, cy + dy, kLabelText);
+            }
+        }
+        const Rect a = bar.previous_arrow();
+        const int dot = std::max(1, m.scale);
+        const int dots_w = bar.pages() * dot * 2 - dot;
+        const int dy = a.y + a.h + std::max(1, m.pad_px / 2);
+        for (int k = 0; k < bar.pages(); ++k) {
+            const Rect d{(w - dots_w) / 2 + k * dot * 2, std::min(dy, p.y + p.h - dot - 1), dot, dot};
+            fill_rect(rgb, w, h, d, k == bar.page() ? kSelectedEdge : kButtonEdge);
+        }
+    }
+
     for (int i = 0; i < bar.count(); ++i) {
         Rect b = bar.button(i);
+        if (b.w == 0) continue;  // on another page
         fill_rect(rgb, w, h, b, kButtonFill);
 
         Rect inner{b.x + m.pad_px, b.y + m.pad_px, b.w - 2 * m.pad_px, b.h - 2 * m.pad_px};

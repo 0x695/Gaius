@@ -30,19 +30,17 @@
 //    actually has, and it happens to be more useful than a pictogram
 //    when what you need to know is how much room a building takes.
 //
-// KNOWN TENSION, stated rather than hidden: the logical framebuffer is
-// 320x200 (masterplan section 4: a period-accurate coordinate space "for
-// game logic and original sprite alignment"). At Desktop scale the
-// toolbar reproduces the original's proportions almost exactly -- 16px
-// icons in a bottom bar, against the measured 24px original panel. At 2x
-// the buttons wrap to two rows and the panel eats about a third of the
-// screen; at 3x it would take three rows and leave no usable map. A
-// touch-first UI therefore cannot simply scale up inside a 320-wide
-// logical space. The real fix is one of: a logical framebuffer that grows
-// with the display (so UI scale and world scale are independent), or a
-// paged/scrolling toolbar. Both are larger decisions than this item, and
-// belong with Phase 9's platform pass -- ui::metrics_for caps at 2x for
-// now so no configuration produces an unusable screen.
+// PAGING. The logical framebuffer is 320x200 (masterplan section 4: a
+// period-accurate coordinate space "for game logic and original sprite
+// alignment"). At 1x the toolbar reproduces the original's proportions; at 2x
+// the buttons wrap to two rows. Past that, wrapping would leave no map, so
+// the toolbar keeps at most the rows that fit in half the screen (at least
+// one) and, when the tools don't fit, pages: the first and
+// last column of each page hold a previous and a next arrow (hit_test
+// returns kPreviousPage / kNextPage), and the tools between them show a
+// page at a time. The alternative, a logical framebuffer that grows with the
+// display, would change every screen drawn in the original's 320x200 art;
+// paging changes only the toolbar (Phase 9, 2026-09-17).
 
 #pragma once
 
@@ -67,11 +65,28 @@ struct GameFont;  // ui/game_font.hpp
 // ui/ from depending on apps/.
 using TileColorFn = formats::RGB (*)(uint8_t);
 
+// The largest share of the screen's height the panel may take before the
+// toolbar pages instead of adding a row.
+inline constexpr double kMaxPanelShare = 0.5;
+// hit_test's answers for the page arrows.
+inline constexpr int kPreviousPage = -2, kNextPage = -3;
+
 class Toolbar {
 public:
     Toolbar(const systems::construction::CommandId* tools, int count, Metrics m, int screen_w, int screen_h);
 
     int count() const { return static_cast<int>(tools_.size()); }
+    // Paging: whether the tools need more than one page, how many pages, the
+    // one showing, and turning it (wrapping around). show_tool turns to the
+    // page holding tool i.
+    bool paged() const { return per_page_ < count(); }
+    int pages() const { return paged() ? (count() + per_page_ - 1) / per_page_ : 1; }
+    int page() const { return page_; }
+    void turn_page(int delta);
+    void show_tool(int i);
+    // The arrows' boxes; empty when not paged.
+    Rect previous_arrow() const;
+    Rect next_arrow() const;
     systems::construction::CommandId tool(int i) const { return tools_[static_cast<size_t>(i)]; }
     const Metrics& metrics() const { return m_; }
     int columns() const { return cols_; }
@@ -81,11 +96,13 @@ public:
     Rect panel() const { return panel_; }
 
     // Geometry of button `i`. The ONLY source of button geometry -- see
-    // the header comment. Out-of-range indices give an empty rect rather
-    // than UB, since this is called from input handling.
+    // the header comment. Out-of-range indices, and tools on another page,
+    // give an empty rect rather than UB, since this is called from input
+    // handling.
     Rect button(int i) const;
 
-    // Index of the button under a logical-space point, or -1.
+    // Index of the button under a logical-space point, kPreviousPage /
+    // kNextPage for an arrow, or -1.
     int hit_test(int lx, int ly) const;
 
     // True if the point is anywhere on the panel. Callers use this to
@@ -100,6 +117,8 @@ private:
     int rows_ = 1;
     int grid_x0_ = 0;
     int grid_y0_ = 0;
+    int per_page_ = 1;  // tools a page shows
+    int page_ = 0;
     Rect panel_;
 };
 

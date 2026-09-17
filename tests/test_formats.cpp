@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,10 @@
 #include "formats/vpx/vpx.hpp"
 #include "model/city_state.hpp"
 #include "apps/viewer/screens.hpp"
+#include "apps/viewer/settings_page.hpp"
+#include "platform/paths.hpp"
+#include "ui/settings.hpp"
+#include "ui/strings.hpp"
 #include "render/city_render.hpp"
 #include "render/province_render.hpp"
 #include "stb_image.h"
@@ -2745,6 +2750,154 @@ bool wrote(const RegLog& log, int reg, int value) {
 }
 
 }  // namespace
+
+// ---------------------------------------------------------------------
+// Phase 9: paths, settings, languages
+// ---------------------------------------------------------------------
+
+void test_platform_paths() {
+    std::printf("test_platform_paths (each OS's folders for settings, saves and the game)\n");
+    using namespace gaius::platform;
+    PathEnvironment w;
+    w.os = Os::Windows;
+    w.appdata = "C:\\Users\\p\\AppData\\Roaming\\";
+    GaiusPaths p = resolve_paths(w);
+    CHECK(fs::path(p.settings) == fs::path("C:\\Users\\p\\AppData\\Roaming") / "Gaius" / "settings");
+    CHECK(fs::path(p.saves) == fs::path("C:\\Users\\p\\AppData\\Roaming") / "Gaius" / "saves");
+    CHECK(fs::path(p.game) == fs::path("C:\\Users\\p\\AppData\\Roaming") / "Gaius" / "game");
+
+    PathEnvironment l;
+    l.os = Os::Linux;
+    l.home = "/home/deck";
+    p = resolve_paths(l);
+    CHECK(fs::path(p.settings) == fs::path("/home/deck") / ".config" / "gaius");
+    CHECK(fs::path(p.saves) == fs::path("/home/deck") / ".local" / "share" / "gaius" / "saves");
+    CHECK(fs::path(p.game) == fs::path("/home/deck") / ".local" / "share" / "gaius" / "game");
+    l.xdg_config_home = "/xdg/config";
+    l.xdg_data_home = "/xdg/data/";
+    p = resolve_paths(l);
+    CHECK(fs::path(p.settings) == fs::path("/xdg/config") / "gaius");
+    CHECK(fs::path(p.saves) == fs::path("/xdg/data") / "gaius" / "saves");
+
+    PathEnvironment a;
+    a.os = Os::Android;
+    a.android_internal = "/data/user/0/org.gaius.game/files";
+    a.android_external = "/storage/emulated/0/Android/data/org.gaius.game/files";
+    p = resolve_paths(a);
+    CHECK(fs::path(p.settings) == fs::path(a.android_internal) / "settings");
+    CHECK(fs::path(p.saves) == fs::path(a.android_internal) / "saves");
+    CHECK(fs::path(p.game) == fs::path(a.android_external) / "game");
+
+    // No folder to be had: empty, not a relative path in the working folder.
+    PathEnvironment none;
+    none.os = Os::Linux;
+    p = resolve_paths(none);
+    CHECK(p.settings.empty() && p.saves.empty() && p.game.empty());
+    // Gaius's folders are never the game's own, where the original writes.
+    p = resolve_paths(w);
+    CHECK(p.saves != p.game && p.settings != p.game);
+}
+
+void test_ui_settings_file() {
+    std::printf("test_ui_settings_file (gaius.cfg: round trip, defaults, bad values ignored)\n");
+    using namespace gaius::ui;
+    Settings s;
+    s.window_mode = WindowModeSetting::Borderless;
+    s.ui_scale = 3;
+    s.frame_cap = 60;
+    s.music_volume = 40;
+    s.effects_volume = 70;
+    s.language = "de";
+    s.game_dir = "D:\\Games\\Caesar";
+    s.gamepad_cursor = false;
+    s.keys["cycle_tool"] = "Q";
+    s.buttons["menu"] = "guide";
+    const Settings r = parse_settings(settings_text(s));
+    CHECK(r.window_mode == s.window_mode && r.ui_scale == 3 && r.frame_cap == 60 && r.music_volume == 40 &&
+          r.effects_volume == 70 && r.language == "de" && r.game_dir == s.game_dir && !r.gamepad_cursor &&
+          r.keys == s.keys && r.buttons == s.buttons);
+    const Settings d = parse_settings("# nothing\nui_scale = 9\nframe_cap = 75\nmusic_volume = -3\nwindow_mode = x\n"
+                                      "unknown = 1\nnot a line\n");
+    const Settings defaults;
+    CHECK(d.ui_scale == defaults.ui_scale && d.frame_cap == defaults.frame_cap &&
+          d.music_volume == defaults.music_volume && d.window_mode == defaults.window_mode);
+    const fs::path tmp = fs::temp_directory_path() / "gaius_test_settings.cfg";
+    CHECK(save_settings(tmp.string(), s));
+    Settings loaded;
+    CHECK(load_settings(tmp.string(), loaded) && loaded.ui_scale == 3 && loaded.keys == s.keys);
+    std::error_code ec;
+    fs::remove(tmp, ec);
+    CHECK(!load_settings(tmp.string(), loaded));
+}
+
+void test_ui_strings() {
+    std::printf("test_ui_strings (language files: English as the key, partial translations)\n");
+    using namespace gaius::ui;
+    const Catalog c = parse_catalog("de", "\xEF\xBB\xBF# language = Deutsch\n# a comment\nSave the game = Spiel speichern\n"
+                                          "Load = Laden\nbroken line\nEmpty =  \n");
+    CHECK(c.code == "de" && c.name == "Deutsch" && c.text.size() == 2);
+    CHECK(std::string(tr("Save the game")) == "Save the game");  // English until a catalog is set
+    set_catalog(c);
+    CHECK(std::string(tr("Save the game")) == "Spiel speichern" && tr(std::string("Load")) == "Laden");
+    CHECK(std::string(tr("Not translated")) == "Not translated");
+    set_catalog(Catalog{"en", "English", {}});
+    CHECK(std::string(tr("Load")) == "Load");
+    // The shipped files parse, and every language listed has a file.
+    const fs::path lang = fs::path(__FILE__).parent_path().parent_path() / "lang";
+    const std::string index = [&] {
+        std::ifstream f(lang / "languages.txt");
+        return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }();
+    CHECK(!index.empty());
+    std::istringstream codes(index);
+    std::string code;
+    int listed = 0;
+    while (std::getline(codes, code)) {
+        while (!code.empty() && (code.back() == '\r' || code.back() == ' ')) code.pop_back();
+        if (code.empty() || code[0] == '#' || code == "en") continue;
+        ++listed;
+        std::ifstream f(lang / (code + ".txt"));
+        const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        const Catalog lc = parse_catalog(code, text);
+        CHECK(!lc.text.empty() && lc.name != code);
+    }
+    CHECK(listed >= 1);
+}
+
+void test_settings_page_rows() {
+    std::printf("test_settings_page_rows (the Settings screen's arrows change both settings files)\n");
+    namespace viewer = gaius::viewer;
+    using viewer::SettingRow;
+    gaius::ui::Settings s;
+    gaius::ui::GameOptions o = gaius::ui::default_options();
+    bool messages = true;
+    const std::vector<gaius::ui::Catalog> langs = {{"en", "English", {}}, {"de", "Deutsch", {}}};
+    const auto down = [](SettingRow r, int i = 0) { return viewer::kActionSettingDown + 2 * viewer::row_id(r, i); };
+    const auto up = [](SettingRow r, int i = 0) { return viewer::kActionSettingDown + 2 * viewer::row_id(r, i) + 1; };
+    CHECK(viewer::adjust_setting(down(SettingRow::GameSpeed), s, o, messages, langs) && o.speed() == 90);
+    viewer::adjust_setting(up(SettingRow::GameSpeed), s, o, messages, langs);
+    viewer::adjust_setting(up(SettingRow::GameSpeed), s, o, messages, langs);
+    CHECK(o.speed() == 100);  // clamped
+    viewer::adjust_setting(up(SettingRow::Tunes), s, o, messages, langs);
+    CHECK(!o.tunes());
+    viewer::adjust_setting(down(SettingRow::CitySounds), s, o, messages, langs);
+    CHECK(o.city_sounds_off());
+    viewer::adjust_setting(up(SettingRow::Messages), s, o, messages, langs);
+    CHECK(!messages);
+    viewer::adjust_setting(down(SettingRow::MusicVolume), s, o, messages, langs);
+    CHECK(s.music_volume == 90);
+    viewer::adjust_setting(down(SettingRow::WindowMode), s, o, messages, langs);
+    CHECK(s.window_mode == gaius::ui::WindowModeSetting::Fullscreen);  // wraps
+    viewer::adjust_setting(down(SettingRow::UiScale), s, o, messages, langs);
+    CHECK(s.ui_scale == 4);
+    viewer::adjust_setting(up(SettingRow::FrameRate), s, o, messages, langs);
+    CHECK(s.frame_cap == 30);
+    viewer::adjust_setting(up(SettingRow::Language), s, o, messages, langs);
+    CHECK(s.language == "de");
+    int capture = -1;
+    CHECK(!viewer::adjust_setting(up(SettingRow::Binding, 2), s, o, messages, langs, &capture) && capture == 5);
+    CHECK(!viewer::adjust_setting(123, s, o, messages, langs));
+}
 
 void test_gtl_library() {
     std::printf("test_gtl_library (SAMPLE.AD: 162 timbres; every tune's TIMB list is in it)\n");
@@ -6172,16 +6325,20 @@ void test_ui_toolbar_layout() {
         CHECK(p.w == 320);
         CHECK(p.y + p.h == 200);
         CHECK(p.h > 0 && p.h < 200);
-        CHECK(bar.rows() * bar.columns() >= n);
+        CHECK(p.h <= 100);  // at most half the screen: past that it pages
+        CHECK(bar.paged() ? (bar.columns() - 2) * bar.rows() * bar.pages() >= n : bar.rows() * bar.columns() >= n);
 
-        // Every button lies inside the panel, and none overlap.
+        // Every button lies inside the panel on its page, and none on a
+        // page overlap.
         for (int i = 0; i < n; ++i) {
+            bar.show_tool(i);
             Rect b = bar.button(i);
             CHECK(b.w == m.button_px() && b.h == m.button_px());
             CHECK(b.y >= p.y && b.y + b.h <= p.y + p.h);
             CHECK(b.x >= 0 && b.x + b.w <= 320);
             for (int j = i + 1; j < n; ++j) {
                 Rect o = bar.button(j);
+                if (o.w == 0) continue;  // another page
                 bool disjoint = b.x + b.w <= o.x || o.x + o.w <= b.x || b.y + b.h <= o.y || o.y + o.h <= b.y;
                 CHECK(disjoint);
             }
@@ -6205,6 +6362,40 @@ void test_ui_toolbar_layout() {
     CHECK(full.panel().h <= 32);  // comparable to the original's 24px bar
 }
 
+void test_ui_toolbar_paging() {
+    std::printf("test_ui_toolbar_paging (past 2x: at most half the screen, page arrows)\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+    const CommandId ring[] = {CommandId::Housing,  CommandId::Well,       CommandId::Fountain, CommandId::ReservoirPipe,
+                              CommandId::Temple,   CommandId::BathHouses, CommandId::Hospital, CommandId::School,
+                              CommandId::Oracle,   CommandId::Theater,    CommandId::Coliseum, CommandId::Hippodrome,
+                              CommandId::Barracks, CommandId::Prefecture, CommandId::Market,   CommandId::HeavyIndustry};
+    CHECK(!Toolbar(ring, 16, metrics_for_scale(1), 320, 200).paged());
+    const Toolbar two(ring, 16, metrics_for_scale(2), 320, 200);
+    CHECK(!two.paged() && two.rows() == 2);
+    for (int scale = 3; scale <= 4; ++scale) {
+        Toolbar bar(ring, 16, metrics_for_scale(scale), 320, 200);
+        CHECK(bar.paged() && bar.rows() == 1 && bar.panel().h <= 100);
+        CHECK(bar.pages() >= 2 && bar.page() == 0);
+        const Rect prev = bar.previous_arrow(), next = bar.next_arrow();
+        CHECK(prev.w > 0 && next.w > 0 && bar.hit_test(prev.x + 1, prev.y + 1) == kPreviousPage &&
+              bar.hit_test(next.x + 1, next.y + 1) == kNextPage);
+        // Every tool is on exactly one page, and turning past the last wraps.
+        std::vector<int> seen(16, 0);
+        for (int page = 0; page < bar.pages(); ++page) {
+            for (int i = 0; i < 16; ++i)
+                if (bar.button(i).w > 0) ++seen[static_cast<size_t>(i)];
+            bar.turn_page(1);
+        }
+        CHECK(std::all_of(seen.begin(), seen.end(), [](int v) { return v == 1; }) && bar.page() == 0);
+        bar.turn_page(-1);
+        CHECK(bar.page() == bar.pages() - 1);
+        bar.show_tool(0);
+        CHECK(bar.page() == 0 && bar.button(0).w == metrics_for_scale(scale).button_px());
+    }
+    CHECK(metrics_for_scale(4).glyph_scale == 2 && metrics_for_scale(9).scale == 4 && metrics_for_scale(0).scale == 1);
+}
+
 void test_ui_hit_test_matches_drawn_buttons() {
     std::printf("test_ui_hit_test_matches_drawn_buttons\n");
     using namespace gaius::ui;
@@ -6223,6 +6414,7 @@ void test_ui_hit_test_matches_drawn_buttons() {
     for (auto bp : {Breakpoint::Desktop, Breakpoint::Handheld, Breakpoint::Phone, Breakpoint::Tv}) {
         Toolbar bar(ring, n, metrics_for(bp), 320, 200);
         for (int i = 0; i < n; ++i) {
+            bar.show_tool(i);
             Rect b = bar.button(i);
             CHECK(bar.hit_test(b.x + b.w / 2, b.y + b.h / 2) == i);
             CHECK(bar.hit_test(b.x, b.y) == i);
@@ -6363,6 +6555,7 @@ int main() {
     test_ui_toolbar_funds_label();
     test_ui_toolbar_layout();
     test_ui_hit_test_matches_drawn_buttons();
+    test_ui_toolbar_paging();
     test_ui_font_rendering();
     test_ui_toolbar_render();
     test_ui_toolbar_variant_label();
@@ -6411,6 +6604,10 @@ int main() {
     test_battle_screen();
     test_battle_race_matches_saves();
     test_cohort2_handover();
+    test_platform_paths();
+    test_ui_settings_file();
+    test_ui_strings();
+    test_settings_page_rows();
     test_gtl_library();
     test_ail_driver_registers();
     test_ail_sequencer();

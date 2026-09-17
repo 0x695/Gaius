@@ -125,6 +125,8 @@ add_library(gaius_ui STATIC
   ui/forum_screens.cpp
   ui/toolbar.cpp
   ui/panel.cpp
+  ui/settings.cpp
+  ui/strings.cpp
 )
 target_link_libraries(gaius_ui PUBLIC gaius_systems)
 
@@ -165,11 +167,18 @@ add_executable(render_audio tools/render_audio.cpp)
 target_link_libraries(render_audio PRIVATE gaius_audio)
 
 # --- platform layer (Phase 1: window/input/paths) --------------------------
+# The platform rules that need no SDL (where Gaius's folders go), so the tests
+# can link them.
+add_library(gaius_platform_rules STATIC platform/path_rules.cpp)
+target_include_directories(gaius_platform_rules PUBLIC ${CMAKE_SOURCE_DIR})
+
 add_library(gaius_platform STATIC
   platform/window.cpp
   platform/input.cpp
   platform/paths.cpp
+  platform/game_import.cpp
 )
+target_link_libraries(gaius_platform PUBLIC gaius_platform_rules)
 target_include_directories(gaius_platform PUBLIC ${CMAKE_SOURCE_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(gaius_platform PUBLIC ${SDL2_LIBRARIES})
 target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
@@ -177,9 +186,12 @@ target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
 target_link_libraries(gaius_viewer PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform stb_image_write)
+# The language files sit beside the executable (ui/strings.hpp).
+add_custom_command(TARGET gaius_viewer POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/lang $<TARGET_FILE_DIR:gaius_viewer>/lang)
 
 # --- tests -----------------------------------------------------------------
 enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
-target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio stb_image)
+target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform_rules stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)

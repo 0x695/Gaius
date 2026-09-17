@@ -29,26 +29,26 @@ Breakpoint breakpoint_for(int physical_w, int physical_h, bool has_touch) {
 }
 
 Metrics metrics_for(Breakpoint b) {
-    Metrics m;
     switch (b) {
-        case Breakpoint::Desktop:
-            m.scale = 1;
-            break;
+        case Breakpoint::Desktop: return metrics_for_scale(1);
         case Breakpoint::Handheld:
-        case Breakpoint::Phone:
-            m.scale = 2;
-            break;
-        case Breakpoint::Tv:
-            m.scale = 2;
-            break;
+        case Breakpoint::Phone: return metrics_for_scale(2);
+        case Breakpoint::Tv: return metrics_for_scale(3);
     }
+    return metrics_for_scale(1);
+}
+
+Metrics metrics_for_scale(int scale) {
+    Metrics m;
+    m.scale = scale < 1 ? 1 : scale > 4 ? 4 : scale;
     // Everything scales off the one factor -- this is the "resizes icons,
-    // text, and hit targets together" requirement expressed as code.
+    // text, and hit targets together" requirement expressed as code -- except
+    // the label text, which stops at 2x so the label row stays one line.
     m.icon_px = kOriginalIconPx * m.scale;
     m.pad_px = 1 * m.scale;
     m.gap_px = 1 * m.scale;
-    m.glyph_scale = m.scale;
-    m.label_h = 8 * m.scale;
+    m.glyph_scale = m.scale < 2 ? m.scale : 2;
+    m.label_h = 8 * m.glyph_scale;
     return m;
 }
 

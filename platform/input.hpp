@@ -16,6 +16,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 #include <vector>
 
 union SDL_Event;
@@ -23,7 +24,12 @@ union SDL_Event;
 namespace gaius::platform {
 
 enum class CommandType {
-    Quit,
+    Quit,         // the window closed (SDL_QUIT). Leaving the game from inside it goes
+                  // through the Settings screen's Exit, which Menu opens.
+    Menu,         // the game menu (the Settings screen): Escape, gamepad Start, Android's
+                  // Back. Added in Phase 9: until then Escape quit on the spot, which a
+                  // handheld's or phone's Back button can't be allowed to do.
+    PreviousTool, // the tool before: Shift+Tab, gamepad left shoulder.
     Select,       // primary action: left click, single tap, gamepad A/South
     Secondary,    // secondary action: right click, two-finger tap, gamepad B/East
     PanBegin,     // pan gesture starts (middle-mouse-drag, single-finger-drag, right stick)
@@ -64,6 +70,8 @@ enum class CommandType {
                   // an editing key. Keyboard enrichment for fields that can also be
                   // edited by pointer (the name dialog's letter arrows), so no screen
                   // depends on it; with text entry on, keys lose their other meanings.
+    Rebound,      // a key or button was captured for a binding (capture_binding): the
+                  // command it was bound to is in `rebound`.
 };
 
 // What a TextKey command carries.
@@ -71,12 +79,76 @@ enum class TextKey { Character, Escape, Enter, Backspace, Left, Right, Delete };
 
 struct Command {
     CommandType type;
-    int x = 0, y = 0;        // physical window coordinates, where relevant (Select/Secondary/Pan*)
+    int x = 0, y = 0;        // physical window coordinates, where relevant (Select/Secondary/Pan*);
+                             // for a gamepad's A, where the gamepad pointer is
     int dx = 0, dy = 0;      // relative motion, for PanMove
     float zoom_delta = 0.0f;  // positive = zoom in, for Zoom
     TextKey text_key = TextKey::Character;  // for TextKey
     char ch = 0;                            // for TextKey::Character: printable ASCII
+    CommandType rebound = CommandType::Quit;  // for Rebound
+    bool from_gamepad = false;
 };
+
+// --- Bindings (Phase 9) ------------------------------------------------------
+//
+// The commands a key or a gamepad button triggers can be changed. Each
+// bindable command has one key and one button; binding a key or button that
+// another command has moves it (the other command loses it). Mouse and touch
+// aren't bindable: their meanings are positional.
+//
+// Defaults -- keyboard: Menu Escape, ToggleWindowMode F11, CycleTool Tab,
+// PreviousTool Shift+Tab (not rebindable: Shift with the CycleTool key),
+// CycleVariant V, ToggleTime Space, CycleScreen M. Gamepad: Select A,
+// Secondary B, CycleTool X, ToggleTime Y, PreviousTool left shoulder,
+// CycleVariant right shoulder, CycleScreen Back, Menu Start. The left stick
+// moves the gamepad pointer, the right stick and the d-pad pan the map, the
+// triggers zoom.
+inline constexpr CommandType kBindable[] = {CommandType::Menu,        CommandType::CycleTool,
+                                            CommandType::PreviousTool, CommandType::CycleVariant,
+                                            CommandType::ToggleTime,  CommandType::CycleScreen,
+                                            CommandType::ToggleWindowMode, CommandType::Select,
+                                            CommandType::Secondary};
+
+// A stable name for a command ("cycle_tool"), for the settings file.
+const char* command_name(CommandType type);
+std::optional<CommandType> command_from_name(const std::string& name);
+
+void reset_bindings();
+// SDL keycodes and SDL_GameControllerButton values; -1 for none.
+void bind_key(CommandType type, int keycode);
+void bind_button(CommandType type, int button);
+int key_for(CommandType type);
+int button_for(CommandType type);
+// The names the settings file and screen use: SDL's key names ("Tab") and
+// button names ("a", "leftshoulder").
+std::string key_name(int keycode);
+std::string button_name(int button);
+int key_from_name(const std::string& name);
+int button_from_name(const std::string& name);
+// What a button is called on the gamepad in use: "A" on an Xbox pad or the
+// Steam Deck, "Cross" on a PlayStation pad, "B" for A's place on a Nintendo pad.
+std::string button_label(int button);
+
+// While capturing, the next key or gamepad button press binds to `type`
+// (Escape on the keyboard cancels) and translate_event returns Rebound.
+void capture_binding(CommandType type, bool gamepad);
+bool capturing_binding();
+void cancel_capture();
+
+// --- Gamepads ----------------------------------------------------------------
+//
+// translate_event opens gamepads as they connect and closes them as they go
+// (SDL only sends a controller's events once it's open). open_gamepads opens
+// those already connected at start-up.
+void open_gamepads();
+bool gamepad_connected();
+// The pads' sticks and triggers now, -1..1 (0..1 for triggers), the strongest
+// of all connected pads; zero inside the dead zone.
+struct GamepadAxes {
+    float left_x = 0, left_y = 0, right_x = 0, right_y = 0, left_trigger = 0, right_trigger = 0;
+};
+GamepadAxes gamepad_axes();
+bool gamepad_button_down(int button);  // any connected pad
 
 // Turns text entry on or off (SDL_StartTextInput / SDL_StopTextInput, which on
 // a phone brings up the on-screen keyboard). While on, key presses become
