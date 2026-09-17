@@ -85,6 +85,10 @@ public:
     // Mono 16-bit samples at `rate`.
     void render(int16_t* out, size_t frames, int rate);
 
+    // Gaius's volumes (the Settings screen), 0-100 each: the music chip's
+    // output and the effects' are scaled by them before mixing.
+    void set_volumes(int music, int effects);
+
     static constexpr int kChipClock = 3579545;
 
 private:
@@ -99,6 +103,8 @@ private:
     std::vector<uint8_t> effect_;  // 8-bit unsigned samples
     int effect_rate_ = 0;
     double effect_pos_ = 0;
+
+    double music_gain_ = 1.0, effects_gain_ = 1.0;
 
     // Time in chip samples, the driver's service and the resampler.
     double chip_phase_ = 0;

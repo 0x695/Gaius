@@ -146,6 +146,11 @@ void GameAudio::play_effect(int effect, bool effects_on) {
     effect_pos_ = 0;
 }
 
+void GameAudio::set_volumes(int music, int effects) {
+    music_gain_ = std::clamp(music, 0, 100) / 100.0;
+    effects_gain_ = std::clamp(effects, 0, 100) / 100.0;
+}
+
 void GameAudio::render(int16_t* out, size_t frames, int rate) {
     if (rate <= 0) return;
     const double chip_rate = static_cast<double>(kChipClock) / 72.0;
@@ -163,13 +168,13 @@ void GameAudio::render(int16_t* out, size_t frames, int rate) {
             chip_prev_ = chip_next_;
             chip_next_ = chip_->next();
         }
-        double mix = chip_prev_ + (chip_next_ - chip_prev_) * chip_phase_;
+        double mix = (chip_prev_ + (chip_next_ - chip_prev_) * chip_phase_) * music_gain_;
         if (effect_pos_ < effect_.size()) {
             const size_t k = static_cast<size_t>(effect_pos_);
             const double frac = effect_pos_ - static_cast<double>(k);
             const int a = effect_[k] - 128;
             const int b = k + 1 < effect_.size() ? effect_[k + 1] - 128 : 0;
-            mix += (a + (b - a) * frac) * 256.0;
+            mix += (a + (b - a) * frac) * 256.0 * effects_gain_;
             effect_pos_ += static_cast<double>(effect_rate_) / rate;
             if (effect_pos_ >= effect_.size()) stop_effect();
         }
