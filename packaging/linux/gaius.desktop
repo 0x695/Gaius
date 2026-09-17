@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Gaius
+GenericName=City building game
+Comment=Play Caesar (1992) with your own copy of the game
+Exec=gaius
+Terminal=false
+Categories=Game;StrategyGame;
+Keywords=Caesar;Rome;city;

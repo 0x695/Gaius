@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds Gaius and runs its tests on Linux (the Steam Deck's platform) and
+# Windows. No game files are available here, so the corpus tests skip.
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libsdl2-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+      - name: Test
+        run: ./build/gaius_tests
+      - name: Package
+        run: packaging/linux/make_tarball.sh build gaius-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gaius-linux-x86_64
+          path: gaius-linux-x86_64.tar.gz
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDL2
+        run: vcpkg install sdl2:x64-windows
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+      - name: Build
+        run: cmake --build build --config RelWithDebInfo -j
+      - name: Test
+        run: ./build/RelWithDebInfo/gaius_tests.exe
