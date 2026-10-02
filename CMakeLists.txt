@@ -210,6 +210,9 @@ target_link_libraries(sim_check PRIVATE gaius_formats gaius_model gaius_systems)
 add_executable(month_check tools/month_check.cpp)
 target_link_libraries(month_check PRIVATE gaius_formats gaius_model gaius_systems)
 
+add_executable(playtest tools/playtest.cpp)
+target_link_libraries(playtest PRIVATE gaius_formats gaius_model gaius_systems)
+
 add_executable(render_city tools/render_city.cpp)
 target_link_libraries(render_city PRIVATE gaius_render stb_image_write)
 
