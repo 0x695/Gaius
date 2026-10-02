@@ -8,7 +8,7 @@
 // and the same library calls underneath, and logs what a player would see.
 //
 // Usage: playtest <game folder> probe   [funding [difficulty]]    the new career's city and province
-//        playtest <game folder> play    [funding [difficulty [years]]]  the bot plays until rank 3 (two promotions)
+//        playtest <game folder> play    [funding [difficulty [years]]]  the bot plays a whole career, to Caesar
 //        playtest <game folder> fuzz    [seed [months [funding [difficulty]]]]  a player who clicks at random
 //        playtest <game folder> inspect <save>   houses by grade, services and last year's accounts
 // The bot is tuned for funding 0 (8000 Dn) on Easy or Medium. Environment knobs: PT_QUIET, PT_TRACE, PT_DUTIES=<year>,
@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <queue>
@@ -30,6 +31,7 @@
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
+#include "systems/actors.hpp"
 #include "systems/administration.hpp"
 #include "systems/battle.hpp"
 #include "systems/campaign.hpp"
@@ -38,6 +40,7 @@
 #include "systems/forum.hpp"
 #include "systems/housing.hpp"
 #include "systems/messages.hpp"
+#include "systems/military.hpp"
 #include "systems/month.hpp"
 #include "systems/plebs.hpp"
 #include "systems/province.hpp"
@@ -60,6 +63,20 @@ struct Pt {
 };
 
 // ---------------------------------------------------------------------------
+// The two sides of a battle round as 0x2308E and 0x229A3 add them up before the shift, the generator's words at their averages.
+int min_barbarian_strength(const model::CityState& st) {
+    int best = 99;
+    for (int t = 0; t < 4; ++t) best = std::min(best, systems::battle::tactic_strength(st, static_cast<systems::battle::Tactic>(t)));
+    return best;
+}
+double romans_strength(const model::Actor& c) {
+    const int morale = c.raw[0x2B];
+    const int mod = morale <= 1 ? -4 : morale <= 3 ? -2 : morale >= 8 ? 2 : morale >= 6 ? 1 : 0;
+    return 3.0 * c.raw[0x20] + 2.0 * c.raw[0x21] + c.raw[0x1D] / 2 + 1.5 + mod;
+}
+double barbarians_strength(int strength, int size) { return 2.0 * strength + size + 3.5; }
+
+// ---------------------------------------------------------------------------
 // The game, as the viewer holds it.
 
 struct Game {
@@ -79,7 +96,7 @@ struct Game {
     std::vector<Event> events;
     std::map<std::string, int> refusals;
     bool promotion_pending = false, promotion_to_caesar = false;
-    int battles = 0, battles_won = 0, battles_lost = 0;
+    int battles = 0, battles_won = 0, battles_lost = 0, battles_retreated = 0, invasions = 0;
     bool dismissed = false;
     bool verbose = false;
 
@@ -102,10 +119,31 @@ struct Game {
     void fight(int cohort, int army) {
         ++battles;
         systems::battle::load_race(state);
-        char buf[96];
-        std::snprintf(buf, sizeof buf, "battle: the Cohort in slot %d meets the army in slot %d", cohort, army);
+        char buf[200];
+        {
+            const model::Actor& c = state.objects[static_cast<size_t>(cohort)];
+            const model::Actor& a = state.objects[static_cast<size_t>(army)];
+            std::snprintf(buf, sizeof buf,
+                          "battle: the Cohort (regulars %d irregulars %d auxiliaries %d morale %d) meets an army of size %d; strengths A%d F%d C%d T%d",
+                          c.raw[0x20], c.raw[0x21], c.raw[0x1D], c.raw[0x2B], a.raw[0x30],
+                          systems::battle::tactic_strength(state, systems::battle::Tactic::Assault),
+                          systems::battle::tactic_strength(state, systems::battle::Tactic::Flank),
+                          systems::battle::tactic_strength(state, systems::battle::Tactic::Charge),
+                          systems::battle::tactic_strength(state, systems::battle::Tactic::Tortoise));
+        }
         note(buf);
         for (int round = 0; round < 60; ++round) {
+            {
+                const model::Actor& c = state.objects[static_cast<size_t>(cohort)];
+                const model::Actor& a = state.objects[static_cast<size_t>(army)];
+                if (romans_strength(c) - barbarians_strength(min_barbarian_strength(state), a.raw[0x30]) < -4.0 &&
+                    static_cast<int>(c.raw[0x20]) + c.raw[0x21] > 0) {
+                    systems::battle::retreat(state, cohort);
+                    ++battles_retreated;
+                    note("battle: the Cohort retreats, the odds are against it");
+                    return;
+                }
+            }
             // pick the tactic with the lowest barbarian strength
             int best = 0, best_strength = 1 << 30;
             for (int t = 0; t < 4; ++t) {
@@ -249,6 +287,21 @@ struct Game {
             for (char& c : t)
                 if (c == 10) c = ' ';
             while (!t.empty() && t.back() == ' ') t.pop_back();
+            if (t.find("entering") != std::string::npos) {
+                ++invasions;
+                if (std::getenv("PT_INV")) {
+                    std::printf("   INVASION at %d/%d:", sim.year, sim.month + 1);
+                    for (int i = 0; i < model::kActorCount; ++i) {
+                        const model::Actor& a = state.objects[static_cast<size_t>(i)];
+                        if (!a.active()) continue;
+                        if (a.type() == systems::province::kCohortType)
+                            std::printf(" [cohort %d at (%d,%d) state %d men %d/%d]", i, a.screen_x() >> 4, a.screen_y() >> 4, a.state(), a.raw[0x20], a.raw[0x21]);
+                        else if (a.type() == systems::province::kArmyType || a.type() == systems::province::kSeaArmyType)
+                            std::printf(" [%s %d at (%d,%d) state %d size %d]", a.type() == systems::province::kSeaArmyType ? "SEA army" : "army", i, a.screen_x() >> 4, a.screen_y() >> 4, a.state(), a.raw[0x30]);
+                    }
+                    std::putchar(10);
+                }
+            }
             note("message: " + t);
         }
         if (sim.funds_warning) {
@@ -265,12 +318,18 @@ struct Game {
         return true;
     }
 
+    // Called every few frames: what a player would do the moment something shows up on the province map.
+    std::function<void()> frame_hook;
+    void* hook_owner = nullptr;
+    int hook_every = 4;
+
     // Runs until the calendar turns a month (or a promotion waits for an answer).
     bool month() {
         const int m = sim.month;
         int guard = 0;
         while (sim.month == m && !promotion_pending) {
             if (!frame()) return false;
+            if (frame_hook && guard % hook_every == 0) frame_hook();
             if (++guard > 200000) {
                 note("month never ended (200000 frames)");
                 return false;
@@ -446,6 +505,22 @@ void print_city(const model::CityState& s, int x0 = 0, int y0 = 0, int x1 = mode
     }
 }
 
+void print_workshops(const model::CityState& st) {
+    const auto& t = st.table_720;
+    auto word = [&](size_t o) { return static_cast<int16_t>(t[o] | (t[o + 1] << 8)); };
+    std::printf("workshops: prospects(0x6BF4)=%d pressure(0x6BFC)=%d empire=%d units=%d", gw(st, 0x6BF4), gw(st, 0x6BFC),
+                gw(st, admin::kEmpire), gw(st, 0x6C10));
+    std::putchar(10);
+    for (int i = 0; i < 30; ++i) {
+        const size_t r = static_cast<size_t>(i) * 24;
+        if (r + 24 > t.size() || word(r + 8) == 0) continue;
+        std::printf("   wks %2d at (%d,%d) goods %d base %d | window pop %d sales %d industry %d | level %d", i, word(r), word(r + 2),
+                    word(r + 4), systems::actors::workshop_base(gw(st, 0x6CA6), word(r + 4)), word(r + 0x0C), word(r + 0x0E),
+                    word(r + 0x14), word(r + 0x10));
+        std::putchar(10);
+    }
+}
+
 void print_province(const model::CityState& s) {
     for (int y = 0; y < 40; ++y) {
         for (int x = 0; x < 40; ++x) {
@@ -479,20 +554,30 @@ struct Bot {
     Game& g;
     model::CityState& s;
     int fx = -1, fy = -1;  // the first forum's anchor
-    int RW = 36;           // half-width of the plan
+    int max_RW = 46;
+    int RW = std::getenv("PT_RW") ? std::atoi(std::getenv("PT_RW")) : 22;  // half-width of the plan
     std::vector<Block> blocks;
     std::vector<int> road_rows;
     std::vector<std::vector<char>> role;  // r road, h house, w reservoir, M market anchor, W workshop anchor, k reserved
     std::vector<Pt> house_queue, workshop_queue, market_queue, reservoir_queue, forum_queue, oracle_queue;
+    std::vector<Pt> culture_cells, prefecture_queue;
+    std::vector<std::vector<char>> culture_region;
     size_t house_next = 0, workshop_next = 0, forum_next = 0;
     int stage = 0;
     int first_year = 0;
-    int reach = 9;  // the built-up area's reach from the forum
+    int reach = std::getenv("PT_EAGER_ROADS") ? 9 : 100;  // the built-up area's reach from the forum
     int oracles = 0, forums_extra = 0;
     int built_houses = 0, built_workshops = 0;
     std::map<std::string, int> spent;
 
-    explicit Bot(Game& game) : g(game), s(game.state) {}
+    explicit Bot(Game& game) : g(game), s(game.state) {
+        // the Legion is watched all month long
+        g.frame_hook = [this] { military(); };
+        g.hook_owner = this;
+    }
+    ~Bot() {
+        if (g.hook_owner == this) g.frame_hook = nullptr;
+    }
 
     int funds() const { return gw(s, economy::kFunds); }
     bool within(int x, int y, int r) const { return std::abs(x - fx) <= r && std::abs(y - fy) <= r; }
@@ -525,6 +610,28 @@ struct Bot {
         return true;
     }
 
+    // Which strips carry the workshops. A workshop holds land value to 3 within three cells of itself (0x2C4F5), so the houses
+    // beside one stay tenements; PT_IND=0 keeps the old pattern (every third strip), otherwise only the second strip each side.
+    // Rows in a housing strip: 2 fits pairs and 2 x 2 houses; 3 lets them grow into the 3 x 3 top grades.
+    static int strip_rows() {
+        static const int rows = std::getenv("PT_STRIP") ? std::atoi(std::getenv("PT_STRIP")) : 2;
+        return rows;
+    }
+    // Strips from this one outward are the culture ground: no roads, the buildings that need none (oracles, hippodromes, schools).
+    static int culture_from() {
+        static const int k = std::getenv("PT_CULTURE_FROM") ? std::atoi(std::getenv("PT_CULTURE_FROM")) : 8;
+        return k;
+    }
+    static bool industry_strip(int k) {
+        static const int mode = std::getenv("PT_IND") ? std::atoi(std::getenv("PT_IND")) : 2;
+        if (mode == 0) return k % 3 == 2;
+        if (mode == 1) return k == 2;
+        if (mode == 2) return k == 2 || k == 6;
+        if (mode == 3) return k == 4 || k == 8;
+        if (mode == 4) return k == 5 || k == 9;
+        return k == 6 || k == 10;
+    }
+
     // Rows of blocks outward from the forum's own: two houses rows, a road, then the pattern H H I H H I ...
     // (an industry block is three rows tall, for the 3 x 3 workshops).
     void plan() {
@@ -534,30 +641,33 @@ struct Bot {
         road_rows.push_back(fy - 1);
         road_rows.push_back(fy + 2);
         int cur = fy + 2;
+        const int last_housing = culture_from() - 1;
         for (int k = 1; k < 20; ++k) {
-            const char type = (k % 3 == 2) ? 'I' : 'H';
-            const int h = type == 'I' ? 3 : 2;
-            const int y0 = cur + 1;
+            const char type = k > last_housing ? 'C' : industry_strip(k) ? 'I' : 'H';
+            const int h = type == 'I' ? 3 : type == 'C' ? 2 : strip_rows();
+            const int y0 = type == 'C' && k > culture_from() ? cur : cur + 1;
             if (y0 + h >= model::kCityH) break;
             blocks.push_back({y0, h, type, k});
             cur = y0 + h;
-            road_rows.push_back(cur);
+            if (type != 'C') road_rows.push_back(cur);
         }
         cur = fy - 1;
         for (int k = 1; k < 20; ++k) {
-            const char type = (k % 3 == 2) ? 'I' : 'H';
-            const int h = type == 'I' ? 3 : 2;
-            const int y0 = cur - h;
+            const char type = k > last_housing ? 'C' : industry_strip(k) ? 'I' : 'H';
+            const int h = type == 'I' ? 3 : type == 'C' ? 2 : strip_rows();
+            const int y0 = type == 'C' && k > culture_from() ? cur - h + 1 : cur - h;
             if (y0 < 1) break;
             blocks.push_back({y0, h, type, -k});
             cur = y0 - 1;
-            road_rows.push_back(cur);
+            if (type != 'C') road_rows.push_back(cur);
         }
         std::sort(blocks.begin(), blocks.end(), [](const Block& a, const Block& b) { return a.y0 < b.y0; });
 
         role.assign(model::kCityH, std::vector<char>(model::kCityW, 0));
         const int x_lo = std::max(0, fx - RW), x_hi = std::min(model::kCityW - 1, fx + RW);
-        auto spine = [&](int x) { return ((x - (fx - 1)) % 12 + 12) % 12 == 0 || x == fx + 2; };
+        plan_x_lo = x_lo;
+        plan_x_hi = x_hi;
+        auto spine = [&](int x) { return is_spine(x); };
         int y_lo = model::kCityH, y_hi = 0;
         for (int r : road_rows) {
             y_lo = std::min(y_lo, r);
@@ -613,11 +723,8 @@ struct Bot {
                         return true;
                     };
                     if (open3(x)) {
-                        if (slot % 5 == 4) {
+                        if (slot % 6 == 5) {
                             role[b.y0][x] = 'M';
-                            role[b.y0][x + 1] = role[b.y0 + 1][x] = role[b.y0 + 1][x + 1] = 'k';
-                        } else if (slot % 5 == 2) {
-                            role[b.y0][x] = 'U';
                             role[b.y0][x + 1] = role[b.y0 + 1][x] = role[b.y0 + 1][x + 1] = 'k';
                         } else {
                             for (int dy = 0; dy < 3; ++dy)
@@ -632,14 +739,53 @@ struct Bot {
                 }
             }
         }
-        // oracle slots: two cells side by side in housing blocks, one every 15 columns
+        // the culture ground, nearest strips first
+        culture_cells.clear();
+        culture_region.assign(model::kCityH, std::vector<char>(model::kCityW, 0));
+        for (const Block& b : blocks) {
+            if (b.type != 'C') continue;
+            for (int y = b.y0; y < b.y0 + b.h; ++y)
+                for (int x = x_lo; x <= x_hi; ++x)
+                    if (grass(s, x, y)) {
+                        culture_region[y][x] = 1;
+                        culture_cells.push_back({x, y});
+                    }
+        }
+        std::sort(culture_cells.begin(), culture_cells.end(), [&](const Pt& a, const Pt& b) {
+            const int ka = std::abs(a.y - fy) * 100 + std::abs(a.x - fx), kb = std::abs(b.y - fy) * 100 + std::abs(b.x - fx);
+            return ka < kb;
+        });
+        // prefectures (one cell) in the housing strips, every eight columns: each holds the unrest down within three cells (-2 a
+        // month), collects the tax within four, and is what lets the conscription rate rise
+        prefecture_queue.clear();
         for (const Block& b : blocks) {
             if (b.type != 'H') continue;
+            const int kk = std::abs(b.k);
+            for (int x = x_lo; x <= x_hi; ++x) {
+                if ((((x - (fx + 1 + (kk * 3) % 8)) % 8) + 8) % 8 != 0) continue;
+                const int y = b.y0 + (kk % 2);
+                if (role[y][x] != 'h') continue;
+                role[y][x] = 'p';
+                prefecture_queue.push_back({x, y});
+            }
+        }
+        std::sort(prefecture_queue.begin(), prefecture_queue.end(), [&](const Pt& a, const Pt& b) {
+            return std::abs(a.x - fx) + 3 * std::abs(a.y - fy) < std::abs(b.x - fx) + 3 * std::abs(b.y - fy);
+        });
+        // forums (2 x 2) in the housing strips, every 22 columns and staggered strip by strip: their walkers carry the network
+        // flag along the road rows beside them, their radius collects the tax, and each is 30 jobs for 60 Dn
+        for (const Block& b : blocks) {
+            if (b.type != 'H') continue;
+            const int kk = std::abs(b.k);
             for (int x = x_lo; x + 1 <= x_hi; ++x) {
-                const int dx = ((x - (fx + 7 + 5 * (std::abs(b.k) % 3))) % 15 + 15) % 15;
-                if (dx != 0 || (std::abs(b.k) % 2) != 0) continue;
-                const int y = b.y0;  // the block's top row
-                if (role[y][x] == 'h' && role[y][x + 1] == 'h') role[y][x] = role[y][x + 1] = 'o';
+                if ((((x - (fx + 3 + (kk * 5) % 12)) % 12) + 12) % 12 != 0) continue;
+                bool ok = true;
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx) ok = ok && role[b.y0 + dy][x + dx] == 'h';
+                if (!ok) continue;
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx) role[b.y0 + dy][x + dx] = 'u';
+                role[b.y0][x] = 'U';
             }
         }
         // queues
@@ -656,32 +802,123 @@ struct Bot {
                 else if (role[y][x] == 'M') market_queue.push_back({x, y});
                 else if (role[y][x] == 'w') reservoir_queue.push_back({x, y});
                 else if (role[y][x] == 'U') forum_queue.push_back({x, y});
-                else if (role[y][x] == 'o' && x + 1 < model::kCityW && role[y][x + 1] == 'o') {
-                    bool left_is_o = x > 0 && role[y][x - 1] == 'o';
-                    if (!left_is_o) oracle_queue.push_back({x, y});
-                }
+
             }
-        auto by_dist = [&](const Pt& a, const Pt& b) {
-            const int da = (a.x - fx) * (a.x - fx) + (a.y - fy) * (a.y - fy);
-            const int db = (b.x - fx) * (b.x - fx) + (b.y - fy) * (b.y - fy);
-            return da < db;
+        // The city grows outward in a wide oval, rows a third as far apart as columns are long: a new strip means a whole
+        // new road row, so the strips already open are filled first.
+        static const int row_weight = std::getenv("PT_ROWW") ? std::atoi(std::getenv("PT_ROWW")) : 0;
+        std::vector<int>& strip_of = strip_rank;
+        strip_of.assign(model::kCityH, 99);
+        for (const Block& b : blocks)
+            for (int y = b.y0; y < b.y0 + b.h; ++y) strip_of[static_cast<size_t>(y)] = std::abs(b.k);
+        auto key = [&](const Pt& a) {
+            const int dx = std::abs(a.x - fx), dy = std::abs(a.y - fy) * (row_weight ? row_weight : 3);
+            if (row_weight == 0) return strip_of[static_cast<size_t>(a.y)] * 100000 + dx * 10 + (a.y < fy ? 1 : 0);  // a strip at a time
+            return std::max(dx, dy) * 1000 + dx + dy;
         };
+        auto by_dist = [&](const Pt& a, const Pt& b) { return key(a) < key(b); };
         std::sort(house_queue.begin(), house_queue.end(), by_dist);
         std::sort(workshop_queue.begin(), workshop_queue.end(), by_dist);
         std::sort(market_queue.begin(), market_queue.end(), by_dist);
         std::sort(reservoir_queue.begin(), reservoir_queue.end(), by_dist);
         std::sort(forum_queue.begin(), forum_queue.end(), by_dist);
-        std::sort(oracle_queue.begin(), oracle_queue.end(), by_dist);
-        std::printf("plan: %zu house cells, %zu workshop slots, %zu markets, %zu reservoirs, %zu blocks\n",
+        std::printf("plan: %zu house cells, %zu workshop slots, %zu markets, %zu reservoirs, %zu culture cells, %zu blocks\n",
                     house_queue.size(), workshop_queue.size(), market_queue.size(), reservoir_queue.size(),
-                    blocks.size());
+                    culture_cells.size(), blocks.size());
     }
 
     // ---- placement helpers, paid for the way a player pays ----
+    int plan_x_lo = 0, plan_x_hi = 0;
+    std::vector<int> strip_rank;  // |k| of the strip each row belongs to
+    int houses_strip_max = 0;     // the farthest strip with a house in it
+    bool strip_open(int y) const { return strip_rank[static_cast<size_t>(y)] <= houses_strip_max + 1; }
+    const char* road_label = "?";
+    bool lazy_roads = std::getenv("PT_EAGER_ROADS") == nullptr;
+    bool is_spine(int x) const { return ((x - (fx - 1)) % 12 + 12) % 12 == 0 || x == fx + 2; }
+
+    void lay_road(int cx, int cy) {
+        if (cx < 0 || cy < 0 || cx >= model::kCityW || cy >= model::kCityH) return;
+        if (role[cy][cx] != 'r' || is_road(cx, cy)) return;
+        const int before = funds();
+        if (g.place_tool(CommandId::Road, cx, cy)) spent[std::string("roads for ") + road_label] += before - funds();
+    }
+
+    // Roads laid just ahead of the buildings, as a tree: the trunk is the spine beside the forum, each strip's road rows grow out
+    // from it as far as the buildings do, and nothing is laid where nobody builds. A house needs the road row beside its own
+    // row (the walkers' flag reaches one cell), a forum or a workshop a road beside it for its walkers, a market none at all.
+    // `w` is the building's width.
+    void roads_for(int x, int y, int w, CommandId tool) {
+        if (tool == CommandId::Market) return;
+        const Block* bk = nullptr;
+        for (const Block& b : blocks)
+            if (y >= b.y0 && y < b.y0 + b.h) {
+                bk = &b;
+                break;
+            }
+        if (!bk || bk->type == 'C') return;
+        const int trunk = fx + 2;
+        const int above = bk->y0 - 1, below = bk->y0 + bk->h;
+        int row = above;
+        if (tool == CommandId::Housing) {
+            row = (y - bk->y0) * 2 >= bk->h ? below : above;
+        } else if (tool == CommandId::Forum || tool == CommandId::Workshop) {
+            // the side that already has road under it, else the one nearer the forum's own rows
+            auto built = [&](int r) {
+                for (int cx = x; cx < x + w; ++cx)
+                    if (r >= 0 && r < model::kCityH && is_road(cx, r)) return true;
+                return false;
+            };
+            if (built(above)) row = above;
+            else if (built(below)) row = below;
+            else row = bk->y0 > fy ? above : below;
+        }
+        const int lo = std::min(trunk, x - 1), hi = std::max(trunk, x + w);
+        for (int cx = lo; cx <= hi; ++cx) lay_road(cx, row);
+        // the trunk, from the forum's own rows to this row
+        if (row > fy + 1) {
+            for (int cy = fy + 2; cy <= row; ++cy) lay_road(trunk, cy);
+        } else if (row < fy) {
+            for (int cy = row; cy <= fy - 1; ++cy) lay_road(trunk, cy);
+        }
+        // and the forum's own rows out to the trunk
+        for (int cx = std::min(fx, trunk); cx <= std::max(fx, trunk); ++cx) {
+            lay_road(cx, fy - 1);
+            lay_road(cx, fy + 2);
+        }
+    }
+
+    // Reservoirs (water to radius 3) along the strip's bottom row, every seven columns.
+    void water_for(int x, int y) {
+        const Block* bk = nullptr;
+        for (const Block& b : blocks)
+            if (y >= b.y0 && y < b.y0 + b.h) {
+                bk = &b;
+                break;
+            }
+        if (!bk || bk->type != 'H') return;
+        const int ry = bk->y0 + bk->h - 1;
+        for (int cx = std::max(0, x - 6); cx <= std::min(model::kCityW - 1, x + 6); ++cx) {
+            if (role[ry][cx] != 'w' || s.city.tile[ry][cx] == 0xA4 || !grass(s, cx, ry)) continue;
+            const int before = funds();
+            if (g.place_tool(CommandId::ReservoirPipe, cx, ry)) spent["reservoirs"] += before - funds();
+        }
+    }
+
     bool put(CommandId tool, int x, int y, const char* what) {
+        if (lazy_roads && tool != CommandId::Road && tool != CommandId::ReservoirPipe && tool != CommandId::Plaza &&
+            tool != CommandId::Oracle && tool != CommandId::Hippodrome && tool != CommandId::School && tool != CommandId::Theater &&
+            tool != CommandId::Coliseum) {
+            road_label = what;
+            roads_for(x, y, std::max(1, tool == CommandId::Forum ? 2 : construction::placement_spec(tool).width), tool);
+            if (tool == CommandId::Housing) water_for(x, y);
+        }
         const int before = funds();
         const bool ok = g.place_tool(tool, x, y);
-        if (ok) spent[what] += before - funds();
+        if (ok) {
+            spent[what] += before - funds();
+            if (tool == CommandId::Market || tool == CommandId::Forum || tool == CommandId::Workshop || tool == CommandId::Housing)
+                houses_strip_max = std::max(houses_strip_max, strip_rank[static_cast<size_t>(y)]);
+        }
         return ok;
     }
 
@@ -693,6 +930,17 @@ struct Bot {
                 if (put(CommandId::Road, x, y, "roads")) ++placed;
             }
         // columns, so a vertical run is dragged top to bottom
+        return placed;
+    }
+
+    // Plazas: a road with the 0x10 flag gives land value to its neighbours (a plain road gives none).
+    int plazas_in(int r) {
+        int placed = 0;
+        for (int y = std::max(0, fy - r); y <= std::min(model::kCityH - 1, fy + r); ++y)
+            for (int x = std::max(0, fx - r); x <= std::min(model::kCityW - 1, fx + r); ++x) {
+                if (role[y][x] != 'r' || !is_road(x, y) || (s.city.operational_state[y][x] & 0x10)) continue;
+                if (put(CommandId::Plaza, x, y, "plazas")) ++placed;
+            }
         return placed;
     }
 
@@ -727,7 +975,7 @@ struct Bot {
         const auto order = goods_order();
         while (n < count && workshop_next < workshop_queue.size()) {
             const Pt p = workshop_queue[workshop_next];
-            if (!within(p.x, p.y, r)) break;  // by distance: the rest is farther
+            if (!within(p.x, p.y, r) || !strip_open(p.y)) break;  // by distance: the rest is farther
             ++workshop_next;
             // spread over the three best goods, round robin
             g.workshop_goods = order[static_cast<size_t>(built_workshops % 3)];
@@ -739,22 +987,56 @@ struct Bot {
         return n;
     }
 
-    int houses(int count, int r) {
+    int houses(int count, int) {
         int n = 0;
-        while (n < count && house_next < house_queue.size()) {
-            const Pt p = house_queue[house_next];
-            if (!within(p.x, p.y, r)) {
-                // the queue is by distance, so the rest is farther
-                break;
-            }
-            ++house_next;
+        size_t i = 0;
+        for (; i < house_queue.size() && n < count; ++i) {
+            const Pt p = house_queue[i];
             if (!grass(s, p.x, p.y)) continue;
             if (put(CommandId::Housing, p.x, p.y, "houses")) {
                 ++n;
                 ++built_houses;
+                houses_strip_max = std::max(houses_strip_max, strip_rank[static_cast<size_t>(p.y)]);
+            } else {
+                break;  // no money, no plebs: the next ones would fail too
             }
         }
         return n;
+    }
+    bool house_cell_free() const {
+        for (const Pt& p : house_queue)
+            if (grass(s, p.x, p.y)) return true;
+        return false;
+    }
+
+    // What fire, collapse and invaders took: rubble is cleared for a Dn a cell, and the roads laid before are laid again.
+    std::vector<std::vector<char>> road_was;
+    int repairs_done = 0;
+    void repair_city() {
+        if (road_was.empty()) road_was.assign(model::kCityH, std::vector<char>(model::kCityW, 0));
+        int budget = 60;
+        for (int y = 0; y < model::kCityH && budget > 0; ++y)
+            for (int x = 0; x < model::kCityW && budget > 0; ++x) {
+                const uint8_t t = s.city.tile[y][x];
+                if (t >= 0x36 && t <= 0x43) {
+                    road_was[static_cast<size_t>(y)][static_cast<size_t>(x)] = 1;
+                } else if ((t == 0xA7 || t == 0xAA || t == 0xAD || t == 0xB0) && funds() > 50) {
+                    if (g.place_tool(CommandId::ClearArea, x, y)) {
+                        --budget;
+                        ++repairs_done;
+                    }
+                } else if (road_was[static_cast<size_t>(y)][static_cast<size_t>(x)] && t == 0x1D && funds() > 100) {
+                    // a road piece that wore away or was torn up: the plan's road, if the cell is one
+                    if (role[y][x] == 'r') {
+                        const int before = funds();
+                        if (g.place_tool(CommandId::Road, x, y)) {
+                            spent["roads repaired"] += before - funds();
+                            --budget;
+                            ++repairs_done;
+                        }
+                    }
+                }
+            }
     }
 
     // ---- the province ----
@@ -892,84 +1174,89 @@ struct Bot {
     std::vector<Pt> highway_cells;
     std::vector<uint8_t> highway_tiles;
 
-    // One piece of province work if the money is there: the highway first, then the nearest towns.
-    void province_work() {
-        static const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
+    // The province's roads, laid cell by cell as the money comes in: the highway first, then a road to each town.
+    int cur_cmd = 0;
+    std::vector<Pt> cur_cells;
+    size_t cur_next = 0;
+    bool province_finished = false;
+
+    bool province_plan_next() {
         if (!highway_done) {
+            highway_done = true;
             const auto path = province_path({0x78}, {0x4A, 0x4B}, true);
             if (path.empty()) {
                 g.note("province: no route for the Imperial Highway");
-                highway_done = true;
-                return;
+            } else {
+                cur_cmd = 42;
+                cur_cells = path;
+                cur_next = 0;
+                highway_cells = path;
+                return true;
             }
-            const int cost = path_cost(path, 42);
-            if (funds() < cost + 350) return;
-            int placed = 0;
-            routes.push_back({42, path});
-            // the construction duty first, so no piece wears while the plebs catch up
-            pending_roads = static_cast<int>(path.size());
-            tribune();
-            for (const Pt& p : path) placed += g.province_place(42, p.x, p.y);
-            pending_roads = 0;
-            tribune();
-            char b[200];
-            std::snprintf(b, sizeof b,
-                          "province: Imperial Highway, %zu cells (%d placed), about %d Dn; entry (%d,%d) first cell (%d,%d) last (%d,%d)",
-                          path.size(), placed, cost, gw(s, 0x6C90), gw(s, 0x6C8E), path.front().x, path.front().y,
-                          path.back().x, path.back().y);
-            g.note(b);
-            highway_cells = path;
-            highway_tiles.clear();
-            for (const Pt& q : path) highway_tiles.push_back(ptile(q.x, q.y));
-            if (std::getenv("PT_HWY")) {
-                for (const Pt& q : path) {
-                    const int t = ptile(q.x, q.y);
-                    const int cls = systems::province::kHighwayRoads[static_cast<size_t>(t)];
-                    std::printf("      (%d,%d) tile %02X class %d exits %02X\n", q.x, q.y, t, cls,
-                                cls < 12 ? systems::province::kRoadExits[static_cast<size_t>(cls)].exits : 0);
-                }
-                systems::province::connect_highway(s);
-                std::printf("      connect_highway -> 0x6C8C = %d\n", gw(s, 0x6C8C));
-                const Pt e{gw(s, 0x6C90), gw(s, 0x6C8E)};
-                std::printf("      entry (%d,%d) tile %02X; city tiles at: ", e.x, e.y, ptile(e.x, e.y));
-                for (int yy = 0; yy < 40; ++yy)
-                    for (int xx = 0; xx < 40; ++xx)
-                        if (ptile(xx, yy) == 0x4A || ptile(xx, yy) == 0x4B) std::printf("(%d,%d) ", xx, yy);
-                std::printf("\n");
-            }
-            highway_done = true;
-            return;
         }
         const auto path = province_path({0x4A, 0x4B}, {0x61}, false, town_done);
-        if (path.empty()) return;
-        const int cost = path_cost(path, 36);
-        if (funds() < cost + 350) return;
-        int placed = 0;
-        routes.push_back({36, path});
-        pending_roads = static_cast<int>(path.size());
+        if (path.empty()) return false;
+        cur_cmd = 36;
+        cur_cells = path;
+        cur_next = 0;
+        return true;
+    }
+
+    void finish_piece() {
+        static const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
+        routes.push_back({cur_cmd, cur_cells});
+        char b[160];
+        if (cur_cmd == 42) {
+            highway_tiles.clear();
+            for (const Pt& q : cur_cells) highway_tiles.push_back(ptile(q.x, q.y));
+            std::snprintf(b, sizeof b, "province: Imperial Highway laid, %zu cells; entry (%d,%d)", cur_cells.size(),
+                          gw(s, 0x6C90), gw(s, 0x6C8E));
+        } else {
+            const Pt last = cur_cells.back();
+            for (int d = 0; d < 4; ++d)
+                if (in_map(last.x + dx[d], last.y + dy[d]) && ptile(last.x + dx[d], last.y + dy[d]) == 0x61)
+                    town_done.push_back({last.x + dx[d], last.y + dy[d]});
+            std::snprintf(b, sizeof b, "province: road to a town laid, %zu cells", cur_cells.size());
+        }
+        g.note(b);
+        cur_cells.clear();
+        cur_next = 0;
+    }
+
+    // Lays what `budget` pays for; returns what it spent.
+    int province_step(int budget) {
+        if (province_finished) return 0;
+        if (cur_cells.empty()) {
+            if (!province_plan_next()) {
+                province_finished = true;
+                return 0;
+            }
+        }
+        const int before = funds();
+        // the construction duty first, so no piece wears while the plebs catch up
+        pending_roads = static_cast<int>(std::min<size_t>(cur_cells.size() - cur_next, 40));
         tribune();
-        for (const Pt& p : path) placed += g.province_place(36, p.x, p.y);
+        while (cur_next < cur_cells.size()) {
+            const Pt p = cur_cells[cur_next];
+            const uint8_t t = ptile(p.x, p.y);
+            int cost = 0;
+            if (!((t >= 0x36 && t <= 0x41) || (t >= 0x6D && t <= 0x77)))
+                cost = economy::kConstructionCost[static_cast<size_t>(cur_cmd)] << economy::province_cost_shift(cur_cmd, t);
+            if (before - funds() + cost > budget || funds() < cost + 100) break;
+            g.province_place(cur_cmd, p.x, p.y);
+            ++cur_next;
+        }
         pending_roads = 0;
         tribune();
-        const Pt last = path.back();
-        for (int d = 0; d < 4; ++d)
-            if (in_map(last.x + dx[d], last.y + dy[d]) && ptile(last.x + dx[d], last.y + dy[d]) == 0x61)
-                town_done.push_back({last.x + dx[d], last.y + dy[d]});
-        char b[110];
-        std::snprintf(b, sizeof b, "province: road to a town, %zu cells (%d placed), about %d Dn", path.size(), placed, cost);
-        g.note(b);
-        if (std::getenv("PT_HWY")) {
-            systems::province::connect_highway(s);
-            std::printf("      after the town road: 0x6C8C = %d\n", gw(s, 0x6C8C));
-            for (size_t i = 0; i < highway_cells.size(); ++i) {
-                const uint8_t now = ptile(highway_cells[i].x, highway_cells[i].y);
-                if (now != highway_tiles[i])
-                    std::printf("      highway cell (%d,%d) changed from %02X to %02X\n", highway_cells[i].x, highway_cells[i].y,
-                                highway_tiles[i], now);
-            }
-            std::printf("      town road cells:");
-            for (const Pt& q : path) std::printf(" (%d,%d)=%02X", q.x, q.y, ptile(q.x, q.y));
-            std::printf("\n");
+        if (cur_next >= cur_cells.size()) finish_piece();
+        return before - funds();
+    }
+
+    // For the harness: lays everything there is, if the money lasts.
+    void province_work() {
+        for (int guard = 0; guard < 100 && !province_finished; ++guard) {
+            province_step(1 << 20);
+            if (!cur_cells.empty()) break;  // out of money mid-piece: the rest next month
         }
     }
 
@@ -1006,50 +1293,216 @@ struct Bot {
         patrol_b = best_b;
     }
 
+    // A Fort (500 Dn) is another Cohort. The Legion is shared out among them, so they come only when the money is plentiful
+    // and the Legion has grown; but the armies come in twos and threes, and one Cohort chasing one of them leaves the rest
+    // to walk into the city.
+    int forts_wanted() const {
+        const int regulars = gw(s, systems::military::kRegulars);
+        static const int per_cohort = std::getenv("PT_REGS_PER_COHORT") ? std::atoi(std::getenv("PT_REGS_PER_COHORT")) : 6;
+        return std::clamp(regulars / per_cohort, 1, 4);
+    }
+    void maybe_build_fort() {
+        namespace province = systems::province;
+        const int cohorts = gw(s, 0x6C12);
+        if (cohorts >= forts_wanted() || funds() < 1500 + reserve_funds() || !viable()) return;
+        int city_x = -1, city_y = -1;
+        for (int y = 0; y < 40 && city_x < 0; ++y)
+            for (int x = 0; x < 40; ++x)
+                if (ptile(x, y) == 0x4A) {
+                    city_x = x;
+                    city_y = y;
+                    break;
+                }
+        if (city_x < 0) return;
+        for (int d = 2; d <= 7; ++d)
+            for (int dy = -d; dy <= d; ++dy)
+                for (int dx = -d; dx <= d; ++dx) {
+                    if (std::max(std::abs(dx), std::abs(dy)) != d) continue;
+                    const int x = city_x + dx, y = city_y + dy;
+                    if (!in_map(x, y) || ptile(x, y) < 0x1D || ptile(x, y) > 0x35 ||
+                        province::kLandClass[static_cast<size_t>(ptile(x, y))] != 0)
+                        continue;
+                    // not beside another fort
+                    bool crowded = false;
+                    for (int ddy = -2; ddy <= 2 && !crowded; ++ddy)
+                        for (int ddx = -2; ddx <= 2 && !crowded; ++ddx)
+                            if (in_map(x + ddx, y + ddy) && ptile(x + ddx, y + ddy) == 0x4D) crowded = true;
+                    if (crowded) continue;
+                    if (economy::can_afford(s, 500) && economy::enough_plebs(s, 29) && province::place_fort(s, x, y) >= 0) {
+                        economy::charge(s, 500);
+                        g.note("province: a Fort raised for another Cohort");
+                        return;
+                    }
+                }
+    }
+
+    // A Cohort that cannot take the armies stays home: a battle lost costs its Centuries, and the Legion grows by one of each
+    // kind a year, so a Cohort that fights every army it is too weak for never gets stronger. One that can takes the
+    // province road on patrol, which turns on any army it meets, and is sent after the ones on the march that it can beat.
     void military() {
         namespace province = systems::province;
         if (patrol_a.x < 0) pick_patrol();
-        // every Cohort with men that is standing still goes on patrol
+        const int min_str = min_barbarian_strength(s);
+        static const double margin = std::getenv("PT_MIL_MARGIN") ? std::atof(std::getenv("PT_MIL_MARGIN")) : 3.0;
         for (int i = 0; i < model::kActorCount; ++i) {
             const model::Actor& a = s.objects[static_cast<size_t>(i)];
             if (a.active() == 0 || a.type() != province::kCohortType) continue;
-            if (a.state() == province::kHalt && patrol_a.x >= 0 && patrol_b.x >= 0) {
+            const bool strong = romans_strength(a) - barbarians_strength(min_str, 6) >= margin;
+            if (strong && a.state() == province::kHalt && patrol_a.x >= 0 && patrol_b.x >= 0) {
                 if (province::order_patrol(s, i, patrol_a.x, patrol_a.y, patrol_b.x, patrol_b.y) && !patrol_set) {
                     patrol_set = true;
                     g.note("the Prima Cohors put on patrol near the city");
                 }
+            } else if (!strong && a.state() == province::kPatrol) {
+                province::order_go_home(s, i);
             }
         }
-        // armies on the march: send the nearest Cohort after each
+        // armies on the march: the one nearest the city is the most urgent, and the Cohorts go after them in that order, the
+        // strongest first, wherever they can win; a Cohort chasing one that is not the nearest turns to the one that is
+        int city_x = -1, city_y = -1;
+        for (int y = 0; y < 40 && city_x < 0; ++y)
+            for (int x = 0; x < 40; ++x)
+                if (ptile(x, y) == 0x4A) {
+                    city_x = x;
+                    city_y = y;
+                    break;
+                }
+        struct Threat {
+            int slot, distance;
+        };
+        std::vector<Threat> threats;
         for (int ai = 0; ai < model::kActorCount; ++ai) {
             const model::Actor& army = s.objects[static_cast<size_t>(ai)];
-            if (army.active() == 0 || (army.type() != province::kArmyType && army.type() != province::kSeaArmyType)) continue;
+            if (army.active() == 0 || army.type() != province::kArmyType) continue;  // a ship can't be attacked until it lands
             if (army.state() != province::kMarch) continue;
-            int best = -1, best_d = 1 << 30;
+            threats.push_back({ai, std::abs((army.screen_x() >> 4) - city_x) + std::abs((army.screen_y() >> 4) - city_y)});
+        }
+        std::sort(threats.begin(), threats.end(), [](const Threat& a, const Threat& b) { return a.distance < b.distance; });
+        std::vector<bool> taken(model::kActorCount, false);
+        for (const Threat& th : threats) {
+            const model::Actor& army = s.objects[static_cast<size_t>(th.slot)];
+            int best = -1;
+            double best_strength = -1e9;
             for (int ci = 0; ci < model::kActorCount; ++ci) {
                 const model::Actor& c = s.objects[static_cast<size_t>(ci)];
-                if (c.active() == 0 || c.type() != province::kCohortType || c.state() == province::kAttack ||
+                if (taken[static_cast<size_t>(ci)] || c.active() == 0 || c.type() != province::kCohortType ||
                     c.state() == province::kDemobilized)
                     continue;
-                const int d = std::abs(static_cast<int>(c.screen_x()) - static_cast<int>(army.screen_x())) +
-                              std::abs(static_cast<int>(c.screen_y()) - static_cast<int>(army.screen_y()));
-                if (d < best_d) {
-                    best_d = d;
+                const double r = romans_strength(c);
+                if (r > best_strength) {
+                    best_strength = r;
                     best = ci;
                 }
             }
-            if (best >= 0 && province::order_attack(s, best, ai)) ++armies_seen;
+            if (best < 0) break;
+            if (best_strength - barbarians_strength(min_str, army.raw[0x30]) < margin) continue;
+            taken[static_cast<size_t>(best)] = true;
+            const model::Actor& c = s.objects[static_cast<size_t>(best)];
+            const int current = c.raw[0x14] | (c.raw[0x15] << 8);
+            if (c.state() == province::kAttack && current == th.slot) continue;  // already on its way
+            // a Cohort already chasing another army only turns for one clearly nearer the city
+            if (c.state() == province::kAttack && current >= 0 && current < model::kActorCount) {
+                const model::Actor& now = s.objects[static_cast<size_t>(current)];
+                if (now.active() != 0 && now.type() == province::kArmyType) {
+                    const int d = std::abs((now.screen_x() >> 4) - city_x) + std::abs((now.screen_y() >> 4) - city_y);
+                    if (d <= th.distance + 3) continue;
+                }
+            }
+            if (province::order_attack(s, best, th.slot)) ++armies_seen;
         }
     }
 
-    int more_forums(int count, int r) {
+    // ---- slots chosen by what they do for the houses around them ----
+    // A summed-area table, so a box of cells is counted in one step.
+    template <typename F>
+    std::vector<int> make_sat(F f) const {
+        std::vector<int> t(static_cast<size_t>(model::kCityH + 1) * (model::kCityW + 1), 0);
+        const size_t W = model::kCityW + 1;
+        for (int y = 0; y < model::kCityH; ++y)
+            for (int x = 0; x < model::kCityW; ++x)
+                t[static_cast<size_t>(y + 1) * W + x + 1] = f(x, y) + t[static_cast<size_t>(y) * W + x + 1] +
+                                                           t[static_cast<size_t>(y + 1) * W + x] - t[static_cast<size_t>(y) * W + x];
+        return t;
+    }
+    static int box_sum(const std::vector<int>& t, int x0, int y0, int x1, int y1) {  // inclusive, clipped
+        x0 = std::max(0, x0);
+        y0 = std::max(0, y0);
+        x1 = std::min(model::kCityW - 1, x1);
+        y1 = std::min(model::kCityH - 1, y1);
+        if (x0 > x1 || y0 > y1) return 0;
+        const size_t W = model::kCityW + 1;
+        return t[static_cast<size_t>(y1 + 1) * W + x1 + 1] - t[static_cast<size_t>(y0) * W + x1 + 1] -
+               t[static_cast<size_t>(y1 + 1) * W + x0] + t[static_cast<size_t>(y0) * W + x0];
+    }
+    bool free_rect(int x, int y, int w, int h) const {
+        for (int dy = 0; dy < h; ++dy)
+            for (int dx = 0; dx < w; ++dx)
+                if (!grass(s, x + dx, y + dy)) return false;
+        return true;
+    }
+    bool is_house_tile(uint8_t t) const { return t >= 0xC8 && t <= 0xD7; }
+
+    // The free slot of `queue` (width w, height h) whose box, grown by `radius`, holds the most of what `sat` counts; -1 if
+    // there is no free slot. Ties go to the one nearest the forum.
+    int best_slot(const std::vector<Pt>& queue, int w, int h, int radius, const std::vector<int>& sat) const {
+        int best = -1;
+        long long best_score = -(1LL << 40);
+        for (size_t i = 0; i < queue.size(); ++i) {
+            const Pt& p = queue[i];
+            if (!strip_open(p.y) || !free_rect(p.x, p.y, w, h)) continue;
+            const long long score = static_cast<long long>(box_sum(sat, p.x - radius, p.y - radius, p.x + w - 1 + radius, p.y + h - 1 + radius)) * 1000 -
+                               (std::abs(p.x - fx) + 3 * std::abs(p.y - fy));
+            if (score > best_score) {
+                best_score = score;
+                best = static_cast<int>(i);
+            }
+        }
+        return best;
+    }
+    bool any_slot(const std::vector<Pt>& queue, int w, int h) const {
+        for (const Pt& p : queue)
+            if (strip_open(p.y) && free_rect(p.x, p.y, w, h)) return true;
+        return false;
+    }
+
+    // The best free 2 x 2 on cells the plan keeps for houses, in the open strips, for when the reserved slots are used up.
+    bool find_house_square(const std::vector<int>& sat, int radius, Pt& out) const {
+        long long best_score = -(1LL << 40);
+        bool found = false;
+        for (const Pt& p : house_queue) {
+            if (!strip_open(p.y) || p.x + 1 >= model::kCityW || p.y + 1 >= model::kCityH) continue;
+            if (role[p.y][p.x] != 'h' || role[p.y][p.x + 1] != 'h' || role[p.y + 1][p.x] != 'h' || role[p.y + 1][p.x + 1] != 'h') continue;
+            if (!free_rect(p.x, p.y, 2, 2)) continue;
+            // nothing but houses' own ground: keep to the strips that already have houses
+            if (strip_rank[static_cast<size_t>(p.y)] > houses_strip_max + 1) continue;
+            const long long score = static_cast<long long>(box_sum(sat, p.x - radius, p.y - radius, p.x + 1 + radius, p.y + 1 + radius)) * 1000 -
+                                    (std::abs(p.x - fx) + 3 * std::abs(p.y - fy));
+            if (score > best_score) {
+                best_score = score;
+                out = p;
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    // A forum goes where the most houses are still outside the tax (and the network).
+    int more_forums(int count, int) {
         int n = 0;
-        g.forum_grade = 0;
-        while (n < count && forum_next < forum_queue.size()) {
-            const Pt p = forum_queue[forum_next];
-            if (!within(p.x, p.y, r)) break;
-            ++forum_next;
-            if (put(CommandId::Forum, p.x, p.y, "forums")) ++n;
+        g.forum_grade = forum_grade_choice();
+        const int fw = g.forum_grade <= 2 ? 2 : g.forum_grade <= 6 ? 3 : 4;
+        for (int i = 0; i < count; ++i) {
+            const auto sat = make_sat([&](int x, int y) {
+                if (!is_house_tile(s.city.tile[y][x])) return 0;
+                const uint8_t f = s.city.service_flags[y][x];
+                return ((f & 0x20) ? 0 : 3) + ((f & 0x02) ? 0 : 1);
+            });
+            const int at = best_slot(forum_queue, fw, fw, 6, sat);
+            Pt p{};
+            if (at >= 0) p = forum_queue[static_cast<size_t>(at)];
+            else if (!find_house_square(sat, 6, p)) break;
+            if (!put(CommandId::Forum, p.x, p.y, "forums")) break;
+            ++n;
         }
         return n;
     }
@@ -1066,41 +1519,59 @@ struct Bot {
         const int construction_need =
             std::max(systems::plebs::set_needs(s, g.sim.difficulty), (construction_need_now_with(pending_roads)));
         struct D { Duty duty; uint16_t have; int target; };
+        // The needs the next scan will find, from the map as it stands (what has just been built counts), and a little over:
+        // the shares that set the chance of a fire or a collapse are taken against whatever is built by then.
+        int building_cells = 0, road_cells = 0;
+        for (int y = 0; y < model::kCityH; ++y)
+            for (int x = 0; x < model::kCityW; ++x) {
+                const uint8_t t = s.city.tile[y][x];
+                if ((t >= 0xC8 && t <= 0xE8) || (t >= 0xEA && t <= 0xF3) || t == 0xF5 || t == 0xF6) ++building_cells;
+                else if (t >= 0x36 && t <= 0x40) ++road_cells;
+            }
+        const int rank = gw(s, 0x6C30);
+        int shift = rank <= 1 ? 4 : rank <= 3 ? 3 : 2;
+        if (g.sim.difficulty == 2) shift = 1;
+        const int extra = rank == 3 ? 16 : 0;
+        auto over = [](int need) { return need + need / 20 + 1; };
+        const int fire_need = std::max(1, (building_cells + extra) >> shift);
+        const int building_need = std::max(1, (building_cells + extra + 16) >> (shift + 1));
+        const int road_need = std::max(1, (road_cells + extra) >> shift);
         D duties[] = {{Duty::Construction, systems::plebs::kConstruction, construction_need},
-                      {Duty::FirePrevention, systems::plebs::kFirePrevention, gw(s, systems::plebs::kFireNeed)},
-                      {Duty::BuildingMaintenance, systems::plebs::kBuildingMaintenance, gw(s, systems::plebs::kBuildingNeed)},
-                      {Duty::RoadMaintenance, systems::plebs::kRoadMaintenance, gw(s, systems::plebs::kRoadNeed)}};
+                      {Duty::FirePrevention, systems::plebs::kFirePrevention, over(std::max(fire_need, gw(s, systems::plebs::kFireNeed)))},
+                      {Duty::BuildingMaintenance, systems::plebs::kBuildingMaintenance,
+                       over(std::max(building_need, gw(s, systems::plebs::kBuildingNeed)))},
+                      {Duty::RoadMaintenance, systems::plebs::kRoadMaintenance, over(std::max(road_need, gw(s, systems::plebs::kRoadNeed)))}};
         int total_need = 0;
         for (const D& d : duties) total_need += d.target;
         pleb_deficit = total_need - (gw(s, systems::plebs::kPlebs) - 50);
         for (const D& d : duties) {
             int guard = 0;
-            while (gw(s, d.have) > 0 && guard++ < 200) systems::forum::lower_duty(s, d.duty);
+            while (gw(s, d.have) > 0 && guard++ < 4000) systems::forum::lower_duty(s, d.duty);
         }
         for (const D& d : duties) {
             int guard = 0;
-            while (gw(s, d.have) < d.target && gw(s, systems::plebs::kUnassigned) > 0 && guard++ < 200)
+            while (gw(s, d.have) < d.target && gw(s, systems::plebs::kUnassigned) > 0 && guard++ < 4000)
                 if (!systems::forum::raise_duty(s, d.duty)) break;
         }
     }
 
-    // Welfare buys plebs: they settle where welfare = (plebs + plebs / 20 x rank + 150) / 3. The bot sets welfare for the plebs
-    // it needs (the duties' needs plus the 50 kept back, plus a margin) as soon as it has the money for a year of it.
-    int welfare_margin = std::getenv("PT_MARGIN") ? std::atoi(std::getenv("PT_MARGIN")) : 15;
+    // Welfare buys plebs: pay_welfare (0x2DDFC) moves the count by up to 5 a month towards where welfare equals
+    // (plebs - unassigned / 4 + plebs / 20 x rank + 150) / 3. The bot keeps welfare 10 above that while it is short of the
+    // plebs its duties need (plus the 50 kept back and a margin), and level with it otherwise.
+    int welfare_margin = std::getenv("PT_MARGIN") ? std::atoi(std::getenv("PT_MARGIN")) : 60;
     void welfare() {
         const int rank = gw(s, 0x6C30);
-        const int needs = pleb_deficit + (gw(s, systems::plebs::kPlebs) - 50);  // total need, from tribune()
-        const int want_plebs = needs + 50 + welfare_margin;
-        const int target = (want_plebs + (want_plebs / 20) * rank + 150) / 3;
-        const int w = gw(s, systems::plebs::kWelfare);
+        const int plebs = gw(s, systems::plebs::kPlebs);
+        const int needs = pleb_deficit + (plebs - 50);  // total need, from tribune()
+        const int want = needs + 50 + welfare_margin;
+        const int unassigned = gw(s, systems::plebs::kUnassigned);
+        const int expected = (plebs - (unassigned >> 2) + (plebs / 20) * rank + 150) / 3;
+        const int target = std::max(0, plebs < want ? expected + 10 : expected + 1);
         int guard = 0;
-        if (target > w && funds() > target + 100) {
-            while (gw(s, systems::plebs::kWelfare) < target && guard++ < 300)
-                systems::forum::adjust(s, systems::forum::Control::Welfare, 1);
-        } else if (target + 15 < w) {
-            while (gw(s, systems::plebs::kWelfare) > target + 10 && guard++ < 300)
-                systems::forum::adjust(s, systems::forum::Control::Welfare, -1);
-        }
+        while (gw(s, systems::plebs::kWelfare) < target && guard++ < 3000)
+            systems::forum::adjust(s, systems::forum::Control::Welfare, 1);
+        while (gw(s, systems::plebs::kWelfare) > target && guard++ < 6000)
+            systems::forum::adjust(s, systems::forum::Control::Welfare, -1);
     }
 
     // Two free house cells side by side in a housing block, the nearest to the forum.
@@ -1118,25 +1589,489 @@ struct Bot {
         return best < (1 << 30);
     }
 
+    int tax_rate = std::getenv("PT_TAXRATE") ? std::atoi(std::getenv("PT_TAXRATE")) : 6;
     void setup() {
         g.place_tool(CommandId::Forum, fx, fy);
-        std::printf("setup: roads %d\n", roads_in(reach));
-        std::printf("setup: reservoirs %d, markets %d\n", reservoirs_in(reach), markets_in(reach));
-        std::printf("setup: workshops %d\n", workshops(10, reach));
-        std::printf("setup: houses %d\n", houses(40, reach));
+        const int r = lazy_roads ? 0 : roads_in(reach);
+        const int w = lazy_roads ? 0 : reservoirs_in(reach);
+        const int m = markets_n(6, reach);
+        const int k = workshops_n(4, reach);
+        const int h = houses(40, reach);
+        std::printf("setup: roads %d reservoirs %d markets %d workshops %d houses %d", r, w, m, k, h);
+        std::putchar(10);
+        int guard = 0;
+        static const int conscription = std::getenv("PT_CONSRATE") ? std::atoi(std::getenv("PT_CONSRATE")) : 10;
+        while (gw(s, 0x6C06) > conscription && guard++ < 4000) systems::forum::adjust(s, systems::forum::Control::Conscription, -1);
+        while (gw(s, 0x6C06) < conscription && guard++ < 400) systems::forum::adjust(s, systems::forum::Control::Conscription, 1);
+        // the governor's savings go to the city (90 %), and the salary stops
+        guard = 0;
+        while (gw(s, 0x6C28) < gw(s, 0x6C2E) && guard++ < 500) systems::forum::adjust(s, systems::forum::Control::Donation, 1);
+        economy::donate_savings(s, gw(s, 0x6C28));
+        guard = 0;
+        while (gw(s, 0x6C2C) > 0 && guard++ < 500) systems::forum::adjust(s, systems::forum::Control::Salary, -1);
+        // 6 % on the people costs nothing in land value or unrest (the tables at 5 % and 6 % agree) and pays a fifth more
+        guard = 0;
+        while (gw(s, 0x6C04) < tax_rate && guard++ < 50) systems::forum::adjust(s, systems::forum::Control::PopulationTax, 1);
         stage = 1;
     }
 
-    // One decision for the month just begun.
-    int next_oracle = 0;
-    int oracle_after_years = std::getenv("PT_ORACLE_AFTER") ? std::atoi(std::getenv("PT_ORACLE_AFTER")) : 5;
+    // ---------------------------------------------------------------------------------------------------------------
+    // What the city is made of, counted from the map, and what its jobs and culture come to.
+    struct Counts {
+        int house_cells = 0, units_now = 0, units_potential = 0;
+        int markets = 0, forums = 0, workshops = 0, oracles = 0, schools = 0, theaters = 0, coliseums = 0,
+            hippodromes = 0;
+        int religion = 0, entertainment = 0;  // the culture points, as administration::culture_year counts them
+        int road_cells = 0;
+    };
 
-    bool want_oracle() const {
-        const int units = gw(s, 0x6C10);
-        const int cap = 2 * (units / 50 + 1);
-        const int culture = gw(s, admin::kCulture);
-        return units >= 100 && oracles < 12 && culture + 3 < cap && culture < 55 &&
-               gw(s, 0x6C32) - first_year >= oracle_after_years;
+    Counts count() const {
+        Counts c;
+        int market_cells = 0, oracle_cells = 0, school_cells = 0, theater_cells = 0, coliseum_cells = 0, hippo_cells = 0;
+        for (int y = 0; y < model::kCityH; ++y)
+            for (int x = 0; x < model::kCityW; ++x) {
+                const uint8_t t = s.city.tile[y][x];
+                if (t >= 0x36 && t <= 0x43) {
+                    ++c.road_cells;
+                } else if (t >= 0xC8 && t <= 0xD7) {
+                    const int u = systems::housing::kPopulationUnitsPerCell[t - 0xC8];
+                    ++c.house_cells;
+                    c.units_now += u;
+                    c.units_potential += t <= 0xCB ? std::max(u, 3) : u;
+                } else if (t >= 0xD8 && t <= 0xDF) {
+                    ++c.religion;
+                } else if (t == 0xEB) {
+                    ++oracle_cells;
+                    c.religion += 9;
+                } else if (t == 0xF4) {
+                    ++market_cells;
+                } else if (t == 0xEC || t == 0xED) {
+                    ++school_cells;
+                } else if (t == 0xF0) {
+                    ++theater_cells;
+                    c.entertainment += 2;
+                } else if (t == 0xF1) {
+                    ++coliseum_cells;
+                    c.entertainment += 3;
+                } else if (t == 0xF2) {
+                    ++hippo_cells;
+                    c.entertainment += 4;
+                }
+            }
+        c.markets = market_cells / 4;
+        c.oracles = oracle_cells / 2;
+        c.schools = school_cells / 4;
+        c.theaters = theater_cells / 2;
+        c.coliseums = coliseum_cells / 6;
+        c.hippodromes = hippo_cells / 8;
+        c.forums = gw(s, 0x6CA0);
+        c.workshops = gw(s, 0x6C9E);
+        return c;
+    }
+
+    // The monthly jobs sum of the economy step (0x28694), in population units; the multiplier is the saved yearly average.
+    int jobs_units(const Counts& c) const {
+        const int mult = gw(s, 0x6BE8) / 4 + 1;
+        return (c.workshops * 20 + c.markets * 12) * mult + c.forums * 30;
+    }
+    // The share of the population (as it will be once the houses have grown) with no work, net of the conscripts.
+    double unemployment_if(const Counts& c) const {
+        const int cons = gw(s, 0x6C06);
+        const double need = c.units_potential * (100 - cons) / 100.0;
+        const double jobs = jobs_units(c);
+        return std::max(0.0, need - jobs) / std::max(1, c.units_potential);
+    }
+
+    // Culture as the year-end routine scores it (0x28C90), with planning arithmetic in doubles.
+    double culture_value(int religion, int entertainment, int schools, int units) const {
+        const double d = units / 12 + 5;
+        double rel = religion * 34.0 / d;
+        if (rel > 34) rel = 34;
+        double sum = rel + (entertainment >> 1) * 34.0 / d;
+        if (sum > 68) sum = 68;
+        sum += schools * 34.0 / d;
+        const int cap = systems::administration::population_cap(100, 1, units);
+        return std::min({sum, static_cast<double>(cap), 100.0});
+    }
+
+    // ---- the money: shares of what is spare each month are put aside for the province and for culture ----
+    double credit_province = 0, credit_culture = 0;
+    double share_province = std::getenv("PT_SHARE_PROVINCE") ? std::atof(std::getenv("PT_SHARE_PROVINCE")) : 0.45;
+    double share_culture_base = std::getenv("PT_SHARE_CULTURE") ? std::atof(std::getenv("PT_SHARE_CULTURE")) : 0.4;
+    double share_culture_now() const { return final_stage ? 0.8 : share_culture_base; }
+    // What the city can count on in a year (the taxes as the yearly routine would charge them now) against what it owes
+    // (welfare, salary, wages and the tribute): a cushion of two years of any shortfall stays untouched.
+    int estimated_taxes() const {
+        const int rate = gw(s, 0x6C04), industrial_rate = gw(s, 0x6C02);
+        const auto pop = economy::population_tax(s.city, rate, 4 * gw(s, 0x6C10));
+        return pop.tax + economy::industrial_tax(s, industrial_rate);
+    }
+    int yearly_costs() const { return gw(s, 0x6C46) + gw(s, 0x6C2C) + gw(s, 0x6C08) + gw(s, 0x6BBA); }
+    int reserve_funds() const {
+        const int deficit = yearly_costs() - estimated_taxes();
+        static const int base = std::getenv("PT_RESERVE") ? std::atoi(std::getenv("PT_RESERVE")) : 200;
+        return std::min(1000, base + std::max(0, deficit));
+    }
+    double years_in() const { return gw(s, 0x6C32) - first_year + gw(s, 0x6C1C) / 12.0; }
+
+    // ---- growth: jobs, then the houses they pay for ----
+    int pick_goods() {
+        // A workshop's level is its base for the province and the goods, plus what the neighbourhood and the Empire add
+        // (about 6), less a penalty that grows with the number of the same goods (0x2CFB5: over 1, 3 and 5), clamped to
+        // 0-7. So the best few goods get all the workshops, up to the point where the penalty has stopped growing.
+        auto& t8 = s.table_8;
+        if (t8.size() < 8) t8.resize(8, 0);
+        auto penalty = [](int n) { return (n > 1) + (n > 3) + (n > 5); };
+        auto level = [&](int base, int n) { return std::clamp(base + 6 - penalty(n), 0, 7); };
+        int best = 0;
+        double best_gain = -1e9;
+        for (int gd = 0; gd < 8; ++gd) {
+            const int base = systems::actors::workshop_base(gw(s, 0x6CA6), gd);
+            const int n = static_cast<int8_t>(t8[static_cast<size_t>(gd)]);
+            const double gain = (n + 1) * level(base, n + 1) - n * level(base, n) + 0.01 * base;
+            if (gain > best_gain) {
+                best_gain = gain;
+                best = gd;
+            }
+        }
+        return best;
+    }
+
+    // A workshop's level rises with the people in the nine by nine around it (0x2CFB5): it goes where there are most.
+    int workshops_n(int count_wanted, int) {
+        int n = 0;
+        for (int i = 0; i < count_wanted; ++i) {
+            const auto sat = make_sat([&](int x, int y) {
+                const uint8_t t = s.city.tile[y][x];
+                return is_house_tile(t) ? systems::housing::kPopulationUnitsPerCell[t - 0xC8] : 0;
+            });
+            const int at = best_slot(workshop_queue, 3, 3, 3, sat);
+            if (at < 0) break;
+            const Pt p = workshop_queue[static_cast<size_t>(at)];
+            g.workshop_goods = pick_goods();
+            if (!put(CommandId::Workshop, p.x, p.y, "workshops")) break;
+            ++n;
+            ++built_workshops;
+        }
+        return n;
+    }
+
+    // A market goes where the most houses are outside its reach; it is 12 jobs wherever it stands.
+    int markets_n(int count_wanted, int) {
+        int n = 0;
+        for (int i = 0; i < count_wanted; ++i) {
+            const auto sat = make_sat([&](int x, int y) {
+                if (!is_house_tile(s.city.tile[y][x])) return 0;
+                return (s.city.service_flags[y][x] & 0x08) ? 0 : 1;
+            });
+            const int at = best_slot(market_queue, 2, 2, 6, sat);
+            Pt p{};
+            if (at >= 0) p = market_queue[static_cast<size_t>(at)];
+            else if (!find_house_square(sat, 6, p)) break;
+            if (!put(CommandId::Market, p.x, p.y, "markets")) break;
+            ++n;
+        }
+        return n;
+    }
+
+    bool slot_left(const std::vector<Pt>& queue, int w, int h) const { return any_slot(queue, w, h); }
+
+    // Forums come first: each one collects the tax from the houses around it (radius 6), sends the walkers that carry the
+    // network flag, and is 30 jobs for 60 Dn. One for every dozen house cells, and two to begin with.
+    double unemployment_limit = std::getenv("PT_UNEMP_LIMIT") ? std::atof(std::getenv("PT_UNEMP_LIMIT")) : 0.08;
+    int forum_grade_choice() const {
+        static const int g0 = std::getenv("PT_FORUM_GRADE") ? std::atoi(std::getenv("PT_FORUM_GRADE")) : 0;
+        return g0;
+    }
+    int forums_wanted(const Counts& c) const {
+        static const int per = std::getenv("PT_FORUM_PER") ? std::atoi(std::getenv("PT_FORUM_PER")) : 24;
+        return std::min(30, 2 + c.house_cells / per);
+    }
+    // A workshop is worth building while the ones there are producing: a level of 3 is 38 Dn a year for the 50 it cost, and
+    // each new one eats into every other's share of the market (0x28621), so the number follows the average level.
+    int workshops_wanted(const Counts& c) const {
+        static const int need_empire = std::getenv("PT_WKS_EMPIRE") ? std::atoi(std::getenv("PT_WKS_EMPIRE")) : 0;
+        const double average = economy::average_workshop_level(s) + 0.0;
+        if (gw(s, admin::kEmpire) < need_empire) return std::min(c.workshops, 4);
+        if (c.workshops < 4) return 4;
+        if (average >= 3.0) return std::min(30, c.workshops + 1);
+        return c.workshops;
+    }
+
+    // One batch of jobs. `exhausted` is set when no slot of any kind is left in reach (the ring has to grow), as opposed
+    // to a slot that could not be paid for.
+    int add_jobs(const Counts& c, bool& exhausted) {
+        const bool want_workshop = c.workshops < workshops_wanted(c);
+        int n = 0;
+        if (want_workshop) n = workshops_n(1, reach);
+        if (n == 0) n = markets_n(1, reach);
+        if (n == 0 && c.forums < 30) n = more_forums(1, reach);
+        if (n == 0 && c.workshops < 30) n = workshops_n(1, reach);
+        exhausted = n == 0 && !(c.workshops < 30 && slot_left(workshop_queue, 3, 3)) &&
+                    !(c.forums < 30 && slot_left(forum_queue, 2, 2)) && !slot_left(market_queue, 2, 2);
+        if (exhausted) exhausted = false;  // house ground can always be given over to a market
+        return n;
+    }
+
+    int add_houses(int n) { return houses(n, reach); }
+
+    // The next ring of the plan: its roads and water, when the money is there.
+    bool expand_ring() {
+        if (lazy_roads) return false;  // the roads follow the houses; nothing to widen
+        if (reach >= 3 * RW) return false;
+        if (funds() < 400 + reserve_funds()) return false;
+        reach += 3;
+        const int r = roads_in(reach), w = reservoirs_in(reach);
+        char b[100];
+        std::snprintf(b, sizeof b, "expanding to reach %d: roads %d reservoirs %d", reach, r, w);
+        if (std::getenv("PT_QUIET") == nullptr) std::puts(b);
+        return true;
+    }
+
+    // plebs needed per new house cell, for the rank's duties (fire, upkeep of buildings and roads)
+    double pleb_per_cell() const {
+        const int rank = gw(s, 0x6C30);
+        int shift = rank <= 1 ? 4 : rank <= 3 ? 3 : 2;
+        if (g.sim.difficulty == 2) shift = 1;
+        return 1.8 / static_cast<double>(1 << shift);
+    }
+
+    int grow(int floor_funds) {
+        int placed_total = 0;
+        double room = -pleb_deficit - 4.0;  // plebs to spare
+        const double per_cell = pleb_per_cell();
+        Counts c = count();
+        int failures = 0;
+        for (int iter = 0; iter < 300 && failures < 3; ++iter) {
+            if (funds() < floor_funds + 30 || gw(s, systems::plebs::kPlebs) < 50) break;
+            int did = 0;
+            bool exhausted = false;
+            // in order of what pays: forums for the tax and the walkers, workshops, jobs when there are none, then houses;
+            // whatever cannot be done (no slot, no money) gives way to the next
+            if (c.forums < forums_wanted(c)) did = more_forums(1, reach);
+            if (did == 0 && c.workshops < workshops_wanted(c)) did = workshops_n(1, reach);
+            if (did == 0 && unemployment_if(c) > unemployment_limit) {
+                did = add_jobs(c, exhausted);
+            } else if (did == 0 && room > per_cell) {
+                did = add_houses(4);
+                room -= did * per_cell;
+                exhausted = did == 0 && !house_cell_free();
+            } else if (did == 0) {
+                break;  // the plebs for more upkeep aren't there yet
+            }
+            if (std::getenv("PT_DEBUG2"))
+                std::printf("   grow: forums %d/%d unemployment %.2f room %.1f did %d exhausted %d funds %d floor %d", c.forums, forums_wanted(c), unemployment_if(c), room, did, (int)exhausted, funds(), floor_funds), std::putchar(10);
+            if (did == 0) {
+                if (!exhausted) break;  // slots there, but no money for them
+                ++failures;
+                // the plan is full: widen it, a wider city needs more forums to carry the network to its edges
+                if (RW < max_RW) {
+                    RW = std::min(max_RW, RW + 12);
+                    plan();
+                    continue;
+                }
+                if (!expand_ring()) break;
+                continue;
+            }
+            placed_total += did;
+            c = count();
+        }
+        return placed_total;
+    }
+
+    // ---- culture ----
+    struct Candidate {
+        CommandId cmd;
+        int cost, religion, entertainment, schools;
+        const char* what;
+    };
+
+    // The nearest free ground in the culture strips that holds the building's footprint.
+    bool find_culture_site(CommandId cmd, Pt& out) const {
+        const auto spec = construction::placement_spec(cmd);
+        for (const Pt& p : culture_cells) {
+            bool ok = true;
+            for (int dy = 0; dy < spec.height && ok; ++dy)
+                for (int dx = 0; dx < spec.width && ok; ++dx) {
+                    const int cx = p.x + dx, cy = p.y + dy;
+                    ok = cx < model::kCityW && cy < model::kCityH && culture_region[static_cast<size_t>(cy)][static_cast<size_t>(cx)];
+                }
+            if (ok && construction::can_place(s.city, cmd, p.x, p.y)) {
+                out = p;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // After the last promotion has been earned, the title waits while the record is made as good as it can be.
+    bool final_stage = false;
+
+    double culture_goal() const {
+        if (final_stage) return 100.0;
+        // money that would only pile up (the funds word is 16 bits) is better spent on culture, which no rating punishes
+        if (funds() > 15000) return 100.0;
+        const int rank = gw(s, 0x6C30);
+        const admin::Requirement& need = admin::kPromotion[static_cast<size_t>(std::min(rank, 20))];
+        // the average is the sum of the four: what the others will be, by the time Peace is there
+        const double p = std::min(100.0, gw(s, admin::kPeace) + 2.0 * 3);
+        const double e = 100, pr = std::min(100.0, gw(s, admin::kProsperity) + 5.0 * 3);
+        return std::min(100.0, std::max<double>(need.each + 4, 4.0 * need.average - p - e - pr + 3));
+    }
+
+    // Builds the culture building that adds the most per Dn, while the credit pays for one.
+    int culture_step(const Counts& c) {
+        const int units = std::max(gw(s, 0x6C10), c.units_now);
+        if (units < 150) return 0;
+        const double goal = culture_goal();
+        int built = 0;
+        for (int guard = 0; guard < 10; ++guard) {
+            const Counts now = count();
+            const double have = culture_value(now.religion, now.entertainment, now.schools, units);
+            if (have >= goal) break;
+            const Candidate cands[] = {{CommandId::Oracle, 200, 18, 0, 0, "oracles"},
+                                       {CommandId::Hippodrome, 300, 0, 32, 0, "hippodromes"},
+                                       {CommandId::School, 60, 0, 0, 1, "schools"}};
+            int best = -1;
+            double best_value = 0;
+            for (int i = 0; i < 3; ++i) {
+                const Candidate& k = cands[i];
+                if (k.schools > 0 && goal <= 68) continue;  // a school is worth a tenth of a point
+                if (credit_culture < k.cost || funds() < k.cost + reserve_funds()) continue;
+                const double after = culture_value(now.religion + k.religion, now.entertainment + k.entertainment,
+                                                   now.schools + k.schools, units);
+                const double value = (after - have) / k.cost;
+                if (value > best_value) {
+                    best_value = value;
+                    best = i;
+                }
+            }
+            if (best < 0) break;
+            const Candidate& k = cands[best];
+            Pt site;
+            if (!find_culture_site(k.cmd, site)) break;
+            if (!put(k.cmd, site.x, site.y, k.what)) break;
+            credit_culture -= k.cost;
+            ++built;
+        }
+        return built;
+    }
+
+    // ---- the Legion's pay: one more regular Century a year if the wages are there for it ----
+    void military_policy() {
+        const int regulars = gw(s, systems::military::kRegulars);
+        static const int max_regs = std::getenv("PT_MAX_REGS") ? std::atoi(std::getenv("PT_MAX_REGS")) : 24;
+        static const double wage_share = std::getenv("PT_WAGE_SHARE") ? std::atof(std::getenv("PT_WAGE_SHARE")) : 0.2;
+        const int affordable = static_cast<int>(wage_share * estimated_taxes());
+        int want = std::min({8 * max_regs, 8 * (regulars + 2), std::max(8 * 3, affordable)});
+        want = std::max(want, 8 * regulars - 8);  // never cut below what keeps the Centuries there, unless it has to be
+        int guard = 0;
+        while (gw(s, systems::military::kArmyWages) < want && guard++ < 1200)
+            systems::forum::adjust(s, systems::forum::Control::ArmyWages, 1);
+        while (gw(s, systems::military::kArmyWages) > want + 8 && guard++ < 2400)
+            systems::forum::adjust(s, systems::forum::Control::ArmyWages, -1);
+    }
+
+    // ---- the people's tax: as high as the houses will bear ----
+    // Each house cell adds the tax table's value to the land value of its neighbours, and each month the tax raises the unrest
+    // of the cells the forums cover (0x28800, 0x28826). Up to 10 % costs one point of land value, and the unrest it adds is
+    // held down by the conscription rate; so the rate follows the worst unrest among the small houses, which collapse.
+    int tax_limit = std::getenv("PT_TAXMAX") ? std::atoi(std::getenv("PT_TAXMAX")) : 6;
+    int months_since_tax_change = 0;
+    long long last_spent_total = 0;
+    int months_idle = 0;
+    int last_worst_unrest = -999;
+    void tax_controller() {
+        ++months_since_tax_change;
+        int worst = -999;
+        for (int y = 0; y < model::kCityH; ++y)
+            for (int x = 0; x < model::kCityW; ++x) {
+                const uint8_t t = s.city.tile[y][x];
+                if (t >= 0xC8 && t <= 0xCB) worst = std::max(worst, static_cast<int>(static_cast<int8_t>(s.city.unrest[y][x])));
+            }
+        const int rate = gw(s, 0x6C04);
+        const int unemployed = gw(s, 0x6BCC);
+        last_worst_unrest = worst;
+        if ((worst > 24 || (unemployed >= 10 && rate > 6)) && rate > 4 && months_since_tax_change >= 2) {
+            systems::forum::adjust(s, systems::forum::Control::PopulationTax, -1);
+            months_since_tax_change = 0;
+        } else if (worst < 6 && unemployed < 8 && rate < tax_limit && months_since_tax_change >= 8) {
+            systems::forum::adjust(s, systems::forum::Control::PopulationTax, 1);
+            months_since_tax_change = 0;
+        }
+    }
+
+    // ---- the conscription rate: every conscript is a man with no need of work (0x28694), so it is the cheapest job there is;
+    // its price is the unrest it adds (0x2882C), which the prefectures carry off ----
+    int conscription_max = std::getenv("PT_CONS_MAX") ? std::atoi(std::getenv("PT_CONS_MAX")) : 30;
+    int months_since_conscription_change = 0;
+    int prefectures_built = 0;
+    int prefectures_wanted(const Counts& c) const {
+        const int rate = gw(s, 0x6C06);
+        if (rate <= 10) return 0;
+        return std::min(static_cast<int>(prefecture_queue.size()), c.house_cells / 20 + (rate - 10) / 5 * 8);
+    }
+    void conscription_controller(const Counts& c, int worst_unrest) {
+        ++months_since_conscription_change;
+        const int rate = gw(s, 0x6C06);
+        const int unemployed = gw(s, 0x6BCC);
+        if (worst_unrest > 20 && rate > 10 && months_since_conscription_change >= 2) {
+            systems::forum::adjust(s, systems::forum::Control::Conscription, -1);
+            months_since_conscription_change = 0;
+            return;
+        }
+        // build the prefectures first, then raise the rate
+        if (prefectures_built < prefectures_wanted(c) && funds() > reserve_funds() + 200) {
+            for (const Pt& p : prefecture_queue) {
+                if (!grass(s, p.x, p.y)) continue;
+                if (put(CommandId::Prefecture, p.x, p.y, "prefectures")) ++prefectures_built;
+                break;
+            }
+        }
+        const bool covered = prefectures_built >= std::max(1, c.house_cells / 20);
+        if (unemployed >= 7 && rate < conscription_max && worst_unrest < 8 && months_since_conscription_change >= 6 &&
+            (rate < 10 || covered)) {
+            for (int i = 0; i < 5 && gw(s, 0x6C06) < conscription_max; ++i)
+                systems::forum::adjust(s, systems::forum::Control::Conscription, 1);
+            months_since_conscription_change = 0;
+        }
+    }
+
+    // The governor's salary is paid into his savings each year, to 25000; in the last stage, with money to spare, it is raised so
+    // that the savings fill, and stopped when they are full or the city's cash runs short.
+    void salary_policy() {
+        if (!final_stage) return;
+        const int savings = gw(s, 0x6C2E);
+        int target = 0;
+        if (savings < 25000 && funds() > 7000 && viable()) target = std::min(9999, (funds() - 5000) / 2);
+        int guard = 0;
+        while (gw(s, 0x6C2C) < target && guard++ < 10000) systems::forum::adjust(s, systems::forum::Control::Salary, 1);
+        while (gw(s, 0x6C2C) > target && guard++ < 20000) systems::forum::adjust(s, systems::forum::Control::Salary, -1);
+    }
+
+    // One decision for the month just begun.
+    int province_after_years = std::getenv("PT_PROVINCE_AFTER") ? std::atoi(std::getenv("PT_PROVINCE_AFTER")) : 2;
+    int culture_lead_years = std::getenv("PT_CULTURE_LEAD") ? std::atoi(std::getenv("PT_CULTURE_LEAD")) : 5;
+
+    // The city carries itself: what the taxes bring in covers what it costs, with something over.
+    bool viable() const {
+        static const int margin = std::getenv("PT_VIABLE") ? std::atoi(std::getenv("PT_VIABLE")) : 60;
+        return estimated_taxes() >= yearly_costs() + margin;
+    }
+    bool province_active(const Counts& c) const {
+        if (!viable() && years_in() < 12) return false;
+        static const int gate = std::getenv("PT_PROV_GATE") ? std::atoi(std::getenv("PT_PROV_GATE")) : 1;
+        return years_in() >= province_after_years && !province_finished && (gate == 0 || c.workshops >= 8 || years_in() >= 3);
+    }
+    bool culture_active(const Counts& c) const {
+        if (!viable()) return false;
+        const int rank = gw(s, 0x6C30);
+        const admin::Requirement& need = admin::kPromotion[static_cast<size_t>(std::min(rank, 20))];
+        const double years_to_peace = (need.each - gw(s, admin::kPeace)) / 2.0;
+        if (c.units_now < 400) return false;
+        const int units = std::max(gw(s, 0x6C10), c.units_now);
+        if (culture_value(c.religion, c.entertainment, c.schools, units) >= culture_goal()) return false;
+        return years_to_peace <= culture_lead_years || years_in() >= 8;
     }
 
     void act() {
@@ -1144,49 +2079,116 @@ struct Bot {
         // what costs nothing, every month
         tribune();
         welfare();
+        military_policy();
         military();
         province_repair();
-        const int unemployed = gw(s, 0x6BCC);  // % of the population without work, as the economy step computes
-        // the province's roads and towns: the Empire rating, and a good part of the promotion
-        if (gw(s, 0x6C32) - first_year >= province_after_years) province_work();
-        const int f = funds();
-        if (f < 300) return;
-        // jobs first when there is unemployment, housing when there is work
-        if (unemployed >= unemp_limit) {
-            int jobs = more_forums(1, reach);
-            jobs += workshops(2, reach);
-            jobs += markets_in(reach);
-            if (jobs == 0 && funds() > 900 && pleb_deficit <= -10) expand();
-        } else if (pleb_deficit <= -5) {
-            houses(12, reach);
+        salary_policy();
+        maybe_build_fort();
+        repair_city();
+        tax_controller();
+        const Counts c = count();
+        conscription_controller(c, last_worst_unrest);
+        const int reserve = reserve_funds();
+        // earmark shares of the spare money
+        const double free_funds = std::max(0, funds() - reserve - static_cast<int>(credit_province + credit_culture));
+        if (province_active(c)) credit_province += share_province * free_funds;
+        if (culture_active(c)) credit_culture += share_culture_now() * free_funds;
+        if (!province_active(c)) credit_province = 0;
+        if (!culture_active(c)) credit_culture = 0;
+        if (province_active(c) && credit_province >= 30) {
+            const int before = funds();
+            province_step(static_cast<int>(credit_province));
+            credit_province = std::max(0.0, credit_province - (before - funds()));
         }
-        // culture
-        if (want_oracle() && funds() >= 450) {
-            while (next_oracle < static_cast<int>(oracle_queue.size())) {
-                const Pt o = oracle_queue[static_cast<size_t>(next_oracle++)];
-                if (put(CommandId::Oracle, o.x, o.y, "oracles")) {
-                    ++oracles;
-                    break;
-                }
+        if (culture_active(c)) culture_step(c);
+        if (std::getenv("PT_DEBUG"))
+            std::printf("  dbg %d/%d funds %d credit prov %.0f cult %.0f | route %zu/%zu hw %d fin %d active %d | plebs %d deficit %d | units %d pot %d jobs %d unemp %.2f"
+                        " | reach %d forums %d wksp %d houses %d | welfare %d wages %d reserve %d est_tax %d costs %d",
+                        gw(s, 0x6C32), gw(s, 0x6C1C), funds(), credit_province, credit_culture, cur_next, cur_cells.size(),
+                        (int)highway_done, (int)province_finished, (int)province_active(c), gw(s, 0x6C56), pleb_deficit,
+                        c.units_now, c.units_potential, jobs_units(c), unemployment_if(c), reach, c.forums, c.workshops, c.house_cells, gw(s, 0x6C46), gw(s, 0x6C08), reserve_funds(), estimated_taxes(), yearly_costs());
+        if (std::getenv("PT_DEBUG")) std::putchar(10);
+        if (std::getenv("PT_DEBUG"))
+            std::printf("  dbg2 oracles %d hippo %d schools %d religion %d ent %d culture_est %.1f goal %.1f rating C%d active %d viable %d",
+                        c.oracles, c.hippodromes, c.schools, c.religion, c.entertainment,
+                        culture_value(c.religion, c.entertainment, c.schools, std::max(gw(s, 0x6C10), c.units_now)), culture_goal(),
+                        gw(s, admin::kCulture), (int)culture_active(c), (int)viable()),
+                std::putchar(10);
+        // the rest of the money grows the city
+        const int floor_funds = reserve + static_cast<int>(credit_province + credit_culture);
+        if (funds() > floor_funds + 30) grow(floor_funds);
+        tribune();  // the duties for what has just been built
+        // a stall: money in hand and nothing built for a year
+        {
+            long long total = 0;
+            for (const auto& kv : spent) total += kv.second;
+            if (total != last_spent_total) {
+                last_spent_total = total;
+                months_idle = 0;
+            } else if (++months_idle >= 12 && months_idle % 12 == 0 && funds() > 1500) {
+                std::printf("   STALL %d/%d: funds %d floor %d | units %d pot %d jobs %d unemp %.2f room %.1f | forums %d/%d wksp %d houses %d | "
+                            "house cell free %d, plebs %d need-deficit %d | viable %d",
+                            gw(s, 0x6C32), gw(s, 0x6C1C), funds(), floor_funds, c.units_now, c.units_potential, jobs_units(c),
+                            unemployment_if(c), -pleb_deficit - 4.0, c.forums, forums_wanted(c), c.workshops, c.house_cells,
+                            (int)house_cell_free(), gw(s, systems::plebs::kPlebs), pleb_deficit, (int)viable());
+                std::putchar(10);
             }
         }
-        // the next ring, when this one is full and there's money to spare
-        if (house_next < house_queue.size() && !within(house_queue[house_next].x, house_queue[house_next].y, reach) &&
-            funds() > 900 && unemployed < unemp_limit && pleb_deficit <= -10)
-            expand();
-    }
-    int province_after_years = std::getenv("PT_PROVINCE_AFTER") ? std::atoi(std::getenv("PT_PROVINCE_AFTER")) : 1;
-
-    void expand() {
-        reach += 3;
-        const int r = roads_in(reach), w = reservoirs_in(reach), m = markets_in(reach), k = workshops(6, reach),
-                  u = more_forums(2, reach);
-        std::printf("expanding to reach %d: roads %d reservoirs %d markets %d workshops %d forums %d\n", reach, r, w, m, k,
-                    u);
     }
 };
 
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// playtest <dir> maps [rank [years [first [last]]]]: the province logic alone, on each of the 50 maps, with money to burn.
+int run_maps(Game& game, int rank, int years, int first, int last) {
+    int bad = 0;
+    for (int p = first; p <= last; ++p) {
+        game.verbose = false;
+        game.events.clear();
+        game.dismissed = false;
+        if (!game.start(0, 0)) return 1;
+        model::set_global_word(game.state, 0x6C30, rank);
+        model::set_global_word(game.state, 0x6CA6, p);
+        game.state.table_50.assign(50, 0);
+        if (!game.start_province()) return 1;
+        auto bot = std::make_unique<Bot>(game);
+        bot->first_year = game.sim.year;
+        if (!bot->choose_site()) return 1;
+        bot->plan();
+        bot->setup();
+        int linked_max = 0;
+        for (int m = 0; m < years * 12 && !game.dismissed; ++m) {
+            model::set_global_word(game.state, economy::kFunds, 30000);
+            model::set_global_word(game.state, systems::plebs::kWelfare, 200);
+            bot->tribune();
+            bot->welfare();
+            bot->military();
+            bot->province_repair();
+            bot->province_work();
+            if (!game.month()) break;
+            linked_max = std::max(linked_max, game.sim.linked_towns);
+        }
+        int towns = 0, towns_total = 0;
+        for (uint8_t c : game.state.empire.cells) {
+            const int t = c & 0x7F;
+            if (t == 0x61 || t == 0x79 || t == 0x7A || t == 0x4C) ++towns_total;
+            if (t == 0x4C) ++towns;
+        }
+        std::printf("province %2d race %2d | empire %3d highway %d linked towns %d (max %d) of %d | road score %d | battles %d won %d lost %d | peace %d\n",
+                    p, systems::battle::kProvinceRace[static_cast<size_t>(p)], gw(game.state, admin::kEmpire),
+                    gw(game.state, 0x6C8C), game.sim.linked_towns, linked_max, towns_total, gw(game.state, 0x6C86),
+                    game.battles, game.battles_won, game.battles_lost, gw(game.state, admin::kPeace));
+        if (gw(game.state, admin::kEmpire) < 90) {
+            ++bad;
+            for (const auto& e : game.events)
+                if (e.text.rfind("province", 0) == 0) std::printf("      [%d/%d] %s\n", e.year, e.month, e.text.c_str());
+        }
+        game.battles = game.battles_won = game.battles_lost = 0;
+    }
+    std::printf("%d provinces below 90 empire\n", bad);
+    return 0;
+}
 
 // ---------------------------------------------------------------------------
 // The fuzzer: a player who clicks at random. Everything goes through the same glue the viewer uses; the checks are that
@@ -1390,6 +2392,13 @@ int main(int argc, char** argv) {
         print_province(game.state);
         return 0;
     }
+    if (command == "maps") {
+        const int rank = argc > 3 ? std::atoi(argv[3]) : 3;
+        const int years = argc > 4 ? std::atoi(argv[4]) : 6;
+        const int first = argc > 5 ? std::atoi(argv[5]) : 0;
+        const int last = argc > 6 ? std::atoi(argv[6]) : 49;
+        return run_maps(game, rank, years, first, last);
+    }
     if (command == "fuzz") {
         // playtest <dir> fuzz [seed [months [funding [difficulty]]]]
         const unsigned seed = argc > 3 ? static_cast<unsigned>(std::atoi(argv[3])) : 1;
@@ -1411,15 +2420,31 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (command == "play") {
-        const int years = argc > 5 ? std::atoi(argv[5]) : 20;
+        const int years = argc > 5 ? std::atoi(argv[5]) : 2500;
         game.verbose = std::getenv("PT_QUIET") == nullptr;
         if (!game.start(funding, difficulty)) return 1;
+        if (const char* r = std::getenv("PT_START_RANK")) {
+            // begin at a later rank, on a chosen province (default: the next one the game would give)
+            model::set_global_word(game.state, 0x6C30, std::atoi(r));
+            if (const char* pr = std::getenv("PT_START_PROVINCE")) model::set_global_word(game.state, 0x6CA6, std::atoi(pr));
+            if (const char* yr = std::getenv("PT_START_YEAR")) model::set_global_word(game.state, 0x6C32, std::atoi(yr));
+            if (const char* sd = std::getenv("PT_SEED"))
+                for (int i = 0; i < std::atoi(sd) * 61 + 7; ++i) game.sim.random.advance();
+            if (!game.start_province()) return 1;
+        }
         if (const char* t = std::getenv("PT_TAX")) {
             int guard = 0;
             while (gw(game.state, 0x6C04) < std::atoi(t) && guard++ < 30)
                 systems::forum::adjust(game.state, systems::forum::Control::PopulationTax, 1);
             while (gw(game.state, 0x6C04) > std::atoi(t) && guard++ < 60)
                 systems::forum::adjust(game.state, systems::forum::Control::PopulationTax, -1);
+        }
+        if (const char* t = std::getenv("PT_CONS")) {
+            int guard = 0;
+            while (gw(game.state, 0x6C06) < std::atoi(t) && guard++ < 60)
+                systems::forum::adjust(game.state, systems::forum::Control::Conscription, 1);
+            while (gw(game.state, 0x6C06) > std::atoi(t) && guard++ < 120)
+                systems::forum::adjust(game.state, systems::forum::Control::Conscription, -1);
         }
         if (const char* t = std::getenv("PT_ITAX")) {
             int guard = 0;
@@ -1433,7 +2458,16 @@ int main(int argc, char** argv) {
         int chaos_actions = std::getenv("PT_CHAOS_N") ? std::atoi(std::getenv("PT_CHAOS_N")) : 3;
         g_gentle = std::getenv("PT_CHAOS_GENTLE") != nullptr;
         if (const char* c = std::getenv("PT_CHAOS")) chaos = std::make_unique<std::mt19937>(static_cast<unsigned>(std::atoi(c)));
-        const int target_rank = std::getenv("PT_RANK") ? std::atoi(std::getenv("PT_RANK")) : 3;
+        const int target_rank = std::getenv("PT_RANK") ? std::atoi(std::getenv("PT_RANK")) : 20;
+        struct RankRecord {
+            int rank, province, start_year, end_year, peace, culture, prosperity, empire, pop, funds, invasions, battles;
+        };
+        std::vector<RankRecord> career;
+        int record_province = gw(game.state, 0x6CA6);
+        int record_invasions = 0, record_battles = 0;
+        const int max_deferrals = std::getenv("PT_DEFERRALS") ? std::atoi(std::getenv("PT_DEFERRALS")) : 8;
+        int deferrals = 0, last_total = -1;
+        const int max_savings_deferrals = std::getenv("PT_SAVINGS_DEFERRALS") ? std::atoi(std::getenv("PT_SAVINGS_DEFERRALS")) : 5;
         auto bot = std::make_unique<Bot>(game);
         auto begin_city = [&]() -> bool {
             bot = std::make_unique<Bot>(game);
@@ -1447,17 +2481,45 @@ int main(int argc, char** argv) {
         int last_year = game.sim.year - 1;
         const bool trace = std::getenv("PT_TRACE") != nullptr;
         int province_start_year = game.sim.year;
+        std::map<std::string, int> prev_spent;
         while (game.sim.year < end_year && !game.dismissed && gw(game.state, 0x6C30) < target_rank) {
             if (game.promotion_pending) {
                 // The promotion screen: the player accepts (the bot always does).
                 game.promotion_pending = false;
                 print_status(game, "PROMOTION OFFERED");
+                if (std::getenv("PT_WKS")) print_workshops(game.state);
+                if (std::getenv("PT_MAP")) print_city(game.state, bot->fx - 40, bot->fy - 45, bot->fx + 41, bot->fy + 46);
                 save_milestone(game, "PROMO" + std::to_string(gw(game.state, 0x6C30)) + ".SAV");
                 std::printf("   ratings needed: average %d, each %d; years in the province: %d\n",
                             admin::kPromotion[static_cast<size_t>(gw(game.state, 0x6C30))].average,
                             admin::kPromotion[static_cast<size_t>(gw(game.state, 0x6C30))].each,
                             game.sim.year - province_start_year);
+                career.push_back({gw(game.state, 0x6C30), record_province, province_start_year, game.sim.year,
+                                  gw(game.state, admin::kPeace), gw(game.state, admin::kCulture), gw(game.state, admin::kProsperity),
+                                  gw(game.state, admin::kEmpire), gw(game.state, 0x6C0E), gw(game.state, economy::kFunds),
+                                  game.invasions - record_invasions, game.battles - record_battles});
+                record_invasions = game.invasions;
+                record_battles = game.battles;
                 if (game.promotion_to_caesar) {
+                    // The title is there for the asking. First make the record as good as it gets: wait while the four ratings
+                    // are still rising, to a hundred each.
+                    const int total = gw(game.state, admin::kPeace) + gw(game.state, admin::kCulture) +
+                                      gw(game.state, admin::kProsperity) + gw(game.state, admin::kEmpire);
+                    // then, with the ratings full, a few years more for the governor's savings to fill (the salary is paid into
+                    // them each year, to 25000)
+                    const int savings = gw(game.state, 0x6C2E);
+                    const bool want_savings = total >= 400 && savings < 24900 && deferrals < max_savings_deferrals;
+                    if ((total < 400 || want_savings) && deferrals < max_deferrals) {
+                        std::printf("   the title of Caesar is put off for nine years: ratings %d + %d + %d + %d\n",
+                                    gw(game.state, admin::kPeace), gw(game.state, admin::kCulture),
+                                    gw(game.state, admin::kProsperity), gw(game.state, admin::kEmpire));
+                        admin::defer_promotion(game.state, 9);
+                        last_total = total;
+                        ++deferrals;
+                        bot->final_stage = true;
+                        career.pop_back();
+                        continue;
+                    }
                     admin::become_caesar(game.state);
                     std::printf("you are Caesar\n");
                     break;
@@ -1468,6 +2530,7 @@ int main(int argc, char** argv) {
                 std::printf("promotion accepted: %s\n", admin::kRankNames[static_cast<size_t>(gw(game.state, 0x6C30))]);
                 if (gw(game.state, 0x6C26) == 1) {
                     if (!game.start_province()) break;
+                    record_province = gw(game.state, 0x6CA6);
                     if (gw(game.state, 0x6C30) >= target_rank) break;
                     province_start_year = game.sim.year;
                     if (!begin_city()) return 1;
@@ -1475,6 +2538,7 @@ int main(int argc, char** argv) {
                 }
                 continue;
             }
+            if (std::getenv("PT_RICH")) model::set_global_word(game.state, economy::kFunds, std::getenv("PT_RICH_FUNDS") ? std::atoi(std::getenv("PT_RICH_FUNDS")) : 30000);
             bot->act();
             if (chaos) fuzz_actions(game, *chaos, chaos_actions);
             if (!game.month()) break;
@@ -1489,6 +2553,22 @@ int main(int argc, char** argv) {
                             bot->construction_need_now(), gw(game.state, 0x6BE4), gw(game.state, 0x6BE2),
                             gw(game.state, 0x6BE0), gw(game.state, 0x6BF2), gw(game.state, 0x6BF0), c.houses_cells, c.forums,
                             c.workshops, c.rubble, c.fire, gw(game.state, economy::kFunds));
+            }
+            if (std::getenv("PT_MIL")) {
+                for (int i = 0; i < model::kActorCount; ++i) {
+                    const model::Actor& a = game.state.objects[static_cast<size_t>(i)];
+                    if (!a.active()) continue;
+                    if (a.type() == systems::province::kCohortType)
+                        std::printf("   mil %d/%d cohort slot %d at (%d,%d) state %d men %d/%d/%d morale %d", game.sim.year,
+                                    game.sim.month + 1, i, a.screen_x() >> 4, a.screen_y() >> 4, a.state(), a.raw[0x20],
+                                    a.raw[0x21], a.raw[0x1D], a.raw[0x2B]);
+                    else if (a.type() == systems::province::kArmyType || a.type() == systems::province::kSeaArmyType)
+                        std::printf("   mil %d/%d army slot %d at (%d,%d) state %d size %d", game.sim.year, game.sim.month + 1, i,
+                                    a.screen_x() >> 4, a.screen_y() >> 4, a.state(), a.raw[0x30]);
+                    else
+                        continue;
+                    std::putchar(10);
+                }
             }
             if (std::getenv("PT_HWTRACE")) {
                 int hw = 0, rd = 0;
@@ -1519,13 +2599,68 @@ int main(int argc, char** argv) {
                                              std::to_string(game.sim.year - province_start_year) + ".SAV");
                 print_status(game, "year");
                 print_accounts(game.state);
+                if (std::getenv("PT_SPENT")) {
+                    std::printf("      spent this year:");
+                    for (const auto& [k, v] : bot->spent) {
+                        const int d = v - prev_spent[k];
+                        if (d) std::printf(" %s %d", k.c_str(), d);
+                    }
+                    std::printf("\n");
+                    prev_spent = bot->spent;
+                }
                 if (std::getenv("PT_PROVINCE")) print_province_status(game);
             }
         }
         print_status(game, "end  ");
-        print_city(game.state, bot->fx - 40, bot->fy - 20, bot->fx + 41, bot->fy + 21);
+        std::printf("invasions %d, battles %d (won %d, lost %d, retreated %d)", game.invasions, game.battles, game.battles_won, game.battles_lost, game.battles_retreated);
+        std::putchar(10);
+        if (std::getenv("PT_MAP")) print_city(game.state, bot->fx - 50, bot->fy - 48, bot->fx + 51, bot->fy + 49);
+        else print_city(game.state, bot->fx - 40, bot->fy - 20, bot->fx + 41, bot->fy + 21);
+        if (std::getenv("PT_WKS")) print_workshops(game.state);
+        if (std::getenv("PT_LVMAP")) {
+            // land value (0-9, a-z for 10-35, - for negative, . for none), network flag as upper case where missing on a house
+            const auto& st = game.state;
+            std::puts("land value (house cells), '_' no house; digits/capitals = network flag present, a-j (0-9) and k-z (10+) = none:");
+            for (int y = std::max(0, bot->fy - 22); y < std::min(model::kCityH, bot->fy + 23); ++y) {
+                for (int x = std::max(0, bot->fx - 40); x < std::min(model::kCityW, bot->fx + 41); ++x) {
+                    const uint8_t t = st.city.tile[y][x];
+                    char ch = '_';
+                    if (t >= 0xC8 && t <= 0xD7) {
+                        const int lv = static_cast<int8_t>(st.city.land_value[y][x]);
+                        const bool net = (st.city.service_flags[y][x] & 2) != 0;
+                        if (lv < 0) ch = '-';
+                        else if (net) ch = lv < 10 ? static_cast<char>('0' + lv) : static_cast<char>('A' + std::min(25, lv - 10));
+                        else ch = lv < 10 ? static_cast<char>('a' + lv) : static_cast<char>('k' + std::min(15, lv - 10));
+                    } else if (t >= 0x36 && t <= 0x43) {
+                        ch = '#';
+                    } else if (t != 0x1D && t >= 0xE0) {
+                        ch = '*';
+                    }
+                    std::putchar(ch);
+                }
+                std::putchar(10);
+            }
+        }
         for (const auto& [k, v] : game.refusals) std::printf("refusal: %s x%d\n", k.c_str(), v);
         for (const auto& [k, v] : bot->spent) std::printf("spent on %s: %d Dn\n", k.c_str(), v);
+        if (!career.empty()) {
+            std::puts("CAREER SUMMARY");
+            std::puts("  rank  title          province  years   in office  peace culture prosperity empire  pop     funds  invasions battles");
+            for (const RankRecord& r : career) {
+                std::printf("  %-4d  %-13s  %-8d  %d..%-4d %-9d  %-5d %-7d %-10d %-6d %-7d %-6d %-9d %d", r.rank,
+                            admin::kRankNames[static_cast<size_t>(std::min(r.rank, 20))], r.province, r.start_year, r.end_year,
+                            r.end_year - r.start_year, r.peace, r.culture, r.prosperity, r.empire, r.pop, r.funds, r.invasions, r.battles);
+                std::putchar(10);
+            }
+            std::printf("final: rank %d (%s), year %d; peace %d, culture %d, prosperity %d, empire %d (average %d); savings %d Dn, imperial favour %d%%",
+                        gw(game.state, 0x6C30), admin::kRankNames[static_cast<size_t>(std::min(gw(game.state, 0x6C30), 20))],
+                        game.sim.year, gw(game.state, admin::kPeace), gw(game.state, admin::kCulture), gw(game.state, admin::kProsperity),
+                        gw(game.state, admin::kEmpire), gw(game.state, admin::kAverage), gw(game.state, 0x6C2E), gw(game.state, 0x6C2A));
+            std::putchar(10);
+            std::printf("battles %d won, %d lost; invasions %d; dismissed %d", game.battles_won, game.battles_lost, game.invasions,
+                        (int)game.dismissed);
+            std::putchar(10);
+        }
         return 0;
     }
     std::fprintf(stderr, "unknown command %s\n", command.c_str());
