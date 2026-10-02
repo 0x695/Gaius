@@ -243,7 +243,7 @@ bool place_road(model::CityMap& city, DragState& drag, int x, int y);
 bool place_wall(model::CityMap& city, DragState& drag, int x, int y);
 
 // Plaza (0x15098): paves an existing road piece (0x36-0x43) by setting its
-// 7BB4 bit 0x10. The renderer and the coverage handlers both read that bit.
+// 7BB4 bit 0x10. The renderer and the land value handlers both read that bit.
 bool place_plaza(model::CityMap& city, int x, int y);
 
 // Clear Area (0x12B79). Crossings revert to water (0x82/0x8A -> 0x4A,

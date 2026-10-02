@@ -75,7 +75,7 @@ For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/g
 ```text
 formats/    Layer 1 — exact import (VPX, P32, .256, PL8, EMPIRE2, SAV, EXEPACK)
 model/      Layer 2 — normalized data model (Phase 2): CityState/CityMap/Actor — see GAIUS_ROADMAP.md
-systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, land-value gate + population), construction.hpp/.cpp (Phase 5, DS:127C command dispatch + placement)
+systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, unrest gate + population), construction.hpp/.cpp (Phase 5, DS:127C command dispatch + placement)
 ui/         scalable toolbar (Phase 5) — metrics/font/toolbar, no SDL dependency
 platform/   window/input/paths abstraction (Phase 1) — see GAIUS_MASTERPLAN.md section 5a
 apps/       gaius_viewer: the game (a Caesar folder, a save or an EMPIRE2 scenario); with no argument it finds the game or explains where it goes

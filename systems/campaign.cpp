@@ -423,9 +423,9 @@ void start_province(model::CityState& state, const formats::empire2::EmpireMap& 
 
     // 0x05A9A: the four other city layers.
     for (auto& row : state.city.service_flags) row.fill(0);
-    for (auto& row : state.city.coverage) row.fill(0);
-    for (auto& row : state.city.operational_state) row.fill(0);
     for (auto& row : state.city.land_value) row.fill(0);
+    for (auto& row : state.city.operational_state) row.fill(0);
+    for (auto& row : state.city.unrest) row.fill(0);
     // 0x05ADD: every walker, and their counters.
     for (int slot = 0; slot < static_cast<int>(model::kActorCount); ++slot) actors::release(state, slot);
     for (int ds : {0x6C1A, 0x6C18, 0x6C14, 0x6C16, 0x6C12}) set(state, ds, 0);

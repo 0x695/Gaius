@@ -191,12 +191,12 @@ void test_save_view_render_synthetic() {
     // land at opposite, clearly distinct ends, not collapse to the same color.
     CHECK(c00.r != c9999.r || c00.g != c9999.g || c00.b != c9999.b);
 
-    gaius::viewer::render_city_layer(sf, SaveLayer::LandValue54A4, 1, 0, 0, 1.0, 100, 100, out);
-    RGB low = px(0, 0);   // land value -8 (confirmed floor)
-    RGB high = px(1, 0);  // land value +50 (confirmed ceiling)
-    CHECK(low.r > high.r);   // negative land value should read redder...
+    gaius::viewer::render_city_layer(sf, SaveLayer::Unrest54A4, 1, 0, 0, 1.0, 100, 100, out);
+    RGB low = px(0, 0);   // unrest -8 (confirmed floor)
+    RGB high = px(1, 0);  // unrest +50 (confirmed ceiling)
+    CHECK(low.r > high.r);   // negative unrest should read redder...
     CHECK(high.g > low.g);   // ...positive should read greener
-    RGB zero = gaius::viewer::land_value_color(0);
+    RGB zero = gaius::viewer::signed_color(0);
     CHECK(zero.r == zero.g && zero.g == zero.b);  // 0 is neutral gray by construction
 
     // Out-of-range camera positions must background-fill, not read
@@ -245,7 +245,7 @@ void test_model_city_state_round_trip() {
     CHECK(state.city.tile[99][99] == sf.raw[tiles_off + 99 * 100 + 99]);
 
     size_t lv_off = block_offset("cell_value_54a4");
-    CHECK(static_cast<uint8_t>(state.city.land_value[3][7]) == sf.raw[lv_off + 3 * 100 + 7]);
+    CHECK(static_cast<uint8_t>(state.city.unrest[3][7]) == sf.raw[lv_off + 3 * 100 + 7]);
 
     size_t empire_off = block_offset("empire2_1602");
     CHECK(state.empire.prefix[0] == sf.raw[empire_off + 0]);
@@ -312,43 +312,43 @@ void test_service_reset_tick() {
     CityMap city;
     ServiceState svc;
     city.service_flags[10][20] = 0xFF;  // all bits set -- only 0x02/0x10 should survive
-    city.coverage[10][20] = 200;
-    svc.coverage_ceiling[10][20] = 5;  // stale from a previous tick
+    city.land_value[10][20] = 200;
+    svc.land_value_ceiling[10][20] = 5;  // stale from a previous tick
 
     reset_tick(city, svc);
 
     CHECK(city.service_flags[10][20] == 0x12);
-    CHECK(city.coverage[10][20] == 0);
-    CHECK(svc.coverage_ceiling[10][20] == 0x3F);
+    CHECK(city.land_value[10][20] == 0);
+    CHECK(svc.land_value_ceiling[10][20] == 0x3F);
     // Spot-check the reset actually swept every cell, not just the one
     // touched above. [0][0] was never set to anything, so &= 0x12 leaves
     // it at 0 (AND only *preserves* bits that were already set -- it
     // can't set a bit from zero).
     CHECK(city.service_flags[0][0] == 0x00);
-    CHECK(svc.coverage_ceiling[99][99] == 0x3F);
+    CHECK(svc.land_value_ceiling[99][99] == 0x3F);
 }
 
-void test_service_apply_coverage() {
-    std::printf("test_service_apply_coverage (routine 0x2C577: square radius, running-minimum ceiling)\n");
+void test_service_apply_land_value() {
+    std::printf("test_service_apply_land_value (routine 0x2C577: square radius, running-minimum ceiling)\n");
     {
         auto f = fresh();
         CityMap& city = f->city;
         ServiceState& svc = f->svc;
-        apply_coverage(city, svc, 50, 50, 10, 2, 15);
-        CHECK(city.coverage[50][50] == 10);           // origin
-        CHECK(city.coverage[50][52] == 10);           // exactly radius 2 on an axis
-        CHECK(city.coverage[52][52] == 10);           // radius 2 on BOTH axes -- square, not circular
-        CHECK(city.coverage[50][53] == 0);            // just outside
-        CHECK(city.coverage[53][53] == 0);
-        CHECK(svc.coverage_ceiling[50][50] == 15);    // lowered from 0x3F to this call's ceiling
-        CHECK(svc.coverage_ceiling[50][53] == 0x3F);  // untouched outside the radius
+        apply_land_value(city, svc, 50, 50, 10, 2, 15);
+        CHECK(city.land_value[50][50] == 10);           // origin
+        CHECK(city.land_value[50][52] == 10);           // exactly radius 2 on an axis
+        CHECK(city.land_value[52][52] == 10);           // radius 2 on BOTH axes -- square, not circular
+        CHECK(city.land_value[50][53] == 0);            // just outside
+        CHECK(city.land_value[53][53] == 0);
+        CHECK(svc.land_value_ceiling[50][50] == 15);    // lowered from 0x3F to this call's ceiling
+        CHECK(svc.land_value_ceiling[50][53] == 0x3F);  // untouched outside the radius
 
-        apply_coverage(city, svc, 50, 50, 10, 0, 15);
-        CHECK(city.coverage[50][50] == 15);  // capped
+        apply_land_value(city, svc, 50, 50, 10, 0, 15);
+        CHECK(city.land_value[50][50] == 15);  // capped
 
-        apply_coverage(city, svc, 0, 0, 5, 1, 20);  // off-grid centre must clip, not crash
-        CHECK(city.coverage[0][0] == 5);
-        CHECK(city.coverage[1][1] == 5);
+        apply_land_value(city, svc, 0, 0, 5, 1, 20);  // off-grid centre must clip, not crash
+        CHECK(city.land_value[0][0] == 5);
+        CHECK(city.land_value[1][1] == 5);
     }
 
     // The engine's defining behaviour: the ceiling is a per-cell running
@@ -356,60 +356,60 @@ void test_service_apply_coverage() {
     // in range whichever is applied first.
     {
         auto f = fresh();
-        apply_coverage(f->city, f->svc, 10, 10, 10, 0, 31);  // high ceiling first
-        apply_coverage(f->city, f->svc, 10, 10, 1, 0, 4);    // then a low one
-        CHECK(f->city.coverage[10][10] == 4);
+        apply_land_value(f->city, f->svc, 10, 10, 10, 0, 31);  // high ceiling first
+        apply_land_value(f->city, f->svc, 10, 10, 1, 0, 4);    // then a low one
+        CHECK(f->city.land_value[10][10] == 4);
     }
     {
         auto f = fresh();
-        apply_coverage(f->city, f->svc, 10, 10, 1, 0, 4);    // low ceiling first
-        apply_coverage(f->city, f->svc, 10, 10, 10, 0, 31);  // a higher one can't lift it back
-        CHECK(f->city.coverage[10][10] == 4);
-        CHECK(f->svc.coverage_ceiling[10][10] == 4);
+        apply_land_value(f->city, f->svc, 10, 10, 1, 0, 4);    // low ceiling first
+        apply_land_value(f->city, f->svc, 10, 10, 10, 0, 31);  // a higher one can't lift it back
+        CHECK(f->city.land_value[10][10] == 4);
+        CHECK(f->svc.land_value_ceiling[10][10] == 4);
         reset_tick(f->city, f->svc);  // the next tick starts over
-        CHECK(f->svc.coverage_ceiling[10][10] == 0x3F);
+        CHECK(f->svc.land_value_ceiling[10][10] == 0x3F);
     }
 }
 
-void test_service_apply_land_value() {
-    std::printf("test_service_apply_land_value (routine 0x2C6AF: square radius, ceiling only, no floor)\n");
+void test_service_apply_unrest() {
+    std::printf("test_service_apply_unrest (routine 0x2C6AF: square radius, ceiling only, no floor)\n");
     auto f = fresh();
     CityMap& city = f->city;
-    apply_land_value(city, 30, 30, 20, 1, 32);
-    CHECK(city.land_value[30][30] == 20);
-    CHECK(city.land_value[31][31] == 20);  // square radius
-    CHECK(city.land_value[32][32] == 0);   // outside
+    apply_unrest(city, 30, 30, 20, 1, 32);
+    CHECK(city.unrest[30][30] == 20);
+    CHECK(city.unrest[31][31] == 20);  // square radius
+    CHECK(city.unrest[32][32] == 0);   // outside
 
-    apply_land_value(city, 30, 30, 20, 0, 32);  // 40 -> capped at this call's ceiling
-    CHECK(city.land_value[30][30] == 32);
+    apply_unrest(city, 30, 30, 20, 0, 32);  // 40 -> capped at this call's ceiling
+    CHECK(city.unrest[30][30] == 32);
 
-    for (int i = 0; i < 3; ++i) apply_land_value(city, 40, 40, 20, 0, 64);
-    CHECK(city.land_value[40][40] == 60);  // no +50 cap in the propagator
+    for (int i = 0; i < 3; ++i) apply_unrest(city, 40, 40, 20, 0, 64);
+    CHECK(city.unrest[40][40] == 60);  // no +50 cap in the propagator
 
     // No floor: the barracks' -3 accumulates straight past -8. A real save
     // holds -43 right next to one.
-    for (int i = 0; i < 15; ++i) apply_land_value(city, 60, 60, -3, 0, 32);
-    CHECK(city.land_value[60][60] == -45);
+    for (int i = 0; i < 15; ++i) apply_unrest(city, 60, 60, -3, 0, 32);
+    CHECK(city.unrest[60][60] == -45);
 }
 
-void test_service_evolve_land_value() {
-    std::printf("test_service_evolve_land_value (routine 0x2DA7E: per-cell step, clamp -8..+50)\n");
+void test_service_evolve_unrest() {
+    std::printf("test_service_evolve_unrest (routine 0x2DA7E: per-cell step, clamp -8..+50)\n");
     auto f = fresh();
     CityMap& city = f->city;
     city.service_flags[5][5] = 0x20;  // bit 0x20 set: grows by the argument
-    city.land_value[5][5] = 45;
-    evolve_land_value(city, 5, 5, 3);
-    CHECK(city.land_value[5][5] == 48);
-    evolve_land_value(city, 5, 5, 3);
-    CHECK(city.land_value[5][5] == 50);  // capped at +50
+    city.unrest[5][5] = 45;
+    evolve_unrest(city, 5, 5, 3);
+    CHECK(city.unrest[5][5] == 48);
+    evolve_unrest(city, 5, 5, 3);
+    CHECK(city.unrest[5][5] == 50);  // capped at +50
 
-    city.land_value[6][6] = -7;  // no 0x20: decays by 2, floored at -8
-    evolve_land_value(city, 6, 6, 3);
-    CHECK(city.land_value[6][6] == -8);
+    city.unrest[6][6] = -7;  // no 0x20: decays by 2, floored at -8
+    evolve_unrest(city, 6, 6, 3);
+    CHECK(city.unrest[6][6] == -8);
 
-    city.land_value[7][7] = -43;  // propagated below the floor: pulled back up
-    evolve_land_value(city, 7, 7, 3);
-    CHECK(city.land_value[7][7] == -8);
+    city.unrest[7][7] = -43;  // propagated below the floor: pulled back up
+    evolve_unrest(city, 7, 7, 3);
+    CHECK(city.unrest[7][7] == -8);
 }
 
 void test_service_derive_network_flags() {
@@ -437,9 +437,9 @@ void test_service_apply_flags() {
 
 void test_service_building_handlers() {
     std::printf("test_service_building_handlers (every handler parameter, transcribed from disassembly)\n");
-    auto cov = [](const CityMap& c, int x, int y) { return static_cast<int>(c.coverage[y][x]); };
+    auto cov = [](const CityMap& c, int x, int y) { return static_cast<int>(c.land_value[y][x]); };
 
-    // Forums (tiles 0xE0-0xE7): coverage radius 2/3/4/5, flags radius
+    // Forums (tiles 0xE0-0xE7): land value radius 2/3/4/5, flags radius
     // 6/8/10/12.
     for (int v = 1; v <= 4; ++v) {
         auto f = fresh();
@@ -454,10 +454,10 @@ void test_service_building_handlers() {
     {  // Bath houses: nothing unless connected
         auto f = fresh();
         apply_bath_houses(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 0);
+        CHECK(f->city.land_value[50][50] == 0);
         CHECK(f->city.service_flags[50][50] == 0);
     }
-    {  // ...then coverage r2 and flags 0x04 r3
+    {  // ...then land value r2 and flags 0x04 r3
         auto f = fresh();
         f->city.operational_state[50][50] = 0x10;
         apply_bath_houses(f->city, f->svc, 50, 50);
@@ -466,16 +466,16 @@ void test_service_building_handlers() {
         CHECK((f->city.service_flags[50][53] & 0x04) != 0);
         CHECK((f->city.service_flags[50][54] & 0x04) == 0);
     }
-    {  // Oracle: coverage +2 r8, land value -2 r5, no flags
+    {  // Oracle: land value +2 r8, unrest -2 r5, no flags
         auto f = fresh();
         apply_oracle(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 58, 50) == 2);
         CHECK(cov(f->city, 59, 50) == 0);
-        CHECK(f->city.land_value[50][55] == -2);
-        CHECK(f->city.land_value[50][56] == 0);
+        CHECK(f->city.unrest[50][55] == -2);
+        CHECK(f->city.unrest[50][56] == 0);
         CHECK(f->city.service_flags[50][50] == 0);
     }
-    {  // School/Hospital: coverage r3, flags 0x40 r4
+    {  // School/Hospital: land value r3, flags 0x40 r4
         auto f = fresh();
         apply_school_or_hospital(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 53, 50) == 1);
@@ -483,28 +483,28 @@ void test_service_building_handlers() {
         CHECK((f->city.service_flags[50][54] & 0x40) != 0);
         CHECK((f->city.service_flags[50][55] & 0x40) == 0);
     }
-    {  // Prefecture: coverage r2 at ceiling 8, flags 0x20 r4, land value -2 r3
+    {  // Prefecture: land value r2 at ceiling 8, flags 0x20 r4, unrest -2 r3
         auto f = fresh();
         apply_prefecture(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 52, 50) == 1);
         CHECK(cov(f->city, 53, 50) == 0);
-        CHECK(f->svc.coverage_ceiling[50][52] == 8);
+        CHECK(f->svc.land_value_ceiling[50][52] == 8);
         CHECK((f->city.service_flags[50][54] & 0x20) != 0);
         CHECK((f->city.service_flags[50][55] & 0x20) == 0);
-        CHECK(f->city.land_value[50][53] == -2);
-        CHECK(f->city.land_value[50][54] == 0);
+        CHECK(f->city.unrest[50][53] == -2);
+        CHECK(f->city.unrest[50][54] == 0);
     }
-    {  // Barracks: coverage r3 at ceiling 5, land value -3 r5, no flags at all
+    {  // Barracks: land value r3 at ceiling 5, unrest -3 r5, no flags at all
         auto f = fresh();
         apply_barracks(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 53, 50) == 1);
         CHECK(cov(f->city, 54, 50) == 0);
-        CHECK(f->svc.coverage_ceiling[50][53] == 5);
-        CHECK(f->city.land_value[50][55] == -3);
-        CHECK(f->city.land_value[50][56] == 0);
+        CHECK(f->svc.land_value_ceiling[50][53] == 5);
+        CHECK(f->city.unrest[50][55] == -3);
+        CHECK(f->city.unrest[50][56] == 0);
         CHECK(f->city.service_flags[50][50] == 0);
     }
-    {  // Theater: coverage r3, flags 0x80 r4
+    {  // Theater: land value r3, flags 0x80 r4
         auto f = fresh();
         apply_theater(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 53, 50) == 1);
@@ -512,7 +512,7 @@ void test_service_building_handlers() {
         CHECK((f->city.service_flags[50][54] & 0x80) != 0);
         CHECK((f->city.service_flags[50][55] & 0x80) == 0);
     }
-    {  // Coliseum: coverage r4, flags 0x80 r6
+    {  // Coliseum: land value r4, flags 0x80 r6
         auto f = fresh();
         apply_coliseum(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 54, 50) == 1);
@@ -520,7 +520,7 @@ void test_service_building_handlers() {
         CHECK((f->city.service_flags[50][56] & 0x80) != 0);
         CHECK((f->city.service_flags[50][57] & 0x80) == 0);
     }
-    {  // Hippodrome: coverage r5, flags 0x80 r7
+    {  // Hippodrome: land value r5, flags 0x80 r7
         auto f = fresh();
         apply_hippodrome(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 55, 50) == 1);
@@ -528,111 +528,111 @@ void test_service_building_handlers() {
         CHECK((f->city.service_flags[50][57] & 0x80) != 0);
         CHECK((f->city.service_flags[50][58] & 0x80) == 0);
     }
-    {  // Heavy industry: coverage r4 at ceiling 2, no flags
+    {  // Heavy industry: land value r4 at ceiling 2, no flags
         auto f = fresh();
         apply_heavy_industry(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 54, 50) == 1);
         CHECK(cov(f->city, 55, 50) == 0);
-        CHECK(f->svc.coverage_ceiling[50][54] == 2);
+        CHECK(f->svc.land_value_ceiling[50][54] == 2);
         CHECK(f->city.service_flags[50][50] == 0);
     }
-    {  // Market: coverage r1 at ceiling 16, flags 0x08 r6
+    {  // Market: land value r1 at ceiling 16, flags 0x08 r6
         auto f = fresh();
         apply_market(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 51, 50) == 1);
         CHECK(cov(f->city, 52, 50) == 0);
-        CHECK(f->svc.coverage_ceiling[50][51] == 16);
+        CHECK(f->svc.land_value_ceiling[50][51] == 16);
         CHECK((f->city.service_flags[50][56] & 0x08) != 0);
         CHECK((f->city.service_flags[50][57] & 0x08) == 0);
     }
-    {  // 0xF5/F6: coverage r3 at ceiling 3
+    {  // 0xF5/F6: land value r3 at ceiling 3
         auto f = fresh();
         apply_tile_f5_f6(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 53, 50) == 1);
         CHECK(cov(f->city, 54, 50) == 0);
-        CHECK(f->svc.coverage_ceiling[50][53] == 3);
+        CHECK(f->svc.land_value_ceiling[50][53] == 3);
     }
     {  // 0x36-0x3B: nothing unless connected, then +1 r1
         auto f = fresh();
         apply_tile_36_3b(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 0);
+        CHECK(f->city.land_value[50][50] == 0);
         f->city.operational_state[50][50] = 0x10;
         apply_tile_36_3b(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 51, 50) == 1);
         CHECK(cov(f->city, 52, 50) == 0);
     }
-    {  // 0x3C-0x3F: +1 r1 unconnected, +2 connected, and no land-value effect
+    {  // 0x3C-0x3F: +1 r1 unconnected, +2 connected, and no unrest effect
         auto f = fresh();
         apply_tile_3c_3f(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 51, 50) == 1);
         CHECK(cov(f->city, 52, 50) == 0);
-        CHECK(f->city.land_value[50][50] == 0);
+        CHECK(f->city.unrest[50][50] == 0);
         f->city.operational_state[50][50] = 0x10;
         apply_tile_3c_3f(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 3);
+        CHECK(f->city.land_value[50][50] == 3);
     }
     {  // 0x40: +2 unconnected, +3 connected
         auto f = fresh();
         apply_tile_40(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 2);
+        CHECK(f->city.land_value[50][50] == 2);
         f->city.operational_state[50][50] = 0x10;
         apply_tile_40(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 5);
+        CHECK(f->city.land_value[50][50] == 5);
     }
     {  // What the low ceilings are for: a heavy industry beside a temple caps
-       // the temple's coverage in their overlap at 2.
+       // the temple's land value in their overlap at 2.
         auto f = fresh();
         for (int i = 0; i < 5; ++i) apply_forum(f->city, f->svc, 50, 50, ForumTier::Tier4);
-        CHECK(f->city.coverage[50][50] == 5);  // alone, it accumulates
+        CHECK(f->city.land_value[50][50] == 5);  // alone, it accumulates
         apply_heavy_industry(f->city, f->svc, 52, 50);
-        CHECK(f->city.coverage[50][50] == 2);  // capped inside industry's radius
-        CHECK(f->city.coverage[50][45] == 5);  // untouched outside it
+        CHECK(f->city.land_value[50][50] == 2);  // capped inside industry's radius
+        CHECK(f->city.land_value[50][45] == 5);  // untouched outside it
     }
-    {  // 0x94/95: coverage +1 r2 at ceiling 8, land value -2 r2
+    {  // 0x94/95: land value +1 r2 at ceiling 8, unrest -2 r2
         auto f = fresh();
         apply_tile_94_95(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 52, 50) == 1);
         CHECK(cov(f->city, 53, 50) == 0);
-        CHECK(f->svc.coverage_ceiling[50][52] == 8);
-        CHECK(f->city.land_value[50][52] == -2);
-        CHECK(f->city.land_value[50][53] == 0);
+        CHECK(f->svc.land_value_ceiling[50][52] == 8);
+        CHECK(f->city.unrest[50][52] == -2);
+        CHECK(f->city.unrest[50][53] == 0);
     }
-    {  // 0xA2/A3, 0xA7-B2: NEGATIVE coverage, -2 r3 then -2 r1, ceiling 8. No
+    {  // 0xA2/A3, 0xA7-B2: NEGATIVE land value, -2 r3 then -2 r1, ceiling 8. No
        // lower clamp, so the byte wraps -- real saves hold 254/255 near these.
         auto f = fresh();
         apply_tile_a2_b2(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 252);  // -4 within radius 1
-        CHECK(f->city.coverage[50][52] == 254);  // -2 out to radius 3
-        CHECK(f->city.coverage[50][53] == 254);
-        CHECK(f->city.coverage[50][54] == 0);
-        CHECK(f->svc.coverage_ceiling[50][53] == 8);
+        CHECK(f->city.land_value[50][50] == 252);  // -4 within radius 1
+        CHECK(f->city.land_value[50][52] == 254);  // -2 out to radius 3
+        CHECK(f->city.land_value[50][53] == 254);
+        CHECK(f->city.land_value[50][54] == 0);
+        CHECK(f->svc.land_value_ceiling[50][53] == 8);
     }
-    {  // 0xB9/BB/BC: coverage +1 r2, only when C9D4.01 is set
+    {  // 0xB9/BB/BC: land value +1 r2, only when C9D4.01 is set
         auto f = fresh();
         apply_tile_b9_bb_bc(f->city, f->svc, 50, 50);
-        CHECK(f->city.coverage[50][50] == 0);
+        CHECK(f->city.land_value[50][50] == 0);
         f->city.service_flags[50][50] = 0x01;
         apply_tile_b9_bb_bc(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 52, 50) == 1);
         CHECK(cov(f->city, 53, 50) == 0);
     }
-    {  // Temple stages 0xD8-DB: coverage +1 r2, land value -2 r2
+    {  // Temple stages 0xD8-DB: land value +1 r2, unrest -2 r2
         auto f = fresh();
         f->city.tile[50][50] = 0xD9;
         apply_temple_stage(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 52, 50) == 1);
         CHECK(cov(f->city, 53, 50) == 0);
-        CHECK(f->city.land_value[50][52] == -2);
-        CHECK(f->city.land_value[50][53] == 0);
+        CHECK(f->city.unrest[50][52] == -2);
+        CHECK(f->city.unrest[50][53] == 0);
     }
-    {  // Temple stages 0xDC-DF: coverage +1 r3, land value -2 r3
+    {  // Temple stages 0xDC-DF: land value +1 r3, unrest -2 r3
         auto f = fresh();
         f->city.tile[50][50] = 0xDE;
         apply_temple_stage(f->city, f->svc, 50, 50);
         CHECK(cov(f->city, 53, 50) == 1);
         CHECK(cov(f->city, 54, 50) == 0);
-        CHECK(f->city.land_value[50][53] == -2);
-        CHECK(f->city.land_value[50][54] == 0);
+        CHECK(f->city.unrest[50][53] == -2);
+        CHECK(f->city.unrest[50][54] == 0);
     }
 }
 
@@ -645,16 +645,16 @@ void test_service_dispatch_tile() {
         f->city.tile[50][50] = 0xE6;
         dispatch_tile(f->city, f->svc, 50, 50);
         CHECK((f->city.service_flags[50][62] & 0x20) != 0);  // radius 12
-        CHECK(f->city.coverage[50][55] == 1);                // radius 5
+        CHECK(f->city.land_value[50][55] == 1);                // radius 5
     }
     {  // 0x36-0x3B keeps its connectivity gate through dispatch
         auto f = fresh();
         f->city.tile[10][10] = 0x38;
         dispatch_tile(f->city, f->svc, 10, 10);
-        CHECK(f->city.coverage[10][10] == 0);
+        CHECK(f->city.land_value[10][10] == 0);
         f->city.operational_state[10][10] = 0x10;
         dispatch_tile(f->city, f->svc, 10, 10);
-        CHECK(f->city.coverage[10][10] == 1);
+        CHECK(f->city.land_value[10][10] == 1);
     }
     {  // The engine's scan (0x2BBBB) never dispatches tiles <= 0x35, and it is
        // the only reader of DS:153A. So tile 0x00 -- whose table entry would
@@ -662,35 +662,35 @@ void test_service_dispatch_tile() {
        // unchanged through a whole play session in real saves.
         auto f = fresh();
         f->city.tile[5][5] = 0x00;
-        f->city.land_value[5][5] = 41;
+        f->city.unrest[5][5] = 41;
         dispatch_tile(f->city, f->svc, 5, 5);
         CHECK(f->city.tile[5][5] == 0x00);
         f->city.tile[6][6] = 0x35;  // the boundary is skipped too
         f->city.operational_state[6][6] = 0x10;
         dispatch_tile(f->city, f->svc, 6, 6);
-        CHECK(f->city.coverage[6][6] == 0);
+        CHECK(f->city.land_value[6][6] == 0);
     }
     {  // Housing tier 0xC8: base-1, radius 1, ceiling 4
         auto f = fresh();
         f->city.tile[20][20] = 0xC8;
         dispatch_tile(f->city, f->svc, 20, 20);
-        CHECK(f->city.coverage[20][21] == 1);
-        CHECK(f->city.coverage[20][22] == 0);
-        CHECK(f->svc.coverage_ceiling[20][20] == 4);
+        CHECK(f->city.land_value[20][21] == 1);
+        CHECK(f->city.land_value[20][22] == 0);
+        CHECK(f->svc.land_value_ceiling[20][20] == 4);
     }
     {  // Housing tier 0xD7: base+2, radius 2, ceiling 31
         auto f = fresh();
         f->city.tile[20][20] = 0xD7;
         dispatch_tile(f->city, f->svc, 20, 20);
-        CHECK(f->city.coverage[20][22] == 4);
-        CHECK(f->city.coverage[20][23] == 0);
+        CHECK(f->city.land_value[20][22] == 4);
+        CHECK(f->city.land_value[20][23] == 0);
     }
     {  // The base really is a parameter (DS:0x6BF8)
         auto f = fresh();
-        f->svc.housing_coverage_base = 5;
+        f->svc.housing_land_value_base = 5;
         f->city.tile[20][20] = 0xCA;  // base, radius 1, ceiling 8
         dispatch_tile(f->city, f->svc, 20, 20);
-        CHECK(f->city.coverage[20][20] == 5);
+        CHECK(f->city.land_value[20][20] == 5);
     }
     {  // 0xF4 routes to the Market (flags 0x08)
         auto f = fresh();
@@ -698,64 +698,64 @@ void test_service_dispatch_tile() {
         dispatch_tile(f->city, f->svc, 30, 30);
         CHECK((f->city.service_flags[30][36] & 0x08) != 0);
     }
-    {  // 0xEF routes to the Barracks (no flags, land value -3)
+    {  // 0xEF routes to the Barracks (no flags, unrest -3)
         auto f = fresh();
         f->city.tile[30][30] = 0xEF;
         dispatch_tile(f->city, f->svc, 30, 30);
         CHECK(f->city.service_flags[30][30] == 0);
-        CHECK(f->city.land_value[30][35] == -3);
+        CHECK(f->city.unrest[30][35] == -3);
     }
     {  // 0xE9 and an id with no transcribed handler are no-ops
         auto f = fresh();
         f->city.tile[7][7] = 0xE9;
         dispatch_tile(f->city, f->svc, 7, 7);
         CHECK(f->city.service_flags[7][7] == 0);
-        CHECK(f->city.coverage[7][7] == 0);
+        CHECK(f->city.land_value[7][7] == 0);
         f->city.tile[8][8] = 0x99;
         dispatch_tile(f->city, f->svc, 8, 8);
         CHECK(f->city.service_flags[8][8] == 0);
-        CHECK(f->city.coverage[8][8] == 0);
+        CHECK(f->city.land_value[8][8] == 0);
     }
 }
 
 // systems::housing (Phase 4, Layer 3), transcribed from the disassembly:
-// land_value_allows (0x2DB49), the DS:1212 development handlers and the row
+// unrest_collapses (0x2DB49), the DS:1212 development handlers and the row
 // pass (0x294CF), and the population table (3496:007E). Each handler case pins
 // one transition exactly -- tiles, 7BB4 part indices and the column skip -- so a
 // transcription slip fails loudly. Real-save checks: test_save_corpus_population.
-void test_housing_land_value_allows() {
-    std::printf("test_housing_land_value_allows (CAESAR_CITY_STATE_v5.md routine 0x2DB49)\n");
+void test_housing_unrest_collapses() {
+    std::printf("test_housing_unrest_collapses (CAESAR_CITY_STATE_v5.md routine 0x2DB49)\n");
     CityMap city;
-    city.land_value[10][10] = 41;
-    city.coverage[10][10] = 5;
+    city.unrest[10][10] = 41;
+    city.land_value[10][10] = 5;
     city.operational_state[10][10] = 7;
-    bool result = land_value_allows(city, 10, 10, 40);
+    bool result = unrest_collapses(city, 10, 10, 40);
     CHECK(result == true);
     CHECK(city.tile[10][10] == 0xA7);
-    CHECK(city.coverage[10][10] == 0);
-    CHECK(city.operational_state[10][10] == 0);
     CHECK(city.land_value[10][10] == 0);
+    CHECK(city.operational_state[10][10] == 0);
+    CHECK(city.unrest[10][10] == 0);
 
     // Strictly greater-than, per the doc ("if (lv > threshold)") -- exactly
     // at the threshold must NOT pass.
     CityMap city2;
-    city2.land_value[5][5] = 40;
-    bool result2 = land_value_allows(city2, 5, 5, 40);
+    city2.unrest[5][5] = 40;
+    bool result2 = unrest_collapses(city2, 5, 5, 40);
     CHECK(result2 == false);
     CHECK(city2.tile[5][5] == 0);  // untouched
 
     CityMap city3;
-    city3.land_value[5][5] = -3;
-    CHECK(land_value_allows(city3, 5, 5, 40) == false);
+    city3.unrest[5][5] = -3;
+    CHECK(unrest_collapses(city3, 5, 5, 40) == false);
     CHECK(city3.tile[5][5] == 0);
 }
 
 void test_housing_development() {
     std::printf("test_housing_development (DS:1212 handlers and row pass 0x294CF, exact writes)\n");
     const uint8_t all = 0x01 | 0x02 | 0x04 | 0x08 | 0x40 | 0x80;
-    auto put = [](CityMap& c, int x, int y, uint8_t tile, int coverage, uint8_t flags) {
+    auto put = [](CityMap& c, int x, int y, uint8_t tile, int land_value, uint8_t flags) {
         c.tile[y][x] = tile;
-        c.coverage[y][x] = static_cast<uint8_t>(coverage);
+        c.land_value[y][x] = static_cast<uint8_t>(land_value);
         c.service_flags[y][x] = flags;
     };
     auto T = [](const CityMap& c, int x, int y) { return static_cast<int>(c.tile[y][x]); };
@@ -767,7 +767,7 @@ void test_housing_development() {
     };
     const DevelopmentContext none;
 
-    {  // C8: coverage below 0 -> open ground 0x1D; above 0 -> C9; exactly 0 -> stays
+    {  // C8: land value below 0 -> open ground 0x1D; above 0 -> C9; exactly 0 -> stays
         auto f = fresh();
         put(f->city, 10, 10, 0xC8, -1, 0);
         put(f->city, 11, 10, 0xC8, 1, 0);
@@ -779,10 +779,10 @@ void test_housing_development() {
         CHECK(T(f->city, 11, 10) == 0xC9);
         CHECK(T(f->city, 12, 10) == 0xC8);
     }
-    {  // C8 with land value above 20: land_value_allows fires first
+    {  // C8 with unrest above 20: unrest_collapses fires first
         auto f = fresh();
         put(f->city, 10, 10, 0xC8, 5, 0);
-        f->city.land_value[10][10] = 21;
+        f->city.unrest[10][10] = 21;
         develop_building(f->city, 10, 10, 0, none);
         CHECK(T(f->city, 10, 10) == 0xA7);
     }
@@ -896,7 +896,7 @@ void test_housing_development() {
         put(f->city, 10, 10, 0xD8, 3, 0);
         develop_building(f->city, 10, 10, 0, at_pop(15));
         CHECK(T(f->city, 10, 10) == 0xD9);
-        f->city.coverage[10][10] = 6;
+        f->city.land_value[10][10] = 6;
         f->city.tile[11][10] = 0x20;
         CHECK(develop_building(f->city, 10, 10, 0, at_pop(15)) == 0);
         CHECK(T(f->city, 10, 10) == 0xDA && T(f->city, 10, 11) == 0xDA && P(f->city, 10, 11) == 4);
@@ -924,7 +924,7 @@ void test_housing_development() {
         f->city.tile[11][12] = 0x20;
         CHECK(develop_building(f->city, 10, 10, 0, at_pop(200)) == 1);
         CHECK(T(f->city, 12, 11) == 0xDF && P(f->city, 12, 11) == 6);
-        f->city.coverage[10][10] = 23;
+        f->city.land_value[10][10] = 23;
         CHECK(develop_building(f->city, 10, 10, 0, none) == 1);
         CHECK(T(f->city, 10, 10) == 0xDE && T(f->city, 12, 10) == 0x1D && T(f->city, 12, 11) == 0x1D);
     }
@@ -953,18 +953,18 @@ void test_housing_development() {
         CHECK(T(f->city, 10, 10) == 0xE8 && T(f->city, 11, 10) == 0xE8 && P(f->city, 11, 10) == 0x40);
         CHECK(T(f->city, 10, 11) == 0x1D && T(f->city, 11, 11) == 0x1D);
     }
-    {  // The row pass: land value, fountains, anchors only, and column skipping
+    {  // The row pass: unrest, fountains, anchors only, and column skipping
         auto f = fresh();
         CityMap& c = f->city;
         DevelopmentContext rc;
         rc.population_units = 60;
-        rc.land_value_growth = 3;
+        rc.unrest_growth = 3;
         c.tile[5][0] = 0x20;
-        c.land_value[5][0] = -5;  // below 0xC8: zeroed
+        c.unrest[5][0] = -5;  // below 0xC8: zeroed
         put(c, 1, 5, 0xC8, 0, 0x20);
-        c.land_value[5][1] = 4;  // housing with C9D4.20: grows by 3
+        c.unrest[5][1] = 4;  // housing with C9D4.20: grows by 3
         put(c, 2, 5, 0xD7, 30, all);
-        c.land_value[5][2] = 9;         // 0xD7 and above: zeroed
+        c.unrest[5][2] = 9;         // 0xD7 and above: zeroed
         put(c, 3, 5, 0xCC, 4, 0x03);   // this pair demotes...
         put(c, 4, 5, 0xCC, 2, 0x03);   // ...and its right half, now a CB that would demote, is skipped
         c.operational_state[5][4] = 1;
@@ -973,9 +973,9 @@ void test_housing_development() {
         put(c, 6, 5, 0xB9, 11, 0x01);  // small fountain grows; watered -> BB
         put(c, 7, 5, 0xBB, 9, 0x00);   // big fountain shrinks; dry -> BA
         develop_row(c, 5, rc);
-        CHECK(c.land_value[5][0] == 0);
-        CHECK(c.land_value[5][1] == 7);
-        CHECK(c.land_value[5][2] == 0);
+        CHECK(c.unrest[5][0] == 0);
+        CHECK(c.unrest[5][1] == 7);
+        CHECK(c.unrest[5][2] == 0);
         CHECK(c.tile[5][3] == 0xCB && c.tile[5][4] == 0xCB);
         CHECK(c.tile[5][5] == 0xC9);
         CHECK(c.tile[5][6] == 0xBB);
@@ -1186,7 +1186,7 @@ void test_construction_to_simulation_pipeline() {
     CHECK(city.tile[50][50] == 0xF0);
     dispatch_tile(city, f->svc, 50, 50);
     CHECK((city.service_flags[50][54] & 0x80) != 0);  // entertainment flag, radius 4
-    CHECK(city.coverage[50][53] == 1);                 // coverage radius 3
+    CHECK(city.land_value[50][53] == 1);                 // land value radius 3
 }
 
 void test_p32_expand_math() {
@@ -1910,7 +1910,7 @@ void test_month_growth_draws() {
         f->city.service_flags[row][5] = 0x20;  // growth applies only with C9D4.20
     }
     SimState sim;
-    sim.land_value_growth_base = 3;
+    sim.unrest_growth_base = 3;
     sim.step = 80;
     Random r;
     r.advance();  // step 80's frame draw
@@ -1925,8 +1925,8 @@ void test_month_growth_draws() {
 
     run_step(f->city, sim);
     run_step(f->city, sim);
-    CHECK(f->city.land_value[80][5] == growth_80);
-    CHECK(f->city.land_value[81][5] == growth_81);
+    CHECK(f->city.unrest[80][5] == growth_80);
+    CHECK(f->city.unrest[81][5] == growth_81);
     CHECK(sim.random.walk == r.walk && sim.random.lfsr == r.lfsr);
 }
 
@@ -5049,8 +5049,8 @@ void test_maps_screen() {
     city.tile[0][1] = 0xD0;  // a house
     city.tile[0][2] = 0x10;  // low ground
     city.service_flags[0][1] = 0x21;
-    city.land_value[0][1] = 17;
-    city.coverage[0][2] = static_cast<uint8_t>(-3);
+    city.unrest[0][1] = 17;
+    city.land_value[0][2] = static_cast<uint8_t>(-3);
     using gaius::ui::MapMode;
     CHECK(gaius::ui::map_colour(city, MapMode::Roads, false, 0, 0) == 0xA);
     CHECK(gaius::ui::map_colour(city, MapMode::Roads, true, 1, 0) == 0);
@@ -5251,7 +5251,7 @@ void test_campaign_start_province() {
 
     set_global_word(*st, 0x6C0C, 8000);
     set_global_word(*st, 0x6CA6, 20);
-    st->city.coverage[3][3] = 9;
+    st->city.land_value[3][3] = 9;
     actors::spawn(*st, 5, 10, 10);  // an invader still in the old city
     gaius::formats::empire2::EmpireMap map{};
     map.cells.fill(0x1D);
@@ -5261,7 +5261,7 @@ void test_campaign_start_province() {
     campaign::start_province(*st, map, rnd, 0, variant);
     CHECK(global_word(*st, 0x6CA2) == 8000 && global_word(*st, plebs::kPlebs) == 120);
     CHECK(global_word(*st, 0x6BBA) == 50 && global_word(*st, military::kRegulars) == 2 && global_word(*st, 0x6C98) == -11);
-    CHECK(st->city.coverage[3][3] == 0 && st->table_480[0] == 0 && st->table_60_c[0] == 0);
+    CHECK(st->city.land_value[3][3] == 0 && st->table_480[0] == 0 && st->table_60_c[0] == 0);
     CHECK(global_word(*st, 0x6C90) == 0 && global_word(*st, 0x6C8E) == 17 && st->empire.cells[17 * 40] == 0x78);
     CHECK(global_word(*st, 0x6BD6) == 9);  // province 20's Picts
     CHECK(global_word(*st, 0x6BE4) == 100 && global_word(*st, plebs::kFireNeed) == 1);
@@ -5338,7 +5338,7 @@ void test_month_economy_matches_saves() {
         gaius::systems::month::run_economy(*st);
         int same = 0;
         for (int i = 0; i < 5; ++i) same += global_word(*st, outputs[i]) == saved[i];
-        std::printf("  %s: %d/5 outputs reproduced (coverage base %d, growth base %d)\n", name, same, saved[3], saved[4]);
+        std::printf("  %s: %d/5 outputs reproduced (land value base %d, growth base %d)\n", name, same, saved[3], saved[4]);
         CHECK(same == 5);
     }
 }
@@ -5349,7 +5349,7 @@ void test_month_economy_matches_saves() {
 // forum, workshop and barracks timers count down on fixed steps, so
 // tools/month_check finds where each save sits in its month (findings section
 // 24). Started from that step, run_step reproduces the next save's tiles,
-// records, month, population words and every land-value cell. The walkers
+// records, month, population words and every unrest cell. The walkers
 // depend on the generator and aren't compared.
 void test_month_consecutive_saves() {
     std::printf("test_month_consecutive_saves (run_step between six saves a month or less apart)\n");
@@ -5381,7 +5381,7 @@ void test_month_consecutive_saves() {
             for (int y = 0; y < gaius::model::kCityH; ++y) {
                 for (int x = 0; x < gaius::model::kCityW; ++x) {
                     tiles += st->city.tile[y][x] != later->city.tile[y][x];
-                    land += st->city.land_value[y][x] != later->city.land_value[y][x];
+                    land += st->city.unrest[y][x] != later->city.unrest[y][x];
                 }
             }
             int records = (st->table_480 != later->table_480) + (st->table_120 != later->table_120) +
@@ -5396,7 +5396,7 @@ void test_month_consecutive_saves() {
         sim.step = leg.start;
         for (int k = 0; k < leg.steps; ++k) month::run_step(*st, sim);
         const auto after = differences();
-        std::printf("  %s -> %s: before tiles %d, record tables %d, globals %d, land value %d; after %d, %d, %d, %d\n",
+        std::printf("  %s -> %s: before tiles %d, record tables %d, globals %d, unrest %d; after %d, %d, %d, %d\n",
                     leg.from, leg.to, before[0], before[1], before[2], before[3], after[0], after[1], after[2], after[3]);
         CHECK(before[1] + before[3] > 0);  // the pair really differs
         CHECK(after[0] == 0 && after[1] == 0 && after[2] == 0 && after[3] == 0);
@@ -5464,7 +5464,7 @@ void test_render_building_animation() {
             }
     };
     square(0xEC, 2, 2, 2, 2);  // school
-    f->city.coverage[2][2] = 13;
+    f->city.land_value[2][2] = 13;
     square(0xEE, 10, 10, 1, 1);  // prefecture with four houses around
     for (const auto& [x, y] : std::initializer_list<std::pair<int, int>>{{9, 9}, {10, 9}, {11, 9}, {9, 10}})
         square(0xC8, x, y, 1, 1);
@@ -5487,7 +5487,7 @@ void test_render_building_animation() {
         RenderPhase p;
         p.ticks = ticks;
         p.population_units = 250;
-        p.coverage_base = 1;
+        p.housing_land_value_base = 1;
         p.workshop_records = &workshops;
         p.barracks_records = &barracks;
         gaius::formats::IndexedImage img;
@@ -5940,7 +5940,7 @@ void test_save_corpus_globals() {
     }
 }
 
-// The strongest check in this suite. The engine rebuilds A2C4 coverage and
+// The strongest check in this suite. The engine rebuilds A2C4 land value and
 // C9D4's service bits from scratch every tick (routine 0x2C8D3 resets them,
 // then every dispatched tile adds to them), so one reset_tick plus one full
 // dispatch pass over a real save's own tile grid must reproduce the layers the
@@ -6099,11 +6099,11 @@ void test_save_corpus_simulation() {
         const uint8_t* globals = sf.block("global_words_128").first;
         for (int i = 0; i < 128; ++i)
             if (save::kGlobalWordDsAddress[i] == 0x6BF8)
-                f->svc.housing_coverage_base = globals[2 * i] | (globals[2 * i + 1] << 8);
+                f->svc.housing_land_value_base = globals[2 * i] | (globals[2 * i + 1] << 8);
 
         // CAESARXS.SAV was written between steps 101 and 102: the reset and the
         // water pass had run (population matches too) but none of the four
-        // scans, so its coverage and every service bit but water are still zero.
+        // scans, so its land value and every service bit but water are still zero.
         const bool before_scans = std::string(n) == "CAESARXS.SAV";
         if (before_scans) {
             reset_tick(f->city, f->svc);
@@ -6112,11 +6112,11 @@ void test_save_corpus_simulation() {
             rebuild_services(f->city, f->svc);
         }
 
-        int coverage_match = 0;
+        int land_value_match = 0;
         int bit_match[6] = {0, 0, 0, 0, 0, 0};
         for (int y = 0; y < gaius::model::kCityH; ++y) {
             for (int x = 0; x < gaius::model::kCityW; ++x) {
-                if (f->city.coverage[y][x] == saved->city.coverage[y][x]) ++coverage_match;
+                if (f->city.land_value[y][x] == saved->city.land_value[y][x]) ++land_value_match;
                 for (int b = 0; b < 6; ++b) {
                     if ((f->city.service_flags[y][x] & bits[b]) == (saved->city.service_flags[y][x] & bits[b]))
                         ++bit_match[b];
@@ -6125,9 +6125,9 @@ void test_save_corpus_simulation() {
         }
         // CAESARXW.SAV: a house next to the road at row 38 changed after the last
         // scan (one more building cell than the published count, population one
-        // unit off), and the coverage around it differs in 43 cells.
+        // unit off), and the land value around it differs in 43 cells.
         const bool changed_after_scan = std::string(n) == "CAESARXW.SAV";
-        CHECK(coverage_match == (changed_after_scan ? 9957 : 10000));
+        CHECK(land_value_match == (changed_after_scan ? 9957 : 10000));
         for (int b = 0; b < 6; ++b) CHECK(bit_match[b] == 10000);
         // The water pass also rewrites fountain tiles (0xB9/0xBA, 0xBB-0xBD) and
         // their levels in 7BB4. Seven of these saves have reservoirs and working
@@ -6536,14 +6536,14 @@ int main() {
     test_model_city_state_round_trip();
     test_service_bit_table_fixtures();
     test_service_reset_tick();
-    test_service_apply_coverage();
     test_service_apply_land_value();
+    test_service_apply_unrest();
     test_service_apply_flags();
-    test_service_evolve_land_value();
+    test_service_evolve_unrest();
     test_service_derive_network_flags();
     test_service_building_handlers();
     test_service_dispatch_tile();
-    test_housing_land_value_allows();
+    test_housing_unrest_collapses();
     test_housing_development();
     test_housing_population();
     test_construction_command_table_fixtures();

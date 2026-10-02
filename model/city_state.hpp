@@ -50,12 +50,18 @@ using CityGrid = std::array<std::array<T, kCityW>, kCityH>;
 // else in the RE corpus (grepped -- appears exactly once, in that sketch),
 // so it's not carried over here: an unbacked field would just be
 // presenting a guess as data. Revisit if RE work ever explains it.
+//
+// Naming (changed 2026-10-02). `land_value` and `unrest` are the names the
+// original's own Maps panel gives these two layers: it draws A2C4 as "land
+// value" and 54A4 on houses as "trouble areas" (findings section 39.2). Until
+// then this struct called A2C4 `coverage` and 54A4 `land_value`, names from
+// the early research that nothing in the executable supports.
 struct CityMap {
     CityGrid<uint8_t> tile{};               // 43A5 / city_tiles_100x100 -- tile->sprite lookup not yet recovered
-    CityGrid<uint8_t> coverage{};           // A2C4 / cell_value_a2c4 -- numeric coverage
+    CityGrid<uint8_t> land_value{};         // A2C4 / cell_value_a2c4 -- the Maps panel's "land value"; a signed byte in use
     CityGrid<uint8_t> service_flags{};      // C9D4 / cell_flags_c9d4 -- mixed persistent/derived/service/prerequisite bitfield
     CityGrid<uint8_t> operational_state{};  // 7BB4 / cell_flags_7bb4 -- operational/connection state; also cleared on actor deletion for city-space actors (CAESAR_CITY_STATE_v9.md)
-    CityGrid<int8_t> land_value{};          // 54A4 / cell_value_54a4 -- signed, confirmed range -8..+50
+    CityGrid<int8_t> unrest{};              // 54A4 / cell_value_54a4 -- the Maps panel's "trouble areas" (what collapses low-grade houses); signed
 };
 
 // City-coordinate actors (types 0-10) use packed_xy = row*100+col;

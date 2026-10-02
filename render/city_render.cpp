@@ -104,7 +104,7 @@ void draw_building_cell(formats::IndexedImage& out, const CitySprites& s, const 
             break;
         }
         case 0xEC:  // school
-            if (static_cast<int8_t>(city.coverage[static_cast<size_t>(row)][static_cast<size_t>(col)]) > 12 && (c32 & 6) &&
+            if (static_cast<int8_t>(city.land_value[static_cast<size_t>(row)][static_cast<size_t>(col)]) > 12 && (c32 & 6) &&
                 phase.population_units > 100)
                 variant(0x1E + stride);
             break;
@@ -131,7 +131,7 @@ void draw_building_cell(formats::IndexedImage& out, const CitySprites& s, const 
             break;
         case 0xF4:  // market, trading
             variant(5);
-            if ((c64 & 0x30) && phase.coverage_base > 0 && phase.population_units >= 30) variant(0x18 + ((c64 & 0x30) >> 4));
+            if ((c64 & 0x30) && phase.housing_land_value_base > 0 && phase.population_units >= 30) variant(0x18 + ((c64 & 0x30) >> 4));
             break;
         case 0xF5:
         case 0xF6:

@@ -50,9 +50,9 @@ SimState sim_state_from_save(const model::CityState& state) {
     SimState sim;
     sim.month = saved_word(state, 0x6C1C);
     sim.year = saved_word(state, 0x6C32);
-    sim.land_value_growth_base = saved_word(state, 0x6BF6);
+    sim.unrest_growth_base = saved_word(state, 0x6BF6);
     sim.population_units = saved_word(state, 0x6C10);
-    sim.service.housing_coverage_base = saved_word(state, 0x6BF8);
+    sim.service.housing_land_value_base = saved_word(state, 0x6BF8);
     sim.road_wear_threshold = saved_word(state, 0x6BE0);
     sim.collapse_threshold = saved_word(state, 0x6BE2);
     sim.fire_threshold = saved_word(state, 0x6BE4);
@@ -145,8 +145,8 @@ void run_step_impl(model::CityMap& city, SimState& sim, model::CityState* state)
         std::vector<std::pair<int, int>> collapsed;
         housing::DevelopmentContext ctx;
         ctx.population_units = sim.population_units;
-        ctx.land_value_growth = static_cast<int8_t>(
-            static_cast<uint8_t>(sim.land_value_growth_base + (sim.random.walk & 3) - 1));
+        ctx.unrest_growth = static_cast<int8_t>(
+            static_cast<uint8_t>(sim.unrest_growth_base + (sim.random.walk & 3) - 1));
         if (state) ctx.collapsed = &collapsed;
         ctx.random = &sim.random;
         ctx.spread_fire = [&](int x, int y, int direction) {
@@ -340,8 +340,8 @@ void run_step(model::CityState& state, SimState& sim) {
         model::set_global_word(state, 0x6C0E, 4 * sim.population_units);
         run_economy(state);
         sim.industrial_rate_sum += model::global_word(state, 0x6C02);  // 0x28230
-        sim.land_value_growth_base = model::global_word(state, 0x6BF6);
-        sim.service.housing_coverage_base = model::global_word(state, 0x6BF8);
+        sim.unrest_growth_base = model::global_word(state, 0x6BF6);
+        sim.service.housing_land_value_base = model::global_word(state, 0x6BF8);
     }
     model::set_global_word(state, 0x6C1C, sim.month);
     model::set_global_word(state, 0x6C32, sim.year);

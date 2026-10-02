@@ -38,7 +38,7 @@ For each cell (`0x1FFEF`), `303E:[0x0E]` is set to the tile id, then:
 - **Tiles `0xA8`/`0xAB`/`0xAE`/`0xB1`** add `(DS:0x6D3A >> 2) & 1`.
 - Anything still below `0xC8` is drawn by `303E:0BF0` as **`FIXTS.PL8` frame = tile id**, opaque.
 
-`0x1FB94` is a second loop, for the overlay map modes. It draws `SHADE.PL8` frames chosen from coverage, water and similar layers (`DS:0x6D26` selects which) and isn't implemented.
+`0x1FB94` is a second loop, for the overlay map modes. It draws `SHADE.PL8` frames chosen from land value, water and similar layers (`DS:0x6D26` selects which) and isn't implemented.
 
 ## 4. Buildings (`0x20204`)
 
@@ -59,7 +59,7 @@ Special cases that switch to `HOUSES2.PL8`:
 | `0xF5` / `0xF6` (workshops) | top two rows: 6 / 7 (48×34, height forced to 32, 2 extra rows); while `DS:0x6D3E & 6` is nonzero and the workshop's production level (+`0x10`, found as for the bottom row but one or no rows up) exceeds 2, `0x21` / `0x24` + (`0x6D3E & 6`) >> 1 |
 | `0xF5` / `0xF6` bottom row (`7BB4` bit `0x08`) | no extra rows. The cell looks up the workshop record (`DS:0x585C`, the save's `table_720`) whose anchor is two rows up and up to two columns left. The left two cells draw 32×16 frame 8 + (production level `+0x10` & 7); the right cell (`7BB4` bit `0x02`) draws 16×16 frame 16 + goods `+0x04`. With no record found, the index runs on to 30, past the table, into the barracks records at `DS:0x5B2C`. |
 | `0xF1` coliseum | while `DS:0x6D3A` ≥ 70 and population units ≥ 200: `0x29` below 75, `0x2A` below 80, `0x2B` below 124, `0x2A` below 126, then `0x29`; otherwise the default |
-| `0xEC` school | `0x1E` + (`DS:0x6D3E & 6`) >> 1 while that is nonzero, the cell's coverage exceeds 12 and population units exceed 100; otherwise the default |
+| `0xEC` school | `0x1E` + (`DS:0x6D3E & 6`) >> 1 while that is nonzero, the cell's land value exceeds 12 and population units exceed 100; otherwise the default |
 | `0xEE` prefecture | `0x1B` + (`DS:0x6D3E & 6`) >> 1 while that is nonzero and at least 4 of the cell's 8 neighbours are housing; otherwise the default |
 
 All of it is implemented in `render::render_city`: `RenderPhase` carries the step count, the population units, `DS:0x6BF8` and the two record tables. `test_render_building_animation` checks every case against synthetic sheets.

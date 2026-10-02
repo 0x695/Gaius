@@ -33,7 +33,7 @@
 //   0-2  forum citizens    state 1  walk roads to a map edge, setting C9D4
 //                                   bits 0x12 on the 3x3 around each cell
 //   3, 9 (handlers do nothing)
-//   4    barracks patrol   state 7  walk roads lowering land value by 2 around
+//   4    barracks patrol   state 7  walk roads lowering unrest by 2 around
 //                                   each cell; every fifth cell look for a
 //                                   hostile within 160 px -> state 8, chase it
 //                                   over open ground and remove what it touches
@@ -132,7 +132,7 @@ void update(model::CityState& state, month::Random& random, int tick, const prov
 // number.
 void run_spawners(model::CityState& state, const month::Random& random, int step);
 
-// 0x2DB49's tail: a house whose land value passed its limit collapsed at
+// 0x2DB49's tail: a house whose unrest passed its limit collapsed at
 // (x, y); a rioter comes out of it heading south, and DS:0x6C3C drops by 2.
 int spawn_rioter(model::CityState& state, int x, int y);  // the slot, or -1
 

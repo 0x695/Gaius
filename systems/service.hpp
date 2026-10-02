@@ -18,17 +18,17 @@
 //     mechanism; they are Prefecture and Barracks (Phase 5's construction
 //     seeds, confirmed by nine 1x1 and one 3x3 footprint in a real save) and
 //     share nothing.
-//   - Coverage ceilings are NOT a universal 31: heavy industry 2, the
+//   - Land value ceilings are NOT a universal 31: heavy industry 2, the
 //     0xF5/F6 building 3, barracks 5, prefecture 8, market 16. Because the
-//     ceiling is a per-cell running minimum (see apply_coverage), those low
-//     values cap coverage from every other source in range -- which is how
+//     ceiling is a per-cell running minimum (see apply_land_value), those low
+//     values cap land value from every other source in range -- which is how
 //     industry and the military suppress their surroundings.
-//   - Tiles 0x3C-0x3F use radius 1 and have no land-value effect.
-//   - Temple variants 1-3 do apply coverage (radius 2/3/4).
-//   - Bath houses use flags radius 3 and coverage radius 2 -- what Phase 3
+//   - Tiles 0x3C-0x3F use radius 1 and have no unrest effect.
+//   - Temple variants 1-3 do apply land value (radius 2/3/4).
+//   - Bath houses use flags radius 3 and land value radius 2 -- what Phase 3
 //     originally had, before a "correction" from v2 swapped them.
-//   - The per-tick land-value propagator has no -8 floor. The -8..+50 range
-//     is real but belongs to a separate per-cell routine (evolve_land_value).
+//   - The per-tick unrest propagator has no -8 floor. The -8..+50 range
+//     is real but belongs to a separate per-cell routine (evolve_unrest).
 //
 // Engine behaviour to know before calling anything here:
 //
@@ -104,17 +104,17 @@ enum class CityEvent { Collapse, Fire, RoadWear };  // RoadWear: after the road 
 struct ServiceState {
     ServiceState();
 
-    // "2D94": the per-cell coverage ceiling. reset_tick sets every cell to
-    // 0x3F; apply_coverage lowers a cell to the smallest ceiling applied to it
+    // "2D94": the per-cell land value ceiling. reset_tick sets every cell to
+    // 0x3F; apply_land_value lowers a cell to the smallest ceiling applied to it
     // this tick and clamps A2C4 against it. Constructed at 0x3F, i.e. the
     // state immediately after a reset.
-    model::CityGrid<uint8_t> coverage_ceiling{};
+    model::CityGrid<uint8_t> land_value_ceiling{};
 
-    // DS:0x6BF8 -- the base delta the housing tiers add to coverage (see
+    // DS:0x6BF8 -- the base delta the housing tiers add to land value (see
     // apply_housing_tier). It is a saved global (global_words_128 index 105,
     // save+0xD2), set by step 101's economy (systems::month::run_economy). Real
     // saves hold 2, 0 or -1. The default is the first session's value.
-    int housing_coverage_base = 2;
+    int housing_land_value_base = 2;
 
     // The scan counters routine 0x2BBBB's handlers bump, zeroed at step 102
     // (reset_scan_counters): DS:0x6E0C road pieces 0x36-0x40, DS:0x6E0A
@@ -147,7 +147,7 @@ struct ServiceState {
 void reset_scan_counters(ServiceState& service);
 
 // Routine 0x2C8D3 (disassembled). For every cell: C9D4 &= 0x12, A2C4 = 0,
-// coverage_ceiling = 0x3F. Land value (54A4) is NOT touched -- it is never
+// land_value_ceiling = 0x3F. Unrest (54A4) is NOT touched -- it is never
 // reset per tick.
 void reset_tick(model::CityMap& city, ServiceState& service);
 
@@ -159,27 +159,27 @@ void derive_network_flags(model::CityMap& city);
 
 // Routine 0x2C577 (disassembled). For every cell within a square (Chebyshev)
 // radius of (x,y), clipped to the grid:
-//   1. coverage_ceiling = min(coverage_ceiling, ceiling)   (signed 8-bit)
+//   1. land_value_ceiling = min(land_value_ceiling, ceiling)   (signed 8-bit)
 //   2. A2C4 += delta                                        (8-bit, wraps)
-//   3. if A2C4 > coverage_ceiling, A2C4 = coverage_ceiling  (signed 8-bit)
+//   3. if A2C4 > land_value_ceiling, A2C4 = land_value_ceiling  (signed 8-bit)
 // No lower clamp. Step 1 is the point: the ceiling is a running minimum over
 // every source that touched the cell this tick, so a low-ceiling source caps
-// coverage for all others in range, whichever is applied first.
-void apply_coverage(model::CityMap& city, ServiceState& service, int x, int y, int delta, int radius, int ceiling);
+// land value for all others in range, whichever is applied first.
+void apply_land_value(model::CityMap& city, ServiceState& service, int x, int y, int delta, int radius, int ceiling);
 
-// Routine 0x2C6AF (disassembled) -- the square-radius land-value propagator
+// Routine 0x2C6AF (disassembled) -- the square-radius unrest propagator
 // the handlers call. For each cell in range: 54A4 += delta (8-bit, wraps);
 // if 54A4 > ceiling (signed), 54A4 = ceiling. NO floor: repeated negative
 // deltas accumulate without limit (a real save holds -43). The -8..+50 range
-// belongs to evolve_land_value, not here.
-void apply_land_value(model::CityMap& city, int x, int y, int delta, int radius, int ceiling);
+// belongs to evolve_unrest, not here.
+void apply_unrest(model::CityMap& city, int x, int y, int delta, int radius, int ceiling);
 
-// Routine 0x2DA7E (disassembled) -- a per-cell land-value step, distinct from
+// Routine 0x2DA7E (disassembled) -- a per-cell unrest step, distinct from
 // the propagator. If the cell has C9D4.20 set, 54A4 += growth; otherwise
 // 54A4 -= 2. Then clamp to -8..+50. This is where the documented -8..+50 range
 // actually lives. Its caller is not yet identified -- no DS:153A handler calls
 // it -- so nothing in this file invokes it.
-void evolve_land_value(model::CityMap& city, int x, int y, int growth);
+void evolve_unrest(model::CityMap& city, int x, int y, int growth);
 
 // Routine 0x2C7BB (disassembled). ORs `mask` into C9D4 over a square radius.
 // The engine also has a one-shot mode: if the runtime global DS:0x6CFC is
@@ -189,21 +189,21 @@ void evolve_land_value(model::CityMap& city, int x, int y, int growth);
 void apply_flags(model::CityMap& city, int x, int y, int radius, uint8_t mask);
 
 // The ceiling most civic handlers pass. Not universal -- see the handlers.
-constexpr int kCommonCoverageCeiling = 31;
+constexpr int kCommonLandValueCeiling = 31;
 
-// ---- Tile handlers. Coverage is (delta, radius, ceiling); flags (radius,
-// mask); land value (delta, radius, ceiling). All from the disassembly. ----
+// ---- Tile handlers. Land value is (delta, radius, ceiling); flags (radius,
+// mask); unrest (delta, radius, ceiling). All from the disassembly. ----
 
 // Tiles 0x36-0x3B, handler 0x2BC26 (road/wall family): if 7BB4.10
-// ("connected") is set, coverage (+1, r1, c31). Otherwise nothing.
+// ("connected") is set, land value (+1, r1, c31). Otherwise nothing.
 void apply_tile_36_3b(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tiles 0x3C-0x3F, handler 0x2BC6A: coverage (+2 if 7BB4.10 is set, else +1,
-// r1, c31). No land-value effect -- v5's -2 land value and radius 2 are not in
+// Tiles 0x3C-0x3F, handler 0x2BC6A: land value (+2 if 7BB4.10 is set, else +1,
+// r1, c31). No unrest effect -- v5's -2 unrest and radius 2 are not in
 // the code.
 void apply_tile_3c_3f(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tile 0x40, handler 0x2BCB9: coverage (+3 if 7BB4.10 is set, else +2, r1, c31).
+// Tile 0x40, handler 0x2BCB9: land value (+3 if 7BB4.10 is set, else +2, r1, c31).
 void apply_tile_40(model::CityMap& city, ServiceState& service, int x, int y);
 
 // Tiles 0xE0-0xE7 are the Forum's eight grades (the Forum command places
@@ -212,52 +212,52 @@ void apply_tile_40(model::CityMap& city, ServiceState& service, int x, int y);
 // 0xE2/E3, 0xE4/E5, 0xE6/E7.
 enum class ForumTier { Tier1 = 1, Tier2, Tier3, Tier4 };
 
-// Forums, handlers 0x2C001 / 0x2C057 / 0x2C0AD / 0x2C103: coverage (+1,
+// Forums, handlers 0x2C001 / 0x2C057 / 0x2C0AD / 0x2C103: land value (+1,
 // radius 2/3/4/5, c31), then flags (radius 6/8/10/12, 0x20).
 void apply_forum(model::CityMap& city, ServiceState& service, int x, int y, ForumTier tier);
 
 // Bath Houses, tiles 0xE8/EA, handler 0x2C159. Only if 7BB4.10 is set:
-// coverage (+1, r2, c31), then flags (r3, 0x04).
+// land value (+1, r2, c31), then flags (r3, 0x04).
 void apply_bath_houses(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Oracle, tile 0xEB, handler 0x2C1B4: coverage (+2, r8, c31), then land value
+// Oracle, tile 0xEB, handler 0x2C1B4: land value (+2, r8, c31), then unrest
 // (-2, r5, c32). Identity from Phase 5's construction seed and a 2x1 footprint
 // in a real save. (Was apply_tile_ea, named before the off-by-one fix.)
 void apply_oracle(model::CityMap& city, ServiceState& service, int x, int y);
 
-// School (0xEC) and Hospital (0xED) share handler 0x2C20D: coverage (+1, r3,
+// School (0xEC) and Hospital (0xED) share handler 0x2C20D: land value (+1, r3,
 // c31), then flags (r4, 0x40). The engine counts the two together as well.
 void apply_school_or_hospital(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Prefecture, tile 0xEE, handler 0x2C267: coverage (+1, r2, c8), flags
-// (r4, 0x20), land value (-2, r3, c48).
+// Prefecture, tile 0xEE, handler 0x2C267: land value (+1, r2, c8), flags
+// (r4, 0x20), unrest (-2, r3, c48).
 void apply_prefecture(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Barracks, tile 0xEF, handler 0x2C2D7: coverage (+1, r3, c5), then land value
+// Barracks, tile 0xEF, handler 0x2C2D7: land value (+1, r3, c5), then unrest
 // (-3, r5, c32). No flags.
 void apply_barracks(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Theater 0xF0 (0x2C330): coverage (+1, r3, c31), flags (r4, 0x80).
+// Theater 0xF0 (0x2C330): land value (+1, r3, c31), flags (r4, 0x80).
 void apply_theater(model::CityMap& city, ServiceState& service, int x, int y);
-// Coliseum 0xF1 (0x2C386): coverage (+1, r4, c31), flags (r6, 0x80).
+// Coliseum 0xF1 (0x2C386): land value (+1, r4, c31), flags (r6, 0x80).
 void apply_coliseum(model::CityMap& city, ServiceState& service, int x, int y);
-// Hippodrome 0xF2 (0x2C3DC): coverage (+1, r5, c31), flags (r7, 0x80).
+// Hippodrome 0xF2 (0x2C3DC): land value (+1, r5, c31), flags (r7, 0x80).
 void apply_hippodrome(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Heavy Industry, tile 0xF3, handler 0x2C432: coverage (+1, r4, c2).
+// Heavy Industry, tile 0xF3, handler 0x2C432: land value (+1, r4, c2).
 void apply_heavy_industry(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Market, tile 0xF4, handler 0x2C475: coverage (+1, r1, c16), then flags
+// Market, tile 0xF4, handler 0x2C475: land value (+1, r1, c16), then flags
 // (r6, 0x08).
 void apply_market(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tiles 0xF5/F6, handler 0x2C4AB: coverage (+1, r3, c3). Named by tile id
+// Tiles 0xF5/F6, handler 0x2C4AB: land value (+1, r3, c3). Named by tile id
 // because the building is unidentified: no construction seed maps to it, and
 // in a real save it appears as 3x3 blocks. Workshop (3x3) is a candidate only.
 void apply_tile_f5_f6(model::CityMap& city, ServiceState& service, int x, int y);
 
 // Tiles 0xC8-0xD7, six handlers (0x2BDA2..0x2BF06) sharing one template:
-// coverage (base + adj, radius, ceiling), base = service.housing_coverage_base.
+// land value (base + adj, radius, ceiling), base = service.housing_land_value_base.
 //   0xC8-C9: base-1, r1, c4     0xCA-CC: base, r1, c8     0xCD-D0: base+1, r1, c31
 //   0xD1-D4: base+1, r2, c31    0xD5-D6: base+2, r1, c31  0xD7:    base+2, r2, c31
 // DEFINITIVE as code. That these sixteen ids are the manual's sixteen housing
@@ -270,27 +270,27 @@ void apply_housing_tier(model::CityMap& city, ServiceState& service, int x, int 
 // ---- Handlers for tiles no construction command seeds directly. Identities
 // go only as far as the evidence does. ----
 
-// Tiles 0x94/95, handler 0x2BD08: coverage (+1, r2, c8), then land value
+// Tiles 0x94/95, handler 0x2BD08: land value (+1, r2, c8), then unrest
 // (-2, r2, c64). Unidentified. (CAESAR_CITY_STATE_v5.md attributed exactly these
 // parameters to tiles 0x3C-0x3F, which run different code.)
 void apply_tile_94_95(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tiles 0xA2/A3 and 0xA7-0xB2, handler 0x2BD3D: coverage (-2, r3, c8), then
-// coverage (-2, r1, c8) -- NEGATIVE coverage. With no lower clamp the byte
+// Tiles 0xA2/A3 and 0xA7-0xB2, handler 0x2BD3D: land value (-2, r3, c8), then
+// land value (-2, r1, c8) -- NEGATIVE land value. With no lower clamp the byte
 // wraps, which is why real saves hold A2C4 values of 254/255 near these tiles.
-// Unidentified. 0xA7 is also the tile land_value_allows writes when land value
+// Unidentified. 0xA7 is also the tile unrest_collapses writes when unrest
 // exceeds its threshold (systems::housing).
 void apply_tile_a2_b2(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tiles 0xB9/BB/BC, handler 0x2BD72: coverage (+1, r2, c31), only if C9D4.01 is
+// Tiles 0xB9/BB/BC, handler 0x2BD72: land value (+1, r2, c31), only if C9D4.01 is
 // set. reset_tick clears that bit and no handler in this file sets it, so within
 // one tick this fires only if some untraced producer set 0x01 first.
 // Unidentified; the ids sit between the Well (0xB8) and Fountain (0xBA) seeds.
 void apply_tile_b9_bb_bc(model::CityMap& city, ServiceState& service, int x, int y);
 
-// Tiles 0xD8-0xDF, two handlers: 0xD8-DB (0x2BF4F) coverage (+1, r2, c31) and
-// land value (-2, r2, c53); 0xDC-DF (0x2BFA8) coverage (+1, r3, c31) and land
-// value (-2, r3, c37). 0xD8 is Temple's construction seed, the range sits
+// Tiles 0xD8-0xDF, two handlers: 0xD8-DB (0x2BF4F) land value (+1, r2, c31) and
+// unrest (-2, r2, c53); 0xDC-DF (0x2BFA8) land value (+1, r3, c31) and
+// unrest (-2, r3, c37). 0xD8 is Temple's construction seed, the range sits
 // directly below the finished temples (0xE0+), and Phase 5 traced growth stages
 // through 0xDD-0xDF -- so "temple under construction" is STRONG INFERENCE.
 // Reads the tile id itself; a no-op for any other tile.

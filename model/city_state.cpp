@@ -36,10 +36,10 @@ CityState load(const formats::save::SaveFile& sf) {
     CityState state;
 
     copy_grid(sf.block("city_tiles_100x100").first, state.city.tile);
-    copy_grid(sf.block("cell_value_a2c4").first, state.city.coverage);
+    copy_grid(sf.block("cell_value_a2c4").first, state.city.land_value);
     copy_grid(sf.block("cell_flags_c9d4").first, state.city.service_flags);
     copy_grid(sf.block("cell_flags_7bb4").first, state.city.operational_state);
-    copy_grid<int8_t>(sf.block("cell_value_54a4").first, state.city.land_value);
+    copy_grid<int8_t>(sf.block("cell_value_54a4").first, state.city.unrest);
 
     auto empire_block = sf.block("empire2_1602");
     state.empire.prefix[0] = empire_block.first[0];
@@ -89,13 +89,13 @@ formats::save::SaveFile serialize(const CityState& state) {
         if (b.name == "city_tiles_100x100") {
             write_grid(state.city.tile, dst);
         } else if (b.name == "cell_value_a2c4") {
-            write_grid(state.city.coverage, dst);
+            write_grid(state.city.land_value, dst);
         } else if (b.name == "cell_flags_c9d4") {
             write_grid(state.city.service_flags, dst);
         } else if (b.name == "cell_flags_7bb4") {
             write_grid(state.city.operational_state, dst);
         } else if (b.name == "cell_value_54a4") {
-            write_grid(state.city.land_value, dst);
+            write_grid(state.city.unrest, dst);
         } else if (b.name == "empire2_1602") {
             dst[0] = state.empire.prefix[0];
             dst[1] = state.empire.prefix[1];

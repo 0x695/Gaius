@@ -12,7 +12,7 @@
 //     timers count down on fixed steps,
 //   - DS:0x6C1C (month), DS:0x6C10/0x6C0E (population, step 101) and
 //     DS:0x6C00 (step 101's running sum).
-// Land value (54A4) and the walkers depend on the generator, so they're only
+// Unrest (54A4) and the walkers depend on the generator, so they're only
 // counted, not required to match.
 //
 // Usage: month_check <earlier.SAV> <later.SAV> [max_steps [--all]]
@@ -41,7 +41,7 @@ int diff_bytes(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
 }
 
 struct Diff {
-    int tiles = 0, records = 0, globals = 0, land_value = 0, actors = 0;
+    int tiles = 0, records = 0, globals = 0, unrest = 0, actors = 0;
     bool deterministic_match() const { return tiles == 0 && records == 0 && globals == 0; }
 };
 
@@ -50,7 +50,7 @@ Diff compare(const model::CityState& a, const model::CityState& b) {
     for (int y = 0; y < model::kCityH; ++y) {
         for (int x = 0; x < model::kCityW; ++x) {
             d.tiles += a.city.tile[y][x] != b.city.tile[y][x];
-            d.land_value += a.city.land_value[y][x] != b.city.land_value[y][x];
+            d.unrest += a.city.unrest[y][x] != b.city.unrest[y][x];
         }
     }
     d.records = diff_bytes(a.table_480, b.table_480) + diff_bytes(a.table_120, b.table_120) +
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
     }
     const int max_steps = argc > 3 ? std::atoi(argv[3]) : 2 * systems::month::kStepsPerMonth;
     // --all as a fourth argument prints every matching (start step, steps,
-    // land-value cells differing, actor records differing) as a MATCH line.
+    // unrest cells differing, actor records differing) as a MATCH line.
     const bool all = argc > 4 && std::string(argv[4]) == "--all";
 
     std::unique_ptr<model::CityState> from, to;
@@ -83,8 +83,8 @@ int main(int argc, char** argv) {
     }
 
     const Diff before = compare(*from, *to);
-    std::printf("%s -> %s\n  unchanged: tiles %d, record bytes %d, globals %d, land value %d, actor records %d\n",
-                argv[1], argv[2], before.tiles, before.records, before.globals, before.land_value, before.actors);
+    std::printf("%s -> %s\n  unchanged: tiles %d, record bytes %d, globals %d, unrest %d, actor records %d\n",
+                argv[1], argv[2], before.tiles, before.records, before.globals, before.unrest, before.actors);
 
     int windows = 0;
     for (int start = 0; start < systems::month::kStepsPerMonth; ++start) {
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
             systems::month::run_step(*st, sim);
             const Diff d = compare(*st, *to);
             if (all && d.deterministic_match())
-                std::printf("MATCH %d %d %d %d\n", start, k, d.land_value, d.actors);
+                std::printf("MATCH %d %d %d %d\n", start, k, d.unrest, d.actors);
             if (d.deterministic_match()) {
                 if (first < 0) {
                     first = k;
@@ -113,8 +113,8 @@ int main(int argc, char** argv) {
         }
         if (first < 0) continue;
         ++windows;
-        std::printf("  start step %3d: matches after %d-%d steps (land value differs in %d cells, actor records %d)\n",
-                    start, first, last, best.land_value, best.actors);
+        std::printf("  start step %3d: matches after %d-%d steps (unrest differs in %d cells, actor records %d)\n",
+                    start, first, last, best.unrest, best.actors);
     }
     if (windows == 0) std::printf("  no start step reproduces the later save's tiles, records and globals\n");
     return windows == 0 ? 1 : 0;

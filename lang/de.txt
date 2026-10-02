@@ -24,6 +24,7 @@ Home = Heim
 Water = Wasser
 Admin = Verwaltung
 Land value = Bodenwert
+Unrest = Unruhe
 Roads = Strassen
 Housing = Wohnen
 Save = Speichern

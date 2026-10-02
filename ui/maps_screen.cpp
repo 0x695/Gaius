@@ -122,7 +122,7 @@ uint8_t map_colour(const model::CityMap& city, MapMode mode, bool show_city, int
             return ground();
         case MapMode::LandValue: {
             // A2C4, signed.
-            const int v = static_cast<int8_t>(city.coverage[sy][sx]);
+            const int v = static_cast<int8_t>(city.land_value[sy][sx]);
             if (v <= -4) return 0x1F;
             if (v == -3) return 0x1D;
             if (v == -2) return 0x1B;
@@ -132,7 +132,7 @@ uint8_t map_colour(const model::CityMap& city, MapMode mode, bool show_city, int
         }
         case MapMode::Trouble: {
             // 54A4 on housing.
-            const int v = city.land_value[sy][sx];
+            const int v = city.unrest[sy][sx];
             if (tile <= 0xC8 || v <= 0) return ground();
             return scale(v);
         }

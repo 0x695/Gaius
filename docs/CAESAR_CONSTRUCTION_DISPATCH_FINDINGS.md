@@ -4,6 +4,8 @@ Written in the same confidence-labeled style as the main RE corpus, from disasse
 
 **Not yet merged into `CAESAR_REVERSE_ENGINEERING_COMPLETE.md`** — same status as the other addenda in this directory.
 
+**Naming (changed 2026-10-02).** Sections 1-38 were first written with the layer names of the early research: `A2C4` was "coverage" and `54A4` was "land value". The original's own Maps panel (section 39.2) calls `A2C4` "land value" and draws `54A4` as "trouble areas", so the text and the code now say **land value** for `A2C4` and **unrest** for `54A4`. Anything older that mentions "coverage" in this directory means `A2C4`; the plebs' "coverage" in section 29 is a different thing and is unchanged.
+
 ---
 
 ## 1. Construction command string table — DEFINITIVE, exact byte layout
@@ -259,26 +261,26 @@ Everything `systems::service` implements was previously transcribed from the RE 
 
 - **`0x293A2` is a phased tick**, a switch over tick-phase numbers. One phase calls the reset `0x2C8D3` and then `0x2DA0D`; four phases call the scan `0x2BBBB` with start rows **0, 25, 50, 75**; a later phase publishes per-scan counters into saved globals, dividing some by building footprint area (`/4`, `/16`).
 - **`0x2BBBB`** loops 25 rows x 100 columns and does `cmp tile, 0x35; jbe skip; lcall [tile*4 + 0x153A]`. **It is the only instruction in the executable that references `0x153A` in any operand form** (exhaustive search). So DS:153A entries `0x00`-`0x35` never run: tile `0x00`'s handler (`0x297AC`, the one Phase 4 implemented from v5) is referenced only from its own table slot, with no direct callers. **Corrected in section 16:** it is not dead code. Those slots belong to the adjacent `DS:1212` table, and `0x297AC` is housing tile `0xCA`'s development handler.
-- **`0x2C8D3`**, the reset, is exactly what Gaius already had: `C9D4 &= 0x12`, `A2C4 = 0`, `2D94 = 0x3F`, every cell. Land value is never reset.
+- **`0x2C8D3`**, the reset, is exactly what Gaius already had: `C9D4 &= 0x12`, `A2C4 = 0`, `2D94 = 0x3F`, every cell. Unrest is never reset.
 - **`0x2DA0D`**: for every cell, if `C9D4.10` set `0x02` and clear `0x10`, else clear `0x02`. Skipped while `DS:0x6D9B` is nonzero. The source bit is `C9D4.10`, not `7BB4.10` as previously documented.
 
 ### 15.2 The propagators
 
 All three clip a square (Chebyshev) radius to the grid with identical bounds code. Arguments are pushed ceiling, radius, delta, row, col (flags: radius, mask, row, col).
 
-- **`0x2C577` coverage.** Per cell: `2D94 = min(2D94, ceiling)`; `A2C4 += delta` (byte, wraps); if `A2C4 > 2D94` (signed), `A2C4 = 2D94`. No lower clamp. The ceiling is a **per-cell running minimum** over every source in the tick, so a low-ceiling source caps all others in range. v5 described a ratchet that could only be raised; the code only ever lowers it.
-- **`0x2C6AF` land value.** `54A4 += delta` (byte); if `54A4 > ceiling` (signed), `54A4 = ceiling`. **No floor** -- which is why a real save holds -43.
+- **`0x2C577` land value.** Per cell: `2D94 = min(2D94, ceiling)`; `A2C4 += delta` (byte, wraps); if `A2C4 > 2D94` (signed), `A2C4 = 2D94`. No lower clamp. The ceiling is a **per-cell running minimum** over every source in the tick, so a low-ceiling source caps all others in range. v5 described a ratchet that could only be raised; the code only ever lowers it.
+- **`0x2C6AF` unrest.** `54A4 += delta` (byte); if `54A4 > ceiling` (signed), `54A4 = ceiling`. **No floor** -- which is why a real save holds -43.
 - **`0x2C7BB` flags.** ORs the mask. If `DS:0x6CFC` is nonzero, the *first* cell is ANDed instead and the global is cleared after that one cell.
 - **`0x2DA7E` is not a propagator.** It is a per-cell step: `+growth` if `C9D4.20`, else -2, then clamp to -8..+50. This is where the corpus's -8..+50 lives. No DS:153A handler calls it; its caller is unidentified.
 
 ### 15.3 Every handler that calls them
 
-Coverage is (delta, radius, ceiling); flags (radius, mask); land value (delta, radius, ceiling). **Bold** marks a value that differs from what Gaius previously implemented, or a handler it didn't have.
+Land value is (delta, radius, ceiling); flags (radius, mask); unrest (delta, radius, ceiling). **Bold** marks a value that differs from what Gaius previously implemented, or a handler it didn't have.
 
 | tiles | handler | building | effect |
 |---|---|---|---|
 | `36`-`3B` | `2BC26` | road/wall family | if 7BB4.10: cov (+1, 1, 31) |
-| `3C`-`3F` | `2BC6A` | road/wall family | cov (+2 if 7BB4.10 else +1, **1**, 31); **no land value** |
+| `3C`-`3F` | `2BC6A` | road/wall family | cov (+2 if 7BB4.10 else +1, **1**, 31); **no unrest** |
 | `40` | `2BCB9` | road/wall family | cov (+3 if 7BB4.10 else +2, 1, 31) |
 | `94`-`95` | `2BD08` | unidentified | **cov (+1, 2, 8); land (-2, 2, 64)** |
 | `A2`-`A3`, `A7`-`B2` | `2BD3D` | unidentified | **cov (-2, 3, 8); cov (-2, 1, 8)** |
@@ -309,11 +311,11 @@ A scan of the whole table, bounded at each handler's true end, found no other DS
 
 ### 15.5 The proof
 
-`tools/sim_check` and `test_save_corpus_simulation` run `reset_tick` plus one `dispatch_tile` pass over each save's own tile grid and compare the result against the layers the engine saved. With the five untranscribed handlers still missing, coverage matched 9988, 10000, 9856 and 9856 of 10000 cells, and every mismatch sat on or beside those handlers' tiles (saved bytes of 254/255 from negative coverage). With them added: **10000/10000 coverage, and 10000/10000 on each of C9D4 bits `04`, `08`, `20`, `40` and `80`, in all four saves.** Independently, the two scan counters the tick publishes -- `DS:0x6BF2` (handler tile set `C8`-`E8`, `EA`-`F3`, `F5`-`F6`) and `DS:0x6BF0` (`36`-`40`) -- equal the grids' own counts exactly: 20/191/251/251 and 40/90/141/153.
+`tools/sim_check` and `test_save_corpus_simulation` run `reset_tick` plus one `dispatch_tile` pass over each save's own tile grid and compare the result against the layers the engine saved. With the five untranscribed handlers still missing, land value matched 9988, 10000, 9856 and 9856 of 10000 cells, and every mismatch sat on or beside those handlers' tiles (saved bytes of 254/255 from negative land value). With them added: **10000/10000 land value, and 10000/10000 on each of C9D4 bits `04`, `08`, `20`, `40` and `80`, in all four saves.** Independently, the two scan counters the tick publishes -- `DS:0x6BF2` (handler tile set `C8`-`E8`, `EA`-`F3`, `F5`-`F6`) and `DS:0x6BF0` (`36`-`40`) -- equal the grids' own counts exactly: 20/191/251/251 and 40/90/141/153.
 
 ### 15.6 Still open
 
-- Who calls `0x2DA7E` (the -8..+50 land-value step), and so how land value is actually bounded over time. -- answered in section 16: the housing development pass.
+- Who calls `0x2DA7E` (the -8..+50 unrest step), and so how unrest is actually bounded over time. -- answered in section 16: the housing development pass.
 - The event routines behind the per-scan counter thresholds (`0x2C525`, `0x2C54E`, `0x2C4EA`), and where the thresholds come from. **The routines are read in section 21**; the plebs set the thresholds (section 29).
 - The housing grade-change routine; the identities of `0x94`/`95`, `0xA2`-`B2`, `0xB9`/`BB`/`BC` and `0xF5`/`F6`; what sets `C9D4.01` and `DS:0x6BF8`. -- the grade-change routine is answered in section 16.
 - What reads the C9D4 service bits.
@@ -341,8 +343,8 @@ Across the four saves the month reads 9, 1, 4, 6 and the year -11, -7, -2, -1 --
 
 For each cell of its row:
 
-- **Below `0xC8`:** land value is zeroed. A jump table at `0x295F8` sends `0xB9`/`0xBA` to `0x2BACE` (coverage > 10 and population > 50 -> `0xBD`, or `0xBB` if watered), `0xBB`-`0xBD` to `0x2BB48` (coverage < 10 -> `0xBA`, or `0xB9` if watered), and `0xA8`/`AB`/`AE`/`B1` to `0x29624`, which either decrements the tile or picks one of eight neighbours from a table at `3496:1DE4` and, if that neighbour is housing, calls `11C6:0A5A` -- both driven by the RNG in segment `2EF9`. Section 21.2 reads it: these are burning tiles.
-- **`0xC8`-`0xD6`:** one `evolve_land_value` step with growth `DS:0x6BF6 + (random & 3) - 1`, drawn once per row. **`0xD7` and up:** land value zeroed.
+- **Below `0xC8`:** unrest is zeroed. A jump table at `0x295F8` sends `0xB9`/`0xBA` to `0x2BACE` (land value > 10 and population > 50 -> `0xBD`, or `0xBB` if watered), `0xBB`-`0xBD` to `0x2BB48` (land value < 10 -> `0xBA`, or `0xB9` if watered), and `0xA8`/`AB`/`AE`/`B1` to `0x29624`, which either decrements the tile or picks one of eight neighbours from a table at `3496:1DE4` and, if that neighbour is housing, calls `11C6:0A5A` -- both driven by the RNG in segment `2EF9`. Section 21.2 reads it: these are burning tiles.
+- **`0xC8`-`0xD6`:** one `evolve_unrest` step with growth `DS:0x6BF6 + (random & 3) - 1`, drawn once per row. **`0xD7` and up:** unrest zeroed.
 - **Then**, if the cell's `7BB4 & 0x0F` is 0, the pass copies its C9D4 byte to `DS:0x6DC7` and calls `DS:1212[tile]`. Handlers that cover extra columns advance the column counter themselves.
 
 ### 16.4 Part indices
@@ -353,7 +355,7 @@ For each cell of its row:
 
 A is the anchor's A2C4 (signed), P the population units, and the letters the anchor's C9D4 service bits: W water `01`, N `02`, M market `08`, B bath houses `04`, S school/hospital `40`, E entertainment `80`. The exact absorbable-cell test for each growth step is in `systems/housing.cpp`.
 
-| tile | shape | land-value gate | demote | promote |
+| tile | shape | unrest gate | demote | promote |
 |---|---|---|---|---|
 | `C8` | 1x1 | > 20 | A<0 -> `1D` | A>0 -> `C9` |
 | `C9` | 1x1 | > 30 | A<1 -> `C8` | A>1, W -> `CA` |
@@ -384,15 +386,15 @@ A is the anchor's A2C4 (signed), P the population units, and the letters the anc
 
 Every other id from `0xC8` up points at a bare `retf` (`0x296D9`).
 
-### 16.6 `land_value_allows` (`0x2DB49`), in full
+### 16.6 `unrest_collapses` (`0x2DB49`), in full
 
-If the cell's land value exceeds the threshold: tile `0xA7`, and A2C4, 7BB4 and 54A4 zeroed. Then it calls `0334:28F9(10, col, row)`; if that returns nonzero it fills in an actor record (`DS:[0x6DBD]`, 50-byte records at `DS:0x5D86`) and calls `31E0:0634(5)` and `0x27A54`. Then `DS:0x6C3C` -= 2 (floored at 0), `DS:0x6C84` = 2, and it returns 1; otherwise it returns 0. `CAESAR_CITY_STATE_v5.md` had only the first sentence.
+If the cell's unrest exceeds the threshold: tile `0xA7`, and A2C4, 7BB4 and 54A4 zeroed. Then it calls `0334:28F9(10, col, row)`; if that returns nonzero it fills in an actor record (`DS:[0x6DBD]`, 50-byte records at `DS:0x5D86`) and calls `31E0:0634(5)` and `0x27A54`. Then `DS:0x6C3C` -= 2 (floored at 0), `DS:0x6C84` = 2, and it returns 1; otherwise it returns 0. `CAESAR_CITY_STATE_v5.md` had only the first sentence.
 
 ### 16.7 Validation, and what's still open
 
-Validated against real saves: part indices on every building, population units (three exact, one explained), water (10000/10000), and -- through `rebuild_services` -- coverage and C9D4 bits `01`, `04`, `08`, `20`, `40` and `80` (10000/10000 each). The development handlers have no direct ground truth in four snapshots taken months apart, so the transcription is pinned by exact-write unit tests instead.
+Validated against real saves: part indices on every building, population units (three exact, one explained), water (10000/10000), and -- through `rebuild_services` -- land value and C9D4 bits `01`, `04`, `08`, `20`, `40` and `80` (10000/10000 each). The development handlers have no direct ground truth in four snapshots taken months apart, so the transcription is pinned by exact-write unit tests instead.
 
-Still open: the RNG in segment `2EF9`, which drives land-value growth and the `0xA8`-`0xB1` routine; the pipe tracer `0x2CBF1`; `0334:28F9` and the actor spawn; the five other per-row routines and six monthly routines; what `DS:0x6C3C` measures.
+Still open: the RNG in segment `2EF9`, which drives unrest growth and the `0xA8`-`0xB1` routine; the pipe tracer `0x2CBF1`; `0334:28F9` and the actor spawn; the five other per-row routines and six monthly routines; what `DS:0x6C3C` measures.
 
 ## 17. The step dispatcher, the calendar and the random number generator (2026-09-13)
 
@@ -421,7 +423,7 @@ State at `2EF9:0286`-`028E`. The image's initial values are 55, 49, 12, 12, 55, 
 - `2EF9:13F0` steps a 16-bit shift register: with `s` = `028E`, feedback = bit 0 xor bit 7, and the new `s` = `((s & 0x7FFF) | feedback << 15) >> 1`.
 - `2EF9:1425` copies `0288` into `028A`, steps the register, stores the result in `028C` and its low 7 bits in `0288`, then adds the low 3 bits to `0286`, subtracting 99 whenever that exceeds 99.
 
-`0286` is therefore a random walk over 1-99. The housing pass never calls the generator; it reads `0286`, and each row's land-value growth is `DS:0x6BF6 + (0286 & 3) - 1` as a signed byte.
+`0286` is therefore a random walk over 1-99. The housing pass never calls the generator; it reads `0286`, and each row's unrest growth is `DS:0x6BF6 + (0286 & 3) - 1` as a signed byte.
 
 The generator has 45 call sites. In the monthly simulation path five draw each month (and the main loop draws once per frame besides -- section 20.1):
 - `0x2E209`, only at step 80 — after that step's housing row, so rows 0-80 share one growth value and rows 81-99 the next.
@@ -462,7 +464,7 @@ The exact sets are data in `systems/construction.cpp` (`kRoadRules`, `kWallRules
   - **Crossings:** water `0x4A`/`0x4E`/`0x52` → `0x82`, `0x56` → `0x5E`, `0x5A` → `0x86`, `0x45` → `0x42`, `0x44` → `0x43`. Each happens only if no neighbour already holds the result, and doesn't re-tile.
   - **Gates, where a road crosses a wall:** `0x93` → `0x95` and `0x92` → `0x94`. These do re-tile the neighbours, using the pattern's modes.
 - **Wall (`0x1415E`)** covers open ground and existing wall pieces. It uses the same pattern table and converts the road tile to its wall form (`0x36`→`0x93`, `0x37`→`0x92`, `0x38`-`0x3B`→`0x96`-`0x99`, `0x3C`-`0x40`→`0xB3`-`0xB7`). Special cases: `0x37` → gate `0x95`, `0x36` → gate `0x94`, and `0x45`/`0x44` → `0xA1`/`0xA0`.
-- **Plaza (`0x15098`)** works only on road pieces `0x36`-`0x43`: it sets `7BB4` bit `0x10`, and refuses if the bit is already set. That bit is what the renderer draws as frame `0x41` and what raises a road's coverage (section 15).
+- **Plaza (`0x15098`)** works only on road pieces `0x36`-`0x43`: it sets `7BB4` bit `0x10`, and refuses if the bit is already set. That bit is what the renderer draws as frame `0x41` and what raises a road's land value (section 15).
 - **Clear Area (`0x12B79`)** reverts crossings to water (`0x82`/`0x8A` → `0x4A`, `0x5E`/`0x72` → `0x56`, `0x86`/`0x8E` → `0x5A`). It turns `0x27`-`0x49` into `0x1D` (clearing `7BB4`) and `0x92`-`0xC9` into `0x1D`, and restores a reservoir's (`0xA4`) stored tile from its `7BB4`. On buildings (`≥ 0xCA`) it calls **`0x124F8(col, row, 8)`**:
   - It walks to the building's anchor through the `7BB4` part bits.
   - It takes the footprint size from `3496:14B2`.
@@ -540,7 +542,7 @@ Each routine decrements its count before searching.
   - `0xFF`: `0xA4`-`0xA6`; `0x0B`: `0xB9`-`0xBD`.
 - **Turns (`3496:1BA0`):** for each class, the direction leaving for each direction entering, or 8 to stop. Classes 1 and 2 are straight vertical and horizontal pieces; 3-6 are the four corners.
 
-With this, the four real saves' coverage and service bits (including water) still match cell for cell (`tools/sim_check`). They hold only wells and dry fountains, so the tracer itself is pinned by `test_service_fountain_supply`.
+With this, the four real saves' land value and service bits (including water) still match cell for cell (`tools/sim_check`). They hold only wells and dry fountains, so the tracer itself is pinned by `test_service_fountain_supply`.
 
 **Validated with reservoirs (2026-09-14).** The second session's seven saves (section 23) hold two to four reservoirs and two to four working fountains. In all eleven saves one rebuild reproduces `C9D4.01`, every fountain tile and every fountain level in `7BB4`, cell for cell (`test_save_corpus_simulation`, `tools/sim_check`).
 
@@ -549,8 +551,8 @@ With this, the four real saves' coverage and service bits (including water) stil
 After population and water, four routines turn the month's state into the next month's housing inputs. They're given as formulas in `systems/month.hpp`, with their five tables in segment `3496` (`006E`, `0136`, `014B`, `017E`, `01B1`) embedded.
 - **`0x28621`** gives `DS:0x6BF4`, from population, the workshop count and `DS:0x6C36`.
 - **`0x28694`** gives a 0-100 share `DS:0x6BCC`, and `DS:0x6BFA` = share ÷ 5. The share is what's left of the population after `DS:0x6C06` percent, workshops × 20, forums × 30 and the month's scan counts (`DS:0x6BEA` × 30 + `DS:0x6BEE` × 12, times `DS:0x6BE8` / 4 + 1). It uses the C runtime's 32-bit multiply and divide.
-- **`0x28800`** gives `DS:0x6BF8`, the housing coverage base, from `DS:0x6C04` and `DS:0x6BFA`.
-- **`0x28826`** gives `DS:0x6BF6`, the land-value growth base, from `DS:0x6C04` and `DS:0x6C06` / 10.
+- **`0x28800`** gives `DS:0x6BF8`, the housing land value base, from `DS:0x6C04` and `DS:0x6BFA`.
+- **`0x28826`** gives `DS:0x6BF6`, the unrest growth base, from `DS:0x6C04` and `DS:0x6C06` / 10.
 - Then `DS:0x6C00` += `DS:0x6C04`.
 
 Recomputed from each real save's own inputs, all five outputs match in all four saves (`test_month_economy_matches_saves`). `systems::month::run_month` on a whole save now runs this, so the month no longer relies on the bases read from the save. Section 25 names them: `DS:0x6C04` is the population tax rate and `DS:0x6C06` the conscription rate.
@@ -690,7 +692,7 @@ Every city type's handler does the same three things:
 | 4 | `0x24563` | roads | skips odd ticks when the cell is **not** shared; walks; at a cell with C9D4 `0x08`, state 2 and the workshop's sales `+0E` + 1 (up to 2) |
 | 5 | `0x245FF` | ground | walks; when stopped, state 6, timer 0, destination += `3496:1DF4`[random `0288` & 7] clamped to 0-99; at a cell, class 1 or 2 demolish, class 8 tile `0x1D` |
 | 6 | `0x2478B` | -- | frame `0x2A`/`0x2B` (the type handler overwrites it); timer + 1, and past 8 state 5 with the path cleared |
-| 7 | `0x247DA` | roads | walks; at each cell inside the margin, land value - 2 over the 3x3; every fifth cell looks for a hostile (types 5, 6, 7, 10) within 160 px (`0x2520E`), then state 8 |
+| 7 | `0x247DA` | roads | walks; at each cell inside the margin, unrest - 2 over the 3x3; every fifth cell looks for a hostile (types 5, 6, 7, 10) within 160 px (`0x2520E`), then state 8 |
 | 8 | `0x24A6B` | ground | the target gone or not hostile: look again, or state 2; destination = the target's cell; walks; at a cell, any hostile within 16 px (`0x26D9D`) goes to state 2 |
 | 9 | `0x24B66` | province | walks; arriving on province tile `0x4A` frees it, launches invaders (`0x2D891`) and lowers `DS:0x6C3C`; otherwise state 15. Random events on the way change tiles `0x4C`/`0x79`/`0x7A` and post messages |
 | 10, 13 | `0x24ECE`, `0x2514C` | province | walks |
@@ -790,7 +792,7 @@ Every handler the service scan (`0x2BBBB`) reaches for a counted tile first bump
 - **Burning tiles, `0x29624`,** are reached from the housing pass through the jump table at `0x295F8`.
   - **Burning out.** If `028A` (the previous draw's low 7 bits) exceeds 90, it adds 32 to `028A` (mod 128) and decrements the tile, so the fire drops to the rubble tile below it.
   - **Spreading.** Otherwise, unless the cell is on the map's outer rows or columns, it adds 32 to `028A` and picks the neighbour `3496:1DE4`[walk & 7] (north, then clockwise). If that holds a building (`0xC8` and up), `0x126BA`(column, row, direction) sets it on fire.
-- **Rubble and fire tiles** (`0xA2`, `0xA3`, `0xA7`-`0xB2`) get the negative-coverage handler (section 15), and invaders and rioters can walk over the rubble (section 20.3).
+- **Rubble and fire tiles** (`0xA2`, `0xA3`, `0xA7`-`0xB2`) get the negative land value handler (section 15), and invaders and rioters can walk over the rubble (section 20.3).
 
 ### 21.3 In Gaius
 
@@ -862,9 +864,9 @@ Seven more saves of the same scenario (province 20, `EMPIRE2.047`), from a new c
 No two are less than a year apart, so the month-apart check of `run_month` is still open. What they do show:
 
 - **Round trip and economy.** All seven load and re-serialize byte-identical, and step 101's economy reproduces all five outputs in each.
-- **Service and water.** Coverage, the six service bits, fountain tiles and fountain levels match cell for cell in five saves outright, which between them hold every housing grade up to `0xD2`, reservoirs and working fountains (section 19.2).
-- **A save taken between steps 101 and 102.** `CAESARXS.SAV` has zero coverage everywhere and no service bits except water, while its population count matches the tiles exactly. That is the state after step 100's reset and step 101's population and water pass, before step 102's first scan; reset plus water alone reproduces it cell for cell. (The step counter isn't saved, section 17.)
-- **A house changed after the scan.** `CAESARXW.SAV` misses 43 coverage cells around the houses south of the row-38 road and has one more building cell than the published count; its population is one unit off. That's a house that developed after the month's scans (STRONG INFERENCE: one save can't show which house).
+- **Service and water.** Land value, the six service bits, fountain tiles and fountain levels match cell for cell in five saves outright, which between them hold every housing grade up to `0xD2`, reservoirs and working fountains (section 19.2).
+- **A save taken between steps 101 and 102.** `CAESARXS.SAV` has zero land value everywhere and no service bits except water, while its population count matches the tiles exactly. That is the state after step 100's reset and step 101's population and water pass, before step 102's first scan; reset plus water alone reproduces it cell for cell. (The step counter isn't saved, section 17.)
+- **A house changed after the scan.** `CAESARXW.SAV` misses 43 land value cells around the houses south of the row-38 road and has one more building cell than the published count; its population is one unit off. That's a house that developed after the month's scans (STRONG INFERENCE: one save can't show which house).
 - **Year 0 exists.** The year word `DS:0x6C32` runs -8, -1, 0, 4, ... 14, so it's a plain signed counter, not a BC/AD year with no zero.
 - **`CAESARXQ.SAV` has rubble** (nine cells of `0xA7`/`0xAA`/`0xAD`/`0xB0`, section 21), and its tiles count 32 population units more than the saved count.
 - **`DS:0x6BF8` isn't always 2.** It's -1 in `CAESARXW.SAV`, 2 in `XV`-`XT` and 0 from `XS` on; step 101's economy recomputes it correctly each time.
@@ -893,7 +895,7 @@ Neither the step counter (`DS:0x6D9D`) nor the generator is saved. But several p
 - the tile grid (housing development, one row per step): (17, 85-86) `0xCC` -> `0xCB` and (24, 74) `0xD0` -> `0xCF` between `UX` and `B`, then (24, 74) `0xCF` -> `0xCB` between `B` and `A`;
 - `DS:0x6C00`, which grows by `DS:0x6C04` (6 here) at step 101, and the population words set there.
 
-`tools/month_check` takes two saves, tries every start step for the first, runs `systems::month::run_step` forward and reports where the second save's tiles, those three record tables, month, population words and `DS:0x6C00` are reproduced exactly. Every pair has such windows. Chaining them -- one leg's end step, `(start + steps) % 106`, is the next leg's start -- and requiring land value to match too leaves the positions in the table: `D` is pinned to step 4 and `F` to step 31, the rest to windows of 8-16 steps.
+`tools/month_check` takes two saves, tries every start step for the first, runs `systems::month::run_step` forward and reports where the second save's tiles, those three record tables, month, population words and `DS:0x6C00` are reproduced exactly. Every pair has such windows. Chaining them -- one leg's end step, `(start + steps) % 106`, is the next leg's start -- and requiring unrest to match too leaves the positions in the table: `D` is pinned to step 4 and `F` to step 31, the rest to windows of 8-16 steps.
 
 ### 24.2 What matches
 
@@ -902,13 +904,13 @@ Along that chain, for all six legs (`test_month_consecutive_saves`), `run_step` 
 - every tile, including the three housing changes above, on the right step;
 - all three record tables, byte for byte;
 - the month, `DS:0x6C10`/`0x6C0E` and `DS:0x6C00`;
-- **all 10000 land-value cells**, where the saves themselves differ in 31-452.
+- **all 10000 unrest cells**, where the saves themselves differ in 31-452.
 
-The coverage and service layers match too (they're rebuilt each month and unchanged in these saves), and so does the population arithmetic: `BAESARUX` and `AAESARUX` are 1 and 2 units below their tiles because the house at (24, 74) dropped a grade at step 24, after the count at step 101 of the month before.
+The land value and service layers match too (they're rebuilt each month and unchanged in these saves), and so does the population arithmetic: `BAESARUX` and `AAESARUX` are 1 and 2 units below their tiles because the house at (24, 74) dropped a grade at step 24, after the count at step 101 of the month before.
 
 ### 24.3 What this doesn't test
 
-- **The generator.** The land-value match doesn't depend on the generator's state: starting its shift register from 1, 55, 12345, 40000 or 65000 gives the same exact match. The random ±1 in the growth term evidently never moves these cells (they sit at their clamps), so the random draws' timing is still unchecked.
+- **The generator.** The unrest match doesn't depend on the generator's state: starting its shift register from 1, 55, 12345, 40000 or 65000 gives the same exact match. The random ±1 in the growth term evidently never moves these cells (they sit at their clamps), so the random draws' timing is still unchecked.
 - **The walkers.** The actor records never match (5-8 of 70 differ): walkers draw from the generator. Checking a walker's path needs a generator state, which saves don't carry.
 - **Development under random pressure.** Nothing burned, collapsed or wore out in these months.
 
@@ -1348,7 +1350,7 @@ With `DS:0x6CAE` = 1 the map draw (`0x06369` -> `0x065D9`) scrolls the province 
 - **Promotion.** `SimState::on_promotion` opens the promotion page and stops time; its buttons call `accept_promotion`, `defer_promotion` or `become_caesar`. An accepted promotion loads the new `EMPIRE2.0NN` and runs `campaign::start_province`.
 - **Battle.** `SimState::on_battle` opens the battle page and stops time. Each tactic runs `battle::fight_round` after one generator draw; the original draws once a frame while it waits.
 - **The province view** has the province toolbar: Clear, Road, Wall, Tower, Highway, Fort, and the four Cohort orders. Each command is charged with the terrain's cost shift and refused below 50 pleb groups (section 25.1). For an order, click the Cohort, then a point or an army.
-- **The maps panel** tints the city by one of the modeled layers: water, the administration's reach, land value, roads or housing.
+- **The maps panel** tints the city by one of the modeled layers: water, the administration's reach, land value, unrest, roads or housing.
 - **Dismissal.** `SimState::dismissed` (the third missed tribute) opens an ending page, and so does becoming Caesar.
 
 ### 32.5 Open
@@ -1364,7 +1366,7 @@ With `DS:0x6CAE` = 1 the map draw (`0x06369` -> `0x065D9`) scrolls the province 
 
 The writer (`0x033C8`, the calls from `0x033F2`) and the loader (`0x04537`, the calls from `0x04561` to `0x05685`) each make 175 calls to their file routine -- `0:32CC` writes, `0:2F78` reads -- and each call pushes a size and a DS or far address. Laid side by side the two sequences agree at every one of the 175: the same address, the same size, in the same order. (The loader's first call also pushes the file handle, which is the only textual difference.) So a save file is exactly those records end to end, and `formats::save::write` of a `model::serialize`d state is a file the engine reads. DEFINITIVE; `test_save_write_round_trip` writes every real save back and reads it byte-identical.
 
-After the reads the loader (`0x05688`-`0x056A4`) closes the file, sets `DS:0x6BFE` = `DS:0x6C02` x `DS:0x6C1C` (section 25.2), calls `0x2C918` -- every cell of `3496:2D94`, the coverage ceiling (`service::ServiceState::coverage_ceiling`), to `0x3F` -- and sets `DS:0x0620` = `DS:0x6C78` xor 1, an options toggle `0x0F006` copies back.
+After the reads the loader (`0x05688`-`0x056A4`) closes the file, sets `DS:0x6BFE` = `DS:0x6C02` x `DS:0x6C1C` (section 25.2), calls `0x2C918` -- every cell of `3496:2D94`, the land value ceiling (`service::ServiceState::land_value_ceiling`), to `0x3F` -- and sets `DS:0x0620` = `DS:0x6C78` xor 1, an options toggle `0x0F006` copies back.
 
 **The difficulty is saved.** `DS:0x6CB8` is the seventh word of `final_state` (FORMATS.md); `systems::month::SimState` had said the save doesn't keep it. `sim_state_from_save` now reads it.
 
@@ -1715,7 +1717,7 @@ Pixel (0x16 + x, 0x26 + y) is cell (x, y). The layers are read through bases tha
 - **Land value** reads `A2C4` as signed: -4 or less `0x1F`, -3 `0x1D`, -2 `0x1B`, -1 `0x1A`, 0 the ground, 1-3 `0x16`, 4-7 `0x17`, 8-15 `0x18`, 16 and up `0x19`.
 - **Trouble areas** read `54A4` on housing (tile above 0xC8): 1-7 `0x16`, 8-15 `0x17`, 16-23 `0x18`, 24 and up `0x19`; anything else is the ground.
 
-**A naming question this raises.** The layer the original calls "land value" is the one `model::CityMap` names `coverage` (`A2C4`). What `CityMap::land_value` holds (`54A4`) is what the original maps as "trouble areas" on houses -- the value whose limit collapses a house (section 21). The code keeps its names; this is recorded here rather than renamed.
+**A naming question this raised, and its answer (2026-10-02).** The layer the original calls "land value" was named `coverage` in `model::CityMap` (`A2C4`), and what the original maps as "trouble areas" on houses (`54A4`, the value whose limit collapses a house, section 21) was named `land_value`. The code now follows the original: `CityMap::land_value` is `A2C4` and `CityMap::unrest` is `54A4`, with the functions renamed to match (`apply_land_value`, `apply_unrest`, `evolve_unrest`, `unrest_collapses`).
 
 **Not compared:** the map's own pixels -- the capture's city isn't one of the saves -- and the frames `0x0DC18` loops over while the map draws in (`DS:0x6D24` counts three passes).
 

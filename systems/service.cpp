@@ -39,15 +39,15 @@ inline int8_t add_wrapping(int8_t value, int delta) {
 }  // namespace
 
 ServiceState::ServiceState() {
-    for (auto& row : coverage_ceiling) row.fill(0x3F);
+    for (auto& row : land_value_ceiling) row.fill(0x3F);
 }
 
 void reset_tick(model::CityMap& city, ServiceState& service) {
     for (int y = 0; y < model::kCityH; ++y) {
         for (int x = 0; x < model::kCityW; ++x) {
             city.service_flags[y][x] &= 0x12;
-            city.coverage[y][x] = 0;
-            service.coverage_ceiling[y][x] = 0x3F;
+            city.land_value[y][x] = 0;
+            service.land_value_ceiling[y][x] = 0x3F;
         }
     }
 }
@@ -65,31 +65,31 @@ void derive_network_flags(model::CityMap& city) {
     }
 }
 
-void apply_coverage(model::CityMap& city, ServiceState& service, int x, int y, int delta, int radius, int ceiling) {
+void apply_land_value(model::CityMap& city, ServiceState& service, int x, int y, int delta, int radius, int ceiling) {
     const uint8_t cap_arg = static_cast<uint8_t>(ceiling);
     for_each_in_square(x, y, radius, [&](int cy, int cx) {
-        uint8_t& cap = service.coverage_ceiling[cy][cx];
+        uint8_t& cap = service.land_value_ceiling[cy][cx];
         if (as_signed(cap) > as_signed(cap_arg)) cap = cap_arg;
-        uint8_t& cov = city.coverage[cy][cx];
-        cov = static_cast<uint8_t>(cov + static_cast<uint8_t>(delta));
-        if (as_signed(cov) > as_signed(cap)) cov = cap;
+        uint8_t& lv = city.land_value[cy][cx];
+        lv = static_cast<uint8_t>(lv + static_cast<uint8_t>(delta));
+        if (as_signed(lv) > as_signed(cap)) lv = cap;
     });
 }
 
-void apply_land_value(model::CityMap& city, int x, int y, int delta, int radius, int ceiling) {
+void apply_unrest(model::CityMap& city, int x, int y, int delta, int radius, int ceiling) {
     const int8_t cap = as_signed(static_cast<uint8_t>(ceiling));
     for_each_in_square(x, y, radius, [&](int cy, int cx) {
-        int8_t& lv = city.land_value[cy][cx];
-        lv = add_wrapping(lv, delta);
-        if (lv > cap) lv = cap;
+        int8_t& u = city.unrest[cy][cx];
+        u = add_wrapping(u, delta);
+        if (u > cap) u = cap;
     });
 }
 
-void evolve_land_value(model::CityMap& city, int x, int y, int growth) {
-    int8_t& lv = city.land_value[y][x];
-    lv = add_wrapping(lv, (city.service_flags[y][x] & 0x20) ? growth : -2);
-    if (lv > 50) lv = 50;
-    if (lv < -8) lv = -8;
+void evolve_unrest(model::CityMap& city, int x, int y, int growth) {
+    int8_t& u = city.unrest[y][x];
+    u = add_wrapping(u, (city.service_flags[y][x] & 0x20) ? growth : -2);
+    if (u > 50) u = 50;
+    if (u < -8) u = -8;
 }
 
 void apply_flags(model::CityMap& city, int x, int y, int radius, uint8_t mask) {
@@ -97,82 +97,82 @@ void apply_flags(model::CityMap& city, int x, int y, int radius, uint8_t mask) {
 }
 
 void apply_tile_36_3b(model::CityMap& city, ServiceState& service, int x, int y) {
-    if (connected(city, x, y)) apply_coverage(city, service, x, y, 1, 1, kCommonCoverageCeiling);
+    if (connected(city, x, y)) apply_land_value(city, service, x, y, 1, 1, kCommonLandValueCeiling);
 }
 
 void apply_tile_3c_3f(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, connected(city, x, y) ? 2 : 1, 1, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, connected(city, x, y) ? 2 : 1, 1, kCommonLandValueCeiling);
 }
 
 void apply_tile_40(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, connected(city, x, y) ? 3 : 2, 1, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, connected(city, x, y) ? 3 : 2, 1, kCommonLandValueCeiling);
 }
 
 void apply_forum(model::CityMap& city, ServiceState& service, int x, int y, ForumTier tier) {
     const int n = static_cast<int>(tier);                                   // 1..4
-    apply_coverage(city, service, x, y, 1, n + 1, kCommonCoverageCeiling);  // radius 2/3/4/5
+    apply_land_value(city, service, x, y, 1, n + 1, kCommonLandValueCeiling);  // radius 2/3/4/5
     apply_flags(city, x, y, 4 + 2 * n, 0x20);                               // radius 6/8/10/12
 }
 
 void apply_bath_houses(model::CityMap& city, ServiceState& service, int x, int y) {
     if (!connected(city, x, y)) return;
-    apply_coverage(city, service, x, y, 1, 2, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, 1, 2, kCommonLandValueCeiling);
     apply_flags(city, x, y, 3, 0x04);
 }
 
 void apply_oracle(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 2, 8, kCommonCoverageCeiling);
-    apply_land_value(city, x, y, -2, 5, 32);
+    apply_land_value(city, service, x, y, 2, 8, kCommonLandValueCeiling);
+    apply_unrest(city, x, y, -2, 5, 32);
 }
 
 void apply_school_or_hospital(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 3, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, 1, 3, kCommonLandValueCeiling);
     apply_flags(city, x, y, 4, 0x40);
 }
 
 void apply_prefecture(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 2, 8);
+    apply_land_value(city, service, x, y, 1, 2, 8);
     apply_flags(city, x, y, 4, 0x20);
-    apply_land_value(city, x, y, -2, 3, 48);
+    apply_unrest(city, x, y, -2, 3, 48);
 }
 
 void apply_barracks(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 3, 5);
-    apply_land_value(city, x, y, -3, 5, 32);
+    apply_land_value(city, service, x, y, 1, 3, 5);
+    apply_unrest(city, x, y, -3, 5, 32);
 }
 
 void apply_theater(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 3, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, 1, 3, kCommonLandValueCeiling);
     apply_flags(city, x, y, 4, 0x80);
 }
 
 void apply_coliseum(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 4, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, 1, 4, kCommonLandValueCeiling);
     apply_flags(city, x, y, 6, 0x80);
 }
 
 void apply_hippodrome(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 5, kCommonCoverageCeiling);
+    apply_land_value(city, service, x, y, 1, 5, kCommonLandValueCeiling);
     apply_flags(city, x, y, 7, 0x80);
 }
 
 void apply_heavy_industry(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 4, 2);
+    apply_land_value(city, service, x, y, 1, 4, 2);
 }
 
 void apply_market(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 1, 16);
+    apply_land_value(city, service, x, y, 1, 1, 16);
     apply_flags(city, x, y, 6, 0x08);
 }
 
 void apply_tile_f5_f6(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 3, 3);
+    apply_land_value(city, service, x, y, 1, 3, 3);
 }
 
 void apply_housing_tier(model::CityMap& city, ServiceState& service, int x, int y) {
     const uint8_t t = city.tile[y][x];
     if (t < 0xC8 || t > 0xD7) return;
-    int adj = 0, radius = 1, ceiling = kCommonCoverageCeiling;
+    int adj = 0, radius = 1, ceiling = kCommonLandValueCeiling;
     if (t <= 0xC9) {
         adj = -1;
         radius = 1;
@@ -194,31 +194,31 @@ void apply_housing_tier(model::CityMap& city, ServiceState& service, int x, int 
         adj = 2;
         radius = 2;
     }
-    apply_coverage(city, service, x, y, service.housing_coverage_base + adj, radius, ceiling);
+    apply_land_value(city, service, x, y, service.housing_land_value_base + adj, radius, ceiling);
 }
 
 void apply_tile_94_95(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, 1, 2, 8);
-    apply_land_value(city, x, y, -2, 2, 64);
+    apply_land_value(city, service, x, y, 1, 2, 8);
+    apply_unrest(city, x, y, -2, 2, 64);
 }
 
 void apply_tile_a2_b2(model::CityMap& city, ServiceState& service, int x, int y) {
-    apply_coverage(city, service, x, y, -2, 3, 8);
-    apply_coverage(city, service, x, y, -2, 1, 8);
+    apply_land_value(city, service, x, y, -2, 3, 8);
+    apply_land_value(city, service, x, y, -2, 1, 8);
 }
 
 void apply_tile_b9_bb_bc(model::CityMap& city, ServiceState& service, int x, int y) {
-    if (city.service_flags[y][x] & 0x01) apply_coverage(city, service, x, y, 1, 2, kCommonCoverageCeiling);
+    if (city.service_flags[y][x] & 0x01) apply_land_value(city, service, x, y, 1, 2, kCommonLandValueCeiling);
 }
 
 void apply_temple_stage(model::CityMap& city, ServiceState& service, int x, int y) {
     const uint8_t t = city.tile[y][x];
     if (t >= 0xD8 && t <= 0xDB) {
-        apply_coverage(city, service, x, y, 1, 2, kCommonCoverageCeiling);
-        apply_land_value(city, x, y, -2, 2, 53);
+        apply_land_value(city, service, x, y, 1, 2, kCommonLandValueCeiling);
+        apply_unrest(city, x, y, -2, 2, 53);
     } else if (t >= 0xDC && t <= 0xDF) {
-        apply_coverage(city, service, x, y, 1, 3, kCommonCoverageCeiling);
-        apply_land_value(city, x, y, -2, 3, 37);
+        apply_land_value(city, service, x, y, 1, 3, kCommonLandValueCeiling);
+        apply_unrest(city, x, y, -2, 3, 37);
     }
 }
 

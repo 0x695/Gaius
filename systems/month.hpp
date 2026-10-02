@@ -31,7 +31,7 @@
 // routine 0x28238 the accounts (systems::economy), the history writes and the
 // Legion (systems::military) are modeled, and none of them draws; the 18-month routine 0x2D6F4 is systems::province::spawn_army.
 //
-// The random draws. The land-value growth each housing row applies is
+// The random draws. The unrest growth each housing row applies is
 // DS:0x6BF6 + (2EF9:0286 & 3) - 1, as a signed byte, and 2EF9:0286 only
 // changes when the generator draws: once per frame in the main loop, and
 // five more times a month in the steps above (step 80, four at step 105).
@@ -74,7 +74,7 @@ struct SimState {
     int month = 0;                   // DS:0x6C1C, 0-11
     int year = 0;                    // DS:0x6C32 (negative before the common era)
     int month_counter_18 = 0;        // DS:0x6D9B
-    int land_value_growth_base = 0;  // DS:0x6BF6
+    int unrest_growth_base = 0;  // DS:0x6BF6
     int population_units = 0;        // DS:0x6C10
     // DS:0x6BFE: the industrial tax rate DS:0x6C02 summed at each step 101, for
     // the yearly accounts (systems::economy::run_year). The save doesn't keep
@@ -135,7 +135,7 @@ struct SimState {
     service::ServiceState service;
 };
 
-// Month, year, growth base, population units and the housing coverage base
+// Month, year, growth base, population units and the housing land value base
 // (DS:0x6BF8) from a save's global words. The step and 18-month counters
 // aren't saved; they start at 0.
 SimState sim_state_from_save(const model::CityState& state);
@@ -157,9 +157,9 @@ void run_month(model::CityMap& city, SimState& sim);
 //            once DS:0x6C06 percent, workshops x 20, forums x 30 and the monthly
 //            scan counts (DS:0x6BEA x 30 + DS:0x6BEE x 12, times DS:0x6BE8 / 4 + 1)
 //            are taken out; DS:0x6BFA = DS:0x6BCC / 5
-//   0x28800  DS:0x6BF8 (the housing coverage base) = 3496:014B[DS:0x6C04]
+//   0x28800  DS:0x6BF8 (the housing land value base) = 3496:014B[DS:0x6C04]
 //            + 3496:0136[DS:0x6BFA]
-//   0x28826  DS:0x6BF6 (the land-value growth base) = 3496:017E[DS:0x6C04]
+//   0x28826  DS:0x6BF6 (the unrest growth base) = 3496:017E[DS:0x6C04]
 //            + 3496:01B1[DS:0x6C06 / 10]
 // then DS:0x6C00 += DS:0x6C04 (and DS:0x6BFE += DS:0x6C02, which the save
 // doesn't keep: SimState::industrial_rate_sum). DS:0x6C04 is the population
@@ -168,7 +168,7 @@ void run_economy(model::CityState& state);
 
 // A month on a whole save: as above, plus at step 101 the save's population
 // words (DS:0x6C10, DS:0x6C0E) are stored and run_economy() runs, and its
-// growth and coverage bases feed the months after; month and year are written
+// growth and land value bases feed the months after; month and year are written
 // back to DS:0x6C1C / DS:0x6C32.
 //
 // When the year turns it runs the year's accounts (systems::economy::run_year:

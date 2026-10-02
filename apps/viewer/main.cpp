@@ -2545,7 +2545,7 @@ int main(int argc, char** argv) {
                 if (render_phase.ticks != sim.ticks || !render_phase.workshop_records) {
                     render_phase.ticks = sim.ticks;
                     render_phase.population_units = model::global_word(state, 0x6C10);
-                    render_phase.coverage_base = model::global_word(state, 0x6BF8);
+                    render_phase.housing_land_value_base = model::global_word(state, 0x6BF8);
                     render_phase.workshop_records = &state.table_720;
                     render_phase.barracks_records = &state.table_120;
                     city_image_dirty = true;

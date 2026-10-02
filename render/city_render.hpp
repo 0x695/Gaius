@@ -87,7 +87,7 @@ struct RenderPhase {
     // ticks % 64, DS:0x6D3A = ticks % 128.
     int ticks = 0;
     int population_units = 0;  // DS:0x6C10
-    int coverage_base = 0;     // DS:0x6BF8
+    int housing_land_value_base = 0;     // DS:0x6BF8
     // The workshop records (DS:0x585C, the save's table_720), and the barracks
     // records that follow them in memory (DS:0x5B2C, table_120), which a
     // workshop cell reads when it finds no record of its own.

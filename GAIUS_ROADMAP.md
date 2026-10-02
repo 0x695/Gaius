@@ -105,7 +105,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **Deliverable:** a save editor's backend — load, inspect every field, re-save byte-identical. **Met**; `save_inspect` prints blocks, global words with their DS addresses (`formats::save::kGlobalWordDsAddress`) and actors.
 
-**RE blockers:** none. The save loader was read in Phase 8 (dispatch findings section 33.1): it reads exactly the writer's records, then rebuilds `DS:0x6BFE`, resets the coverage ceiling and copies the messages option.
+**RE blockers:** none. The save loader was read in Phase 8 (dispatch findings section 33.1): it reads exactly the writer's records, then rebuilds `DS:0x6BFE`, resets the land value ceiling and copies the messages option.
 
 <details>
 <summary>History</summary>
@@ -122,16 +122,16 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **Status: Done and validated against the original engine** (2026-09-13). Code in `systems/service.hpp`/`.cpp`; derivation in dispatch findings section 15.
 
-**Goal:** the service layers at algorithm level — `A2C4` coverage, `54A4` land value, `C9D4` flags, `7BB4` derived state — and every building handler that feeds them.
+**Goal:** the service layers at algorithm level — `A2C4` land value, `54A4` unrest, `C9D4` flags, `7BB4` derived state — and every building handler that feeds them.
 
 **Done**
-- [x] **Propagators** — `apply_coverage` (square radius; the ceiling is a per-cell running minimum in `ServiceState`), `apply_land_value` (no floor; clamps only to the caller's ceiling), `apply_flags`. The −8..+50 clamp is a separate per-cell routine, `evolve_land_value` (`0x2DA7E`).
-- [x] **`reset_tick`** — `C9D4 &= 0x12`, `A2C4 = 0`, and the per-cell coverage ceiling back to 63. Runtime-only state, not saved.
+- [x] **Propagators** — `apply_land_value` (square radius; the ceiling is a per-cell running minimum in `ServiceState`), `apply_unrest` (no floor; clamps only to the caller's ceiling), `apply_flags`. The −8..+50 clamp is a separate per-cell routine, `evolve_unrest` (`0x2DA7E`).
+- [x] **`reset_tick`** — `C9D4 &= 0x12`, `A2C4 = 0`, and the per-cell land value ceiling back to 63. Runtime-only state, not saved.
 - [x] **The C9D4 bit table** — `kC9D4BitTable`, each bit with its producers and a confidence label (`test_service_bit_table_fixtures`).
 - [x] **Every `DS:153A` handler** — transcribed from the disassembly, with `dispatch_tile()` and the engine's ≤ `0x35` gate.
 - [x] **Proof** — `test_save_corpus_simulation`: one reset and one dispatch pass over each real save reproduce its A2C4 layer and every C9D4 service bit, **10000/10000 cells**.
 
-**Deliverable:** given a city grid with buildings, compute coverage, land value and flags exactly as the executable does. **Met and proven.**
+**Deliverable:** given a city grid with buildings, compute land value, unrest and flags exactly as the executable does. **Met and proven.**
 
 **RE blockers:** none left.
 - C9D4 producers are confirmed by disassembly: `0x04` Bath Houses, `0x08` Market, `0x40` School and Hospital, `0x20` Forum and Prefecture (renamed "administration" on 2026-09-14, when the population tax turned out to read it); `0x02` is derived from `0x10` by `0x2DA0D`.
@@ -153,17 +153,17 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **Status: Done and validated** (2026-09-13). Code in `systems/housing.hpp`/`.cpp`, `systems/month.hpp`/`.cpp`, `systems/actors.hpp`/`.cpp`; derivation in dispatch findings sections 16-21.
 
-**Goal:** the residential state machine, land-value gating, and population from housing.
+**Goal:** the residential state machine, unrest gating, and population from housing.
 
 **Done**
 - [x] **Sixteen housing grades** — tiles `0xC8`-`0xD7`, every promotion, demotion and merge (pairs, 2×2, 3×3) in `develop_building`. That these are the manual's sixteen grades is strong inference; the rules are exact.
-- [x] **`land_value_allows`** (`0x2DB49`) — the collapse into `0xA7`, and its rioter and globals (`actors::spawn_rioter`).
+- [x] **`unrest_collapses`** (`0x2DB49`) — the collapse into `0xA7`, and its rioter and globals (`actors::spawn_rioter`).
 - [x] **Population** — the per-cell table at `3496:007E`; `DS:0x6C10` holds the sum, `DS:0x6C0E` four times it.
 - [x] **The month** — `systems::month`: the 106-step dispatcher (`0x2936A`), the calendar (`0x29476`), and the engine's random number generator (`2EF9:1425`) with its draws. `gaius_viewer` runs it.
-- [x] **Water and step 101's economy** — `service::apply_water` with the fountain pipe tracer; `month::run_economy` sets the housing coverage and land-value growth bases (findings section 19).
+- [x] **Water and step 101's economy** — `service::apply_water` with the fountain pipe tracer; `month::run_economy` sets the housing land value and unrest growth bases (findings section 19).
 - [x] **Walkers** — `systems::actors`: allocator, movement around obstacles, city behaviour states, and the forum, workshop and barracks spawners (findings section 20).
 - [x] **Fire, collapse and road wear** — the scan counters, the step-105 roll (`0x2DF7D`), `construction::demolish`/`burn`, burning tiles `0xA8`-`0xB1` (findings section 21).
-- [x] **A month against the original** (2026-09-14) — six saves a month or less apart; `run_step` reproduces each next save's tiles, record tables, population and every land-value cell (`test_month_consecutive_saves`, findings section 24).
+- [x] **A month against the original** (2026-09-14) — six saves a month or less apart; `run_step` reproduces each next save's tiles, record tables, population and every unrest cell (`test_month_consecutive_saves`, findings section 24).
 
 **Deliverable:** houses that grow, merge, shrink and split exactly as the engine's handlers dictate, with real population numbers. **Met and proven.**
 
@@ -271,7 +271,7 @@ Every Phase 6 item is done.
 - [x] **Forum UI** (2026-09-15, findings section 32) — `systems::forum` transcribes the buttons (every arrow's limits, the Tribune's duty transfers, the Military Advisor's Cohort cycling and mobilizing, salary and donation); `gaius_viewer`'s Forum has the Treasurer, Tribune, Legion, ratings and governor pages. Promotion opens its page and an accepted one starts the new province from its `EMPIRE2.0NN`; the third missed tribute (`SimState::dismissed`) and becoming Caesar end the game. The layouts are Gaius's own; the names are the executable's tables (provinces, emblems, Cohort states).
 - [x] **The Forum's other figures and the advice** (2026-09-16, findings section 36) -- the statue's rank cheat, the histories graphed by the man in the blue robe, the industry report, and the ratings screen's 14 advice texts, in `systems::forum` and on the viewer's History, Industry and Ratings pages. The industry average matches all 17 saves.
 - [x] **The map of the Empire** (2026-09-16, findings section 37) -- `EMAP2.VPX` with the given provinces' markers, pixel-exact against the map capture, opened from the governor's page.
-- [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay came with the original maps screen (2026-09-16, section 39).
+- [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay came with the original maps screen (2026-09-16, section 39). On 2026-10-02 the layers were renamed to the original's own terms and this panel followed: its Land value overlay had been drawing the unrest layer (`54A4`), so it now draws `A2C4`, and an Unrest overlay was added.
 
 **Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 

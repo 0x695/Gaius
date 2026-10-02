@@ -2,7 +2,7 @@
 // Gaius CLI tool: sim_check
 //
 // Validates Gaius's simulation against a real save. The engine rebuilds A2C4
-// (coverage) and C9D4's service bits from nothing at the end of every month --
+// (land value) and C9D4's service bits from nothing at the end of every month --
 // steps 100-105 of its 106-step month: reset, water, then the four quarter
 // scans -- and a save carries the result. So systems::service::rebuild_services
 // over a save's own tile grid should reproduce those layers cell for cell, to
@@ -19,14 +19,14 @@
 // compared too.
 //
 // Some saves are written mid-month. One written between steps 101 and 102 (the
-// reset and water have run, none of the scans) shows as zero saved coverage and
+// reset and water have run, none of the scans) shows as zero saved land value and
 // service bits other than water; a house that changed after the last scan shows
-// as a small cluster of coverage mismatches around it.
+// as a small cluster of land value mismatches around it.
 //
-// Land value is deliberately not compared: the engine never resets it, so it
+// Unrest is deliberately not compared: the engine never resets it, so it
 // carries history a single pass can't reproduce.
 //
-// Exit status: 0 if the coverage, the C9D4 bits, the tiles and 7BB4 all match
+// Exit status: 0 if the land value, the C9D4 bits, the tiles and 7BB4 all match
 // ("RESULT: match"), 1 if any differs, 2 if the save can't be loaded. The
 // population comparison is shown but doesn't decide it.
 //
@@ -74,20 +74,20 @@ int main(int argc, char** argv) {
     const model::CityState st = model::load(sf);
     model::CityMap sim = st.city;
     systems::service::ServiceState svc;
-    svc.housing_coverage_base = saved_word(sf, 0x6BF8);
+    svc.housing_land_value_base = saved_word(sf, 0x6BF8);
     systems::service::rebuild_services(sim, svc);
 
-    std::printf("%s\n  housing_coverage_base (DS:0x6BF8) = %d\n", argv[1], svc.housing_coverage_base);
+    std::printf("%s\n  housing_land_value_base (DS:0x6BF8) = %d\n", argv[1], svc.housing_land_value_base);
 
-    // --- Coverage (A2C4) ---
+    // --- Land value (A2C4) ---
     int match = 0, saved_nonzero = 0, sim_nonzero = 0, saved_higher = 0, sim_higher = 0;
     int band_match[4] = {0, 0, 0, 0};
     std::map<int, int> mismatch_by_tile;
     std::vector<std::string> examples;
     for (int y = 0; y < model::kCityH; ++y) {
         for (int x = 0; x < model::kCityW; ++x) {
-            const int saved = st.city.coverage[y][x];
-            const int ours = sim.coverage[y][x];
+            const int saved = st.city.land_value[y][x];
+            const int ours = sim.land_value[y][x];
             if (saved) ++saved_nonzero;
             if (ours) ++sim_nonzero;
             if (saved == ours) {
@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
             }
         }
     }
-    std::printf("  coverage A2C4: %d/10000 cells match  (nonzero: saved %d, sim %d; saved higher %d, sim higher %d)\n",
+    std::printf("  land value A2C4: %d/10000 cells match  (nonzero: saved %d, sim %d; saved higher %d, sim higher %d)\n",
                 match, saved_nonzero, sim_nonzero, saved_higher, sim_higher);
     std::printf("    by scan quarter: rows 0-24 %d/2500, 25-49 %d/2500, 50-74 %d/2500, 75-99 %d/2500\n", band_match[0],
                 band_match[1], band_match[2], band_match[3]);

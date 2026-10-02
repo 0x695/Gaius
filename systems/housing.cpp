@@ -45,7 +45,7 @@ public:
 
     int row() const { return index_ / kCityW; }
     int col() const { return index_ % kCityW; }
-    int coverage() const { return static_cast<int8_t>(read(city_.coverage, 0)); }
+    int land_value() const { return static_cast<int8_t>(read(city_.land_value, 0)); }
     uint8_t tile(int off) const { return read(city_.tile, off); }
     uint8_t part(int off) const { return read(city_.operational_state, off); }
 
@@ -79,7 +79,7 @@ private:
 
 // Fountains, run by the pass for tiles below 0xC8 (not through DS:1212).
 void fountain_grow(CityMap& city, int x, int y, const DevelopmentContext& ctx) {  // 0x2BACE, tiles 0xB9/0xBA
-    if (static_cast<int8_t>(city.coverage[y][x]) > 10 && ctx.population_units > 50) {
+    if (static_cast<int8_t>(city.land_value[y][x]) > 10 && ctx.population_units > 50) {
         city.tile[y][x] = 0xBD;
         city.operational_state[y][x] = 0;
         if (city.service_flags[y][x] & kWater) city.tile[y][x] = 0xBB;
@@ -87,7 +87,7 @@ void fountain_grow(CityMap& city, int x, int y, const DevelopmentContext& ctx) {
 }
 
 void fountain_shrink(CityMap& city, int x, int y) {  // 0x2BB48, tiles 0xBB/0xBC/0xBD
-    if (static_cast<int8_t>(city.coverage[y][x]) < 10) {
+    if (static_cast<int8_t>(city.land_value[y][x]) < 10) {
         city.tile[y][x] = 0xBA;
         city.operational_state[y][x] = 0;
         if (city.service_flags[y][x] & kWater) city.tile[y][x] = 0xB9;
@@ -96,15 +96,15 @@ void fountain_shrink(CityMap& city, int x, int y) {  // 0x2BB48, tiles 0xBB/0xBC
 
 }  // namespace
 
-bool land_value_allows(model::CityMap& city, int x, int y, int threshold,
+bool unrest_collapses(model::CityMap& city, int x, int y, int threshold,
                        std::vector<std::pair<int, int>>* collapsed) {
-    const int lv = city.land_value[y][x];
-    if (lv > threshold) {
+    const int u = city.unrest[y][x];
+    if (u > threshold) {
         if (collapsed) collapsed->emplace_back(x, y);
         city.tile[y][x] = 0xA7;
-        city.coverage[y][x] = 0;
-        city.operational_state[y][x] = 0;
         city.land_value[y][x] = 0;
+        city.operational_state[y][x] = 0;
+        city.unrest[y][x] = 0;
         return true;
     }
     return false;
@@ -123,7 +123,7 @@ int population_units(const model::CityMap& city) {
 
 int develop_building(model::CityMap& city, int x, int y, uint8_t flags, const DevelopmentContext& ctx) {
     Site s(city, x, y);
-    const int a = s.coverage();
+    const int a = s.land_value();
     const int pop = ctx.population_units;
     auto has = [flags](uint8_t mask) { return (flags & mask) == mask; };
     auto pair = [&s](uint8_t id) {
@@ -140,22 +140,22 @@ int develop_building(model::CityMap& city, int x, int y, uint8_t flags, const De
     switch (s.tile(0)) {
         // ---- 1x1 grades ----
         case 0xC8:  // 0x296DA
-            if (land_value_allows(city, x, y, 20, ctx.collapsed)) return 0;
+            if (unrest_collapses(city, x, y, 20, ctx.collapsed)) return 0;
             if (a < 0) s.set(0, 0x1D, 0);
             else if (a > 0) s.set(0, 0xC9, 0);
             return 0;
         case 0xC9:  // 0x2973E
-            if (land_value_allows(city, x, y, 30, ctx.collapsed)) return 0;
+            if (unrest_collapses(city, x, y, 30, ctx.collapsed)) return 0;
             if (a < 1) s.set(0, 0xC8, 0);
             else if (a > 1 && has(kWater)) s.set(0, 0xCA, 0);
             return 0;
         case 0xCA:  // 0x297AC
-            if (land_value_allows(city, x, y, 40, ctx.collapsed)) return 0;
+            if (unrest_collapses(city, x, y, 40, ctx.collapsed)) return 0;
             if (a < 2 || !has(kWater)) s.set(0, 0xC9, 0);
             else if (a > 2) s.set(0, 0xCB, 0);
             return 0;
         case 0xCB:  // 0x2981A
-            if (land_value_allows(city, x, y, 48, ctx.collapsed)) return 0;
+            if (unrest_collapses(city, x, y, 48, ctx.collapsed)) return 0;
             if (a < 3 || !has(kWater)) {
                 s.set(0, 0xCA, 0);
                 return 0;
@@ -437,16 +437,16 @@ void develop_row(model::CityMap& city, int row, const DevelopmentContext& ctx) {
     for (int col = 0; col < kCityW; ++col) {
         const uint8_t t = city.tile[row][col];
         if (t < 0xC8) {
-            city.land_value[row][col] = 0;
+            city.unrest[row][col] = 0;
             if (t == 0xB9 || t == 0xBA) fountain_grow(city, col, row, ctx);
             else if (t >= 0xBB && t <= 0xBD) fountain_shrink(city, col, row);
             else if (t == 0xA8 || t == 0xAB || t == 0xAE || t == 0xB1) burning_tile(city, col, row, ctx);
             continue;
         }
         if (t < 0xD7) {
-            service::evolve_land_value(city, col, row, ctx.land_value_growth);
+            service::evolve_unrest(city, col, row, ctx.unrest_growth);
         } else {
-            city.land_value[row][col] = 0;
+            city.unrest[row][col] = 0;
         }
         if (city.operational_state[row][col] & 0x0F) continue;  // not a building's anchor
         col += develop_building(city, col, row, city.service_flags[row][col], ctx);

@@ -428,8 +428,8 @@ void run_state(Ctx& c, Rec& a) {
             if (!(a.b(kStatus) & kStatusCentre) || !inside_margin(a)) return;
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dx = -1; dx <= 1; ++dx) {
-                    int8_t& lv = cell_at(city.land_value, a.w(kCell) + dy * 100 + dx);
-                    lv = static_cast<int8_t>(static_cast<uint8_t>(lv) + 0xFE);
+                    int8_t& u = cell_at(city.unrest, a.w(kCell) + dy * 100 + dx);
+                    u = static_cast<int8_t>(static_cast<uint8_t>(u) + 0xFE);
                 }
             }
             a.setw(kTimer, a.w(kTimer) + 1);

@@ -63,7 +63,7 @@ The reverse-engineering corpus is already substantial and has been consolidated 
 
 ### Proven / high confidence
 - Full container formats: `.VPX` (4-block RLE, interleaved planes → 320×200 indexed), `.P32`/`.256` palettes, `.PL8` sprite sheets, EMPIRE2 (1602-byte 40×40 strategic map + prefix).
-- City map is a runtime-allocated **100×100** tile grid (`43A5` segment), with four parallel 10,000-byte simulation layers: `A2C4` (numeric coverage), `C9D4` (mixed bitfield: persistent/derived/service/prerequisite), `54A4` (signed land value, -8..+50), `7BB4` (operational/connection state).
+- City map is a runtime-allocated **100×100** tile grid (`43A5` segment), with four parallel 10,000-byte simulation layers: `A2C4` (numeric land value), `C9D4` (mixed bitfield: persistent/derived/service/prerequisite), `54A4` (signed unrest, -8..+50), `7BB4` (operational/connection state).
 - The **70×50-byte object/actor table** — now understood as an actor/walker system (types 0–10 = city-coordinate actors, 11–13 = province/empire-coordinate special actors), not a building table.
 - The empire-map pathfinder: 128-entry static property table, N/S/E/W direction bits, route source/destination markers (`4A`/`4B` = destination/object type 13, `61`/`41` = route sources, `4C`/`79`/`7A` = generated route states).
 - The full save-file layout (`0xDF26` bytes, every block's offset/size/source identified) — a save is essentially a direct dump of all the runtime state above.
@@ -72,7 +72,7 @@ The reverse-engineering corpus is already substantial and has been consolidated 
 ### Explicitly unresolved (tracked as blockers below)
 - The **construction command → object type → city tile ID → footprint** pipeline is not fully decoded (this is the single highest-value remaining RE target).
 - City terrain *generation* (new-game/new-city procedural terrain) source is not yet located — the manual states terrain is randomly generated per province/city, but the generator routine hasn't been pinned down.
-- Heavy Industry and Market **do** run through the same 43A5 tile-dispatch mechanism as civic buildings (tiles `0xF3` and `0xF4`), confirmed by disassembly and by reproducing real saves' coverage layer exactly — see `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 15. That corrects this document's earlier claim that they don't. Those handlers only do service propagation, though: the *economic* behaviour (goods, labour, sales) isn't in them and is still suspected to run through the object/actor system. Workshop may be the unidentified 3×3 building on tiles `0xF5`/`0xF6`; Fort hasn't been located.
+- Heavy Industry and Market **do** run through the same 43A5 tile-dispatch mechanism as civic buildings (tiles `0xF3` and `0xF4`), confirmed by disassembly and by reproducing real saves' land value layer exactly — see `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 15. That corrects this document's earlier claim that they don't. Those handlers only do service propagation, though: the *economic* behaviour (goods, labour, sales) isn't in them and is still suspected to run through the object/actor system. Workshop may be the unidentified 3×3 building on tiles `0xF5`/`0xF6`; Fort hasn't been located.
 - `EDATA.CSR`, `CONTFRM.GD8`, `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, and the VAS win/lose animation format are undeciphered.
 - The save **loader** (as opposed to the serializer) hasn't been reverse engineered, so the save layout is currently proven one-directional.
 - Renderer tile-lookup tables (how a tile ID maps to a sprite frame) are not yet recovered.

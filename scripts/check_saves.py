@@ -35,9 +35,9 @@ def rebuild_check(path):
     result = run([tool("sim_check"), path])
     if result.returncode == 2:
         raise ScriptError("%s: %s" % (path, (result.stderr or "can't load").strip()))
-    detail = re.search(r"coverage A2C4: (\d+)/10000", result.stdout)
+    detail = re.search(r"land value A2C4: (\d+)/10000", result.stdout)
     return ("match" if result.returncode == 0 else "differs",
-            "coverage %s/10000 cells" % (detail.group(1) if detail else "?"))
+            "land value %s/10000 cells" % (detail.group(1) if detail else "?"))
 
 
 def month_check(earlier, later):

@@ -36,14 +36,14 @@ constexpr int kCityH = 100;
 
 enum class SaveLayer {
     Tiles,          // city_tiles_100x100 (43A5) -- raw tile ID, no sprite lookup yet
-    A2C4,           // cell_value_a2c4 -- numeric coverage
+    A2C4,           // cell_value_a2c4 -- land value
     C9D4,           // cell_flags_c9d4 -- mixed persistent/derived/service/prerequisite bitfield
     Flags7BB4,      // cell_flags_7bb4 -- operational/connection state
-    LandValue54A4,  // cell_value_54a4 -- signed land value, confirmed range -8..+50
+    Unrest54A4,     // cell_value_54a4 -- unrest, signed; the monthly step keeps houses' within -8..+50
 };
 
 constexpr SaveLayer kSaveLayerOrder[] = {
-    SaveLayer::Tiles, SaveLayer::A2C4, SaveLayer::C9D4, SaveLayer::Flags7BB4, SaveLayer::LandValue54A4,
+    SaveLayer::Tiles, SaveLayer::A2C4, SaveLayer::C9D4, SaveLayer::Flags7BB4, SaveLayer::Unrest54A4,
 };
 constexpr int kSaveLayerCount = 5;
 
@@ -60,7 +60,7 @@ inline const char* layer_block_name(SaveLayer l) {
         case SaveLayer::A2C4: return "cell_value_a2c4";
         case SaveLayer::C9D4: return "cell_flags_c9d4";
         case SaveLayer::Flags7BB4: return "cell_flags_7bb4";
-        case SaveLayer::LandValue54A4: return "cell_value_54a4";
+        case SaveLayer::Unrest54A4: return "cell_value_54a4";
     }
     return "";
 }
@@ -68,10 +68,10 @@ inline const char* layer_block_name(SaveLayer l) {
 inline const char* layer_label(SaveLayer l) {
     switch (l) {
         case SaveLayer::Tiles: return "city tiles (43A5, raw tile ID as a heat colour)";
-        case SaveLayer::A2C4: return "A2C4 coverage (raw byte)";
+        case SaveLayer::A2C4: return "A2C4 land value (raw byte)";
         case SaveLayer::C9D4: return "C9D4 flags (raw byte)";
         case SaveLayer::Flags7BB4: return "7BB4 operational/connection state (raw byte)";
-        case SaveLayer::LandValue54A4: return "54A4 land value (signed, -8..+50)";
+        case SaveLayer::Unrest54A4: return "54A4 unrest (signed)";
     }
     return "?";
 }
@@ -96,10 +96,10 @@ inline formats::RGB heat_color(uint8_t v) {
     return stops[n - 1].c;
 }
 
-// Diverging gradient for the confirmed -8..+50 land-value range (neutral
+// Diverging gradient for a signed layer's usual -8..+50 range (neutral
 // gray at 0), scaled to that range rather than the full int8 span so the
 // gradient actually uses its contrast within real data bounds.
-inline formats::RGB land_value_color(int8_t v) {
+inline formats::RGB signed_color(int8_t v) {
     constexpr uint8_t base = 80;
     if (v < 0) {
         double t = std::min(1.0, -static_cast<double>(v) / 8.0);
@@ -112,7 +112,7 @@ inline formats::RGB land_value_color(int8_t v) {
 }
 
 inline formats::RGB color_for_layer(SaveLayer layer, uint8_t raw) {
-    if (layer == SaveLayer::LandValue54A4) return land_value_color(static_cast<int8_t>(raw));
+    if (layer == SaveLayer::Unrest54A4) return signed_color(static_cast<int8_t>(raw));
     return heat_color(raw);
 }
 
@@ -147,10 +147,10 @@ inline void render_city_map_layer(const model::CityMap& city, SaveLayer layer, i
                 uint8_t raw = 0;
                 switch (layer) {
                     case SaveLayer::Tiles: raw = city.tile[cell_y][cell_x]; break;
-                    case SaveLayer::A2C4: raw = city.coverage[cell_y][cell_x]; break;
+                    case SaveLayer::A2C4: raw = city.land_value[cell_y][cell_x]; break;
                     case SaveLayer::C9D4: raw = city.service_flags[cell_y][cell_x]; break;
                     case SaveLayer::Flags7BB4: raw = city.operational_state[cell_y][cell_x]; break;
-                    case SaveLayer::LandValue54A4: raw = static_cast<uint8_t>(city.land_value[cell_y][cell_x]); break;
+                    case SaveLayer::Unrest54A4: raw = static_cast<uint8_t>(city.unrest[cell_y][cell_x]); break;
                 }
                 c = color_for_layer(layer, raw);
             }
@@ -167,10 +167,11 @@ inline void render_city_map_layer(const model::CityMap& city, SaveLayer layer, i
 // (systems/service.hpp, findings sections 15-16): C9D4 bits 0x01/0x02 water
 // (0x02 the fountains' pipes, STRONG INFERENCE), 0x20 the reach of forums and
 // prefectures (economy::population_tax); roads are tiles 0x36-0x43 and houses
-// the grades 0xC8-0xD7. The manual's Trouble overlay isn't modeled.
-enum class Overlay { Water, Administration, LandValue, Roads, Housing };
-inline constexpr const char* kOverlayNames[] = {"Water", "Admin", "Land value", "Roads", "Housing"};
-inline constexpr int kOverlayCount = 5;
+// the grades 0xC8-0xD7. Land value is A2C4 and Unrest 54A4, the layers the
+// original's Maps panel calls "land value" and "trouble areas".
+enum class Overlay { Water, Administration, LandValue, Roads, Housing, Unrest };
+inline constexpr const char* kOverlayNames[] = {"Water", "Admin", "Land value", "Roads", "Housing", "Unrest"};
+inline constexpr int kOverlayCount = 6;
 
 // Whether cell (x, y) shows on the overlay, and in what colour.
 inline bool overlay_color(const model::CityMap& city, Overlay overlay, int x, int y, formats::RGB& c) {
@@ -186,7 +187,10 @@ inline bool overlay_color(const model::CityMap& city, Overlay overlay, int x, in
             c = {230, 190, 60};
             return true;
         case Overlay::LandValue:
-            c = land_value_color(city.land_value[y][x]);
+            c = signed_color(static_cast<int8_t>(city.land_value[y][x]));
+            return true;
+        case Overlay::Unrest:
+            c = signed_color(city.unrest[y][x]);
             return true;
         case Overlay::Roads:
             if (tile < 0x36 || tile > 0x43) return false;

@@ -94,10 +94,10 @@ int main(int argc, char** argv) {
     std::printf("\nCity grids:\n");
     int cells = 0;
     cells += diff_grid("tile (43A5)", sa.city.tile, sb.city.tile, show);
-    cells += diff_grid("coverage (A2C4)", sa.city.coverage, sb.city.coverage, show);
+    cells += diff_grid("land value (A2C4)", sa.city.land_value, sb.city.land_value, show);
     cells += diff_grid("service (C9D4)", sa.city.service_flags, sb.city.service_flags, show);
     cells += diff_grid("state (7BB4)", sa.city.operational_state, sb.city.operational_state, show);
-    cells += diff_grid("land value (54A4)", sa.city.land_value, sb.city.land_value, show);
+    cells += diff_grid("unrest (54A4)", sa.city.unrest, sb.city.unrest, show);
 
     std::printf("\nActors:\n");
     int actors = 0;

@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
         render::RenderPhase phase;  // animations as of `steps` steps in
         phase.ticks = steps;
         phase.population_units = model::global_word(*state, 0x6C10);
-        phase.coverage_base = model::global_word(*state, 0x6BF8);
+        phase.housing_land_value_base = model::global_word(*state, 0x6BF8);
         phase.workshop_records = &state->table_720;
         phase.barracks_records = &state->table_120;
         render::render_city(state->city, sprites, col, row, cols, rows, img, phase, &state->objects);

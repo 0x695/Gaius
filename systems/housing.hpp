@@ -2,7 +2,7 @@
 // Gaius — systems/housing.hpp
 //
 // Layer 3, GAIUS_ROADMAP.md Phase 4: housing development, population, and the
-// gate that removes a house when land value runs too high. Transcribed from the
+// gate that removes a house when unrest runs too high. Transcribed from the
 // decompressed US-build CSR.EXE (2026-09-13) -- see
 // docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md section 16.
 //
@@ -13,11 +13,11 @@
 // to the services computed at the end of the previous month.
 //
 // For each cell of its row, the pass:
-//   - below tile 0xC8: zeroes land value. Fountains (0xB9-0xBD) may change size.
+//   - below tile 0xC8: zeroes unrest. Fountains (0xB9-0xBD) may change size.
 //     Tiles 0xA8/AB/AE/B1 run a random decay-and-spread routine (0x29624) that
 //     is NOT modeled: it needs the engine's RNG and an untraced far call.
-//   - tiles 0xC8-0xD6: land value takes one evolve_land_value step. 0xD7 and
-//     above: land value is zeroed.
+//   - tiles 0xC8-0xD6: unrest takes one evolve_unrest step. 0xD7 and
+//     above: unrest is zeroed.
 //   - then, for the anchor cell of a building (7BB4 part index 0 -- see
 //     systems::construction::place), runs that tile's development handler from
 //     the far-pointer table at DS:1212.
@@ -27,7 +27,7 @@
 // slots for 0x00-0x35. Earlier RE, and this project, read those slots as
 // handlers for tiles 0x00-0x35. They are housing development handlers.
 //
-// The development handlers. Each compares the anchor's coverage (A2C4, signed)
+// The development handlers. Each compares the anchor's land value (A2C4, signed)
 // with a demotion and a promotion threshold, requires more of the anchor's C9D4
 // service bits as the grade rises (water 0x01, then 0x02, market 0x08, bath
 // houses 0x04, school/hospital 0x40, entertainment 0x80), and gates promotion on
@@ -59,12 +59,12 @@
 
 namespace gaius::systems::housing {
 
-// Routine 0x2DB49. If the cell's land value (54A4, signed) exceeds `threshold`:
+// Routine 0x2DB49. If the cell's unrest (54A4, signed) exceeds `threshold`:
 // the tile becomes 0xA7 and A2C4, 7BB4 and 54A4 at the cell are zeroed, and it
 // returns true. Called by grades 0xC8-0xCB with thresholds 20/30/40/48. When it
 // fires, the engine also conditionally spawns an actor, lowers DS:0x6C3C by 2
 // and sets DS:0x6C84 to 2 -- not modeled, since there is no actor system yet.
-bool land_value_allows(model::CityMap& city, int x, int y, int threshold,
+bool unrest_collapses(model::CityMap& city, int x, int y, int threshold,
                        std::vector<std::pair<int, int>>* collapsed = nullptr);
 
 // Population units per cell for tiles 0xC8-0xD7: the table at 3496:007E. Per
@@ -83,11 +83,11 @@ inline int population(const model::CityMap& city) { return 4 * population_units(
 struct DevelopmentContext {
     // DS:0x6C10: population_units() as of the month's step 101.
     int population_units = 0;
-    // The growth evolve_land_value applies this row to housing cells with
+    // The growth evolve_unrest applies this row to housing cells with
     // C9D4.20. In the engine it is DS:0x6BF6 + (random & 3) - 1, drawn once per
     // row; the RNG isn't transcribed, so the caller supplies the value.
-    int land_value_growth = 0;
-    // Where set, each house that collapses (land_value_allows) is appended, so
+    int unrest_growth = 0;
+    // Where set, each house that collapses (unrest_collapses) is appended, so
     // the caller can spawn its rioter (actors::spawn_rioter) after the row.
     std::vector<std::pair<int, int>>* collapsed = nullptr;
     // The generator, for the burning tiles 0xA8/AB/AE/B1 (0x29624); without it

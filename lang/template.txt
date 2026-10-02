@@ -29,6 +29,7 @@ Admin =
 Land value = 
 Roads = 
 Housing = 
+Unrest = 
 Save = 
 Load = 
 Close = 
