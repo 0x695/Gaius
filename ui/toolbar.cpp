@@ -122,7 +122,30 @@ void draw_footprint_icon(std::vector<uint8_t>& rgb, int w, int h, Rect box,
 
 }  // namespace
 
-Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metrics m, int screen_w, int screen_h)
+const std::vector<BarButton>& original_bar_page(int page) {
+    using C = systems::construction::CommandId;
+    const auto tool = [](C c, int frame, bool available = true) { return BarButton{BarKind::Tool, c, frame, 0, available}; };
+    const auto go = [](C c, int frame) { return BarButton{BarKind::Go, c, frame, 0, true}; };
+    const auto turn = [](int frame, int to) { return BarButton{BarKind::Page, C::NoAction, frame, to, true}; };
+    const BarButton back{BarKind::Back, C::MainToolbar, 28, 0, true};
+    // Frames from command_icon_frame's table; see there for how the executable's records pair up.
+    static const std::vector<BarButton> pages[kBarPages] = {
+        // DS:0x1178 -- 0x28, Gaius's file screen, is the save and load button
+        {go(C::GoToProvince, 21), go(C::GoToForum, 6), BarButton{BarKind::Files, C::NoAction, 51, 0, true},
+         go(C::Maps, 33), tool(C::ClearArea, 5), tool(C::Housing, 9), tool(C::BathHouses, 22), turn(52, 1), turn(53, 2)},
+        // DS:0x11BA -- the city's Tower re-tiles walls by their neighbours (findings section 18), not transcribed yet
+        {back, tool(C::Road, 7), tool(C::Plaza, 19), tool(C::ReservoirPipe, 8), tool(C::Well, 11), tool(C::Fountain, 12),
+         tool(C::Wall, 10), tool(C::Tower, 16, false), tool(C::Barracks, 14), tool(C::Prefecture, 17), tool(C::Forum, 18)},
+        // DS:0x11FC
+        {back, tool(C::Temple, 23), tool(C::Hospital, 30), tool(C::School, 32), tool(C::Oracle, 31),
+         tool(C::HeavyIndustry, 20), tool(C::Market, 34), tool(C::Workshop, 27), tool(C::Theater, 24),
+         tool(C::Coliseum, 25), tool(C::Hippodrome, 26)},
+    };
+    return pages[std::clamp(page, 0, kBarPages - 1)];
+}
+
+Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metrics m, int screen_w, int screen_h,
+                 bool original_bar)
     : tools_(tools, tools + std::max(0, count)), m_(m) {
     const int pad = std::max(1, m_.pad_px);
     const int stride = m_.button_px() + m_.gap_px;
@@ -137,7 +160,15 @@ Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metri
     cols_ = std::min(fit_cols, n);
     rows_ = std::max(1, (n + cols_ - 1) / cols_);
     per_page_ = n;
-    if (rows_ > max_rows) {
+    const int bar_rows = (kBarSlots + fit_cols - 1) / fit_cols;
+    if (original_bar && bar_rows <= max_rows) {
+        // The original's bar: its 11 slots, the page's buttons in them.
+        bar_ = true;
+        cols_ = std::min(fit_cols, kBarSlots);
+        rows_ = bar_rows;
+        per_page_ = kBarSlots;
+        set_bar_page(0);
+    } else if (rows_ > max_rows) {
         // Paged: an arrow at each end of the rows, the tools between.
         cols_ = std::max(3, fit_cols);
         rows_ = max_rows;
@@ -151,6 +182,52 @@ Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metri
     panel_ = Rect{0, screen_h - panel_h, screen_w, panel_h};
     grid_x0_ = (screen_w - grid_w) / 2;
     grid_y0_ = panel_.y + pad + label_block;
+}
+
+void Toolbar::set_bar_page(int page) {
+    if (!bar_) return;
+    bar_page_ = std::clamp(page, 0, kBarPages - 1);
+    entries_ = original_bar_page(bar_page_);
+}
+
+BarButton Toolbar::entry(int i) const {
+    if (i < 0 || i >= count()) return BarButton{};
+    if (bar_) return entries_[static_cast<size_t>(i)];
+    const auto command = tools_[static_cast<size_t>(i)];
+    return BarButton{BarKind::Tool, command, command_icon_frame(command), 0, true};
+}
+
+const char* Toolbar::label(int i) const {
+    if (i < 0 || i >= count()) return "";
+    const BarButton b = entry(i);
+    switch (b.kind) {
+        case BarKind::Page: return b.page == 1 ? tr("Infrastructure") : tr("Culture");
+        case BarKind::Files: return tr("Save and load");
+        default: return systems::construction::command_name(b.command);
+    }
+}
+
+int Toolbar::index_of(systems::construction::CommandId command) const {
+    for (int i = 0; i < count(); ++i)
+        if (tool(i) == command && entry(i).kind == BarKind::Tool) return i;
+    return -1;
+}
+
+void Toolbar::show_command(systems::construction::CommandId command) {
+    if (!bar_) {
+        for (int i = 0; i < count(); ++i)
+            if (tools_[static_cast<size_t>(i)] == command) {
+                show_tool(i);
+                return;
+            }
+        return;
+    }
+    for (int p = 0; p < kBarPages; ++p)
+        for (const BarButton& b : original_bar_page(p))
+            if (b.kind == BarKind::Tool && b.command == command) {
+                set_bar_page(p);
+                return;
+            }
 }
 
 void Toolbar::turn_page(int delta) {
@@ -214,10 +291,8 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
     // Falls back to a hint when nothing is selected, so the panel is
     // never a blank bar with no explanation of what it does.
     int label_for = (hovered >= 0) ? hovered : selected;
-    const char* label = (label_for >= 0 && label_for < bar.count())
-                            ? systems::construction::command_name(bar.tool(label_for))
-                            : tr("SELECT A BUILDING");
-    const char* shown = (selected_label && label_for == selected) ? selected_label : label;
+    const char* label = (label_for >= 0 && label_for < bar.count()) ? bar.label(label_for) : tr("SELECT A BUILDING");
+    const char* shown = (selected_label && selected >= 0 && label_for == selected) ? selected_label : label;
 
     // Try the label with the funds figure appended; fall back to the label
     // alone if that would overflow the panel (see funds_text's doc comment).
@@ -272,7 +347,8 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
         fill_rect(rgb, w, h, b, kButtonFill);
 
         Rect inner{b.x + m.pad_px, b.y + m.pad_px, b.w - 2 * m.pad_px, b.h - 2 * m.pad_px};
-        const int frame = command_icon_frame(bar.tool(i));
+        const BarButton info = bar.entry(i);
+        const int frame = info.frame;
         const formats::PL8Frame* icon =
             (icons && icon_palette && frame >= 0 && frame < static_cast<int>(icons->frames.size()) &&
              !icons->frames[static_cast<size_t>(frame)].pixels.empty())
@@ -297,6 +373,17 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
             draw_footprint_icon(rgb, w, h, inner, systems::construction::placement_spec(bar.tool(i)), tile_color);
         }
 
+        if (!info.available) {
+            // A command Gaius has not transcribed: dimmed, and it does nothing.
+            for (int y = b.y; y < b.y + b.h; ++y)
+                for (int x = b.x; x < b.x + b.w; ++x) {
+                    if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                    const size_t k = (static_cast<size_t>(y) * w + x) * 3;
+                    rgb[k] = static_cast<uint8_t>(rgb[k] / 3);
+                    rgb[k + 1] = static_cast<uint8_t>(rgb[k + 1] / 3);
+                    rgb[k + 2] = static_cast<uint8_t>(rgb[k + 2] / 3);
+                }
+        }
         RGB edge = (i == selected) ? kSelectedEdge : (i == hovered ? kHoverEdge : kButtonEdge);
         stroke_rect(rgb, w, h, b, edge);
         if (i == selected) {
@@ -312,35 +399,51 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
 
 namespace gaius::ui {
 
+// The panel's button tables (DS:0x1178, 0x11BA, 0x11FC, 0x123E) hold 6-byte records, a POINTERS.PL8 frame word and then
+// a far pointer to a click handler -- but the click code (0x12140-0x122F9) reads `lcall [slot * 6 + 0x116E]`, with
+// slots numbered from 1, which is the *previous* record's pointer. So the handler in record j belongs to the button
+// drawn in slot j + 1: the first button of pages 1 and 2 is the "back" arrow (frame 28, the handler before the table is
+// Main Toolbar), and every command's icon is the frame of the record after its own. Until 2026-10-02 this read each
+// record's own pair, which put a Temple on the Road's icon and every building after it one icon off.
+// Checked against the main-game capture: slots 1-10 of page 1 are frames 7, 19, 8, 11, 12, 10, 16, 14, 17, 18.
 int command_icon_frame(systems::construction::CommandId id) {
     using C = systems::construction::CommandId;
     switch (id) {
-        // Page 0 (DS:0x1178)
-        case C::ClearArea: return 33;
-        case C::Housing: return 5;
-        case C::BathHouses: return 9;
-        // Page 1 (DS:0x11BA)
-        case C::Road: return 28;
-        case C::Plaza: return 7;
-        case C::ReservoirPipe: return 19;
-        case C::Well: return 8;
-        case C::Fountain: return 11;
-        case C::Wall: return 12;
-        case C::Tower: return 10;
-        case C::Barracks: return 16;
-        case C::Prefecture: return 14;
-        case C::Forum: return 17;
-        // Page 2 (DS:0x11FC)
-        case C::Temple: return 28;
-        case C::Hospital: return 23;
-        case C::School: return 30;
-        case C::Oracle: return 32;
-        case C::HeavyIndustry: return 31;
-        case C::Market: return 20;
-        case C::Workshop: return 34;
-        case C::Theater: return 27;
-        case C::Coliseum: return 24;
-        case C::Hippodrome: return 25;
+        // Page 0 (DS:0x1178): the main bar
+        case C::GoToProvince: return 21;
+        case C::GoToForum: return 6;
+        case C::Maps: return 33;
+        case C::ClearArea: return 5;
+        case C::Housing: return 9;
+        case C::BathHouses: return 22;
+        // Page 1 (DS:0x11BA): the infrastructure page
+        case C::MainToolbar: return 28;
+        case C::Road: return 7;
+        case C::Plaza: return 19;
+        case C::ReservoirPipe: return 8;
+        case C::Well: return 11;
+        case C::Fountain: return 12;
+        case C::Wall: return 10;
+        case C::Tower: return 16;
+        case C::Barracks: return 14;
+        case C::Prefecture: return 17;
+        case C::Forum: return 18;
+        // Page 2 (DS:0x11FC): the culture page
+        case C::Temple: return 23;
+        case C::Hospital: return 30;
+        case C::School: return 32;
+        case C::Oracle: return 31;
+        case C::HeavyIndustry: return 20;
+        case C::Market: return 34;
+        case C::Workshop: return 27;
+        case C::Theater: return 24;
+        case C::Coliseum: return 25;
+        case C::Hippodrome: return 26;
+        // The province page (DS:0x123E)
+        case C::Fort: return 15;
+        case C::CohortPatrol: return 36;
+        case C::CohortAttack: return 37;
+        case C::CohortGoHome: return 38;
         default: return -1;
     }
 }

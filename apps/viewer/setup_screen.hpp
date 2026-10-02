@@ -23,6 +23,7 @@
 #include "platform/game_import.hpp"
 #include "platform/input.hpp"
 #include "platform/paths.hpp"
+#include "apps/viewer/window_icon.hpp"
 #include "platform/window.hpp"
 #include "ui/panel.hpp"
 #include "ui/settings.hpp"
@@ -31,7 +32,9 @@
 namespace gaius::viewer {
 
 // The places a game folder can be, in order: the settings' folder, Gaius's
-// own game folder, the folder Gaius runs from, the working folder.
+// own game folder, the folder Gaius runs from, the working folder, and then
+// wherever the game is usually installed (platform::detect_game_folders: GOG,
+// Steam, the usual games folders, GAIUS_GAME_DIR).
 inline std::string find_game_folder(const ui::Settings& settings) {
     std::vector<std::string> candidates;
     if (!settings.game_dir.empty()) candidates.push_back(settings.game_dir);
@@ -50,15 +53,29 @@ inline std::string find_game_folder(const ui::Settings& settings) {
 #endif
     for (const std::string& dir : candidates)
         if (platform::looks_like_game_folder(dir)) return dir;
-    return std::string();
+    const std::vector<std::string> installed = platform::detect_game_folders();
+    return installed.empty() ? std::string() : installed.front();
+}
+
+// Remembers a game folder found outside Gaius's own places, so the next start
+// doesn't have to look for it.
+inline void remember_game_folder(ui::Settings& settings, const std::string& settings_path, const std::string& dir) {
+    if (dir.empty() || settings_path.empty() || settings.game_dir == dir) return;
+    try {
+        if (dir == platform::paths().game) return;
+        settings.game_dir = dir;
+        ui::save_settings(settings_path, settings);
+    } catch (const std::exception&) {
+    }
 }
 
 // The setup screen. Returns the game folder once there is one, or an empty
 // string if the player quits.
 inline std::string run_setup_screen(ui::Settings& settings, const std::string& settings_path, int logical_w,
                                     int logical_h) {
-    constexpr int kImport = 1, kLookAgain = 2, kQuit = 3;
+    constexpr int kImport = 1, kLookAgain = 2, kQuit = 3, kBrowse = 4;
     platform::Window window("Gaius", logical_w, logical_h, 960, 600);
+    window.set_icon(kWindowIcon, kWindowIconSize);
     platform::open_gamepads();
     const ui::Metrics m = ui::metrics_for(ui::Breakpoint::Desktop);
     std::string game_dir = find_game_folder(settings);
@@ -81,13 +98,14 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
             page.rows.push_back({ui::tr("Import copies its folder into Gaius"), ""});
             page.buttons.push_back({ui::tr(importing ? "Importing..." : "Import"), kImport, !importing});
         } else {
-            page.rows.push_back({ui::tr("Drop the Caesar folder on this window,"), ""});
-            page.rows.push_back({ui::tr("start Gaius with the folder's path,"), ""});
-            page.rows.push_back({ui::tr("or copy the files into"), ""});
+            page.rows.push_back({ui::tr("Gaius looked in the usual places and found none."), ""});
+            page.rows.push_back({platform::can_pick_folder() ? ui::tr("Choose the Caesar folder,") : ui::tr("Drop the Caesar folder on this window,"), ""});
+            page.rows.push_back({ui::tr("drop it on this window, or copy the files into"), ""});
             page.rows.push_back({gaius_game.size() > 38 ? "..." + gaius_game.substr(gaius_game.size() - 35) : gaius_game,
                                  ""});
         }
         if (!note.empty()) page.rows.push_back({note, ""});
+        if (platform::can_pick_folder()) page.buttons.push_back({ui::tr("Choose folder"), kBrowse});
         page.buttons.push_back({ui::tr("Look again"), kLookAgain});
         page.buttons.push_back({ui::tr("Quit"), kQuit});
         const ui::PanelLayout lay = ui::layout(page, m, logical_w, logical_h);
@@ -97,8 +115,9 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
             if (event.type == SDL_DROPFILE) {
                 const std::string dropped = event.drop.file;
                 SDL_free(event.drop.file);
-                if (platform::looks_like_game_folder(dropped)) {
-                    game_dir = dropped;
+                const std::vector<std::string> inside = platform::game_folders_under(dropped, 3);
+                if (!inside.empty()) {
+                    game_dir = inside.front();
                 } else {
                     note = ui::tr("That folder doesn't hold Caesar's files");
                 }
@@ -119,6 +138,15 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
                 case kImport:
                     if (!platform::import_game_folder()) note = ui::tr("The folder picker didn't open");
                     break;
+                case kBrowse: {
+                    const std::string picked = platform::pick_folder(ui::tr("Choose the folder with Caesar's files"));
+                    if (picked.empty()) break;
+                    // The folder itself, or the one inside it that holds the files (GOG's has a US build in a folder).
+                    const std::vector<std::string> inside = platform::game_folders_under(picked, 3);
+                    if (!inside.empty()) game_dir = inside.front();
+                    else note = ui::tr("That folder doesn't hold Caesar's files");
+                    break;
+                }
                 case kLookAgain:
                     game_dir = find_game_folder(settings);
                     if (game_dir.empty()) note = ui::tr("Still no Caesar files found");
@@ -137,14 +165,7 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
         window.present_rgb24(frame);
         SDL_Delay(16);
     }
-    // Remember a folder found outside Gaius's own places.
-    try {
-        if (game_dir != platform::paths().game) {
-            settings.game_dir = game_dir;
-            ui::save_settings(settings_path, settings);
-        }
-    } catch (const std::exception&) {
-    }
+    remember_game_folder(settings, settings_path, game_dir);
     return game_dir;
 }
 

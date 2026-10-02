@@ -43,7 +43,7 @@ enum class SettingRow {
     GameSpeed, ScrollSpeed, Messages,
     Tunes, Effects, CitySounds, MusicVolume, EffectsVolume,
     WindowMode, UiScale, FrameRate, PositionIndicator, IconNames,
-    GamepadPointer, Language,
+    GamepadPointer, EdgeScroll, Language,
     Binding,  // + the index into platform::kBindable
 };
 
@@ -159,6 +159,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.rows.push_back(row(ui::tr("Position indicator"), on_off(!o.position_indicator_off()),
                                     row_id(SettingRow::PositionIndicator)));
             page.rows.push_back(row(ui::tr("Icon names"), on_off(!o.icon_name_off()), row_id(SettingRow::IconNames)));
+            page.rows.push_back(row(ui::tr("Edge scrolling"), on_off(s.edge_scroll), row_id(SettingRow::EdgeScroll)));
             break;
         case kSettingsKeys: {
             page.title = ui::tr("Arrows - left key, right button");
@@ -252,6 +253,7 @@ inline bool adjust_setting(int action, ui::Settings& s, ui::GameOptions& o, bool
         case SettingRow::PositionIndicator: flip(ui::kOptPositionOff); break;
         case SettingRow::IconNames: flip(ui::kOptIconNameOff); break;
         case SettingRow::GamepadPointer: s.gamepad_cursor = !s.gamepad_cursor; break;
+        case SettingRow::EdgeScroll: s.edge_scroll = !s.edge_scroll; break;
         case SettingRow::Language: {
             if (languages.empty()) return false;
             const int n = static_cast<int>(languages.size());

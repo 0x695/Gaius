@@ -41,6 +41,7 @@
 #include "model/city_state.hpp"
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
+#include "platform/game_import.hpp"
 #include "platform/paths.hpp"
 #include "ui/settings.hpp"
 #include "ui/strings.hpp"
@@ -2755,6 +2756,36 @@ bool wrote(const RegLog& log, int reg, int value) {
 // Phase 9: paths, settings, languages
 // ---------------------------------------------------------------------
 
+void test_platform_game_detection() {
+    std::printf("test_platform_game_detection (game folders found in and below a folder)\n");
+    namespace plat = gaius::platform;
+    const fs::path root = fs::temp_directory_path() / "gaius_test_game_detect";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    const auto make_game = [](const fs::path& dir) {
+        fs::create_directories(dir);
+        std::ofstream(dir / "empire2.001").put('x');  // any letter case
+        std::ofstream(dir / "HOUSES.PL8").put('x');
+    };
+    make_game(root / "Caesar");
+    make_game(root / "Caesar" / "US");
+    fs::create_directories(root / "Other" / "Deep" / "Deeper" / "Deepest");
+    make_game(root / "Other" / "Deep" / "Deeper" / "Deepest" / "TooFar");
+    const std::vector<std::string> found = plat::game_folders_under(root.string(), 3);
+    CHECK(found.size() == 2);
+    // the US build first, though the folder holding it comes after its parent in the search
+    if (found.size() == 2) {
+        CHECK(fs::path(found[0]).filename() == "US");
+        CHECK(fs::path(found[1]).filename() == "Caesar");
+    }
+    CHECK(plat::game_folders_under(root.string(), 0).empty());          // the root itself is not one
+    CHECK(plat::game_folders_under((root / "Missing").string(), 3).empty());
+    CHECK(plat::game_folders_under("", 3).empty());
+    CHECK(plat::game_folders_under((root / "Other").string(), 2).empty());  // the deep one is out of reach
+    CHECK(!plat::looks_like_game_folder((root / "Other").string()));
+    fs::remove_all(root, ec);
+}
+
 void test_platform_paths() {
     std::printf("test_platform_paths (each OS's folders for settings, saves and the game)\n");
     using namespace gaius::platform;
@@ -2810,11 +2841,12 @@ void test_ui_settings_file() {
     s.language = "de";
     s.game_dir = "D:\\Games\\Caesar";
     s.gamepad_cursor = false;
+    s.edge_scroll = false;
     s.keys["cycle_tool"] = "Q";
     s.buttons["menu"] = "guide";
     const Settings r = parse_settings(settings_text(s));
     CHECK(r.window_mode == s.window_mode && r.ui_scale == 3 && r.frame_cap == 60 && r.music_volume == 40 &&
-          r.effects_volume == 70 && r.language == "de" && r.game_dir == s.game_dir && !r.gamepad_cursor &&
+          r.effects_volume == 70 && r.language == "de" && r.game_dir == s.game_dir && !r.gamepad_cursor && !r.edge_scroll &&
           r.keys == s.keys && r.buttons == s.buttons);
     const Settings d = parse_settings("# nothing\nui_scale = 9\nframe_cap = 75\nmusic_volume = -3\nwindow_mode = x\n"
                                       "unknown = 1\nnot a line\n");
@@ -5697,10 +5729,21 @@ void test_render_city_matches_screenshots() {
 void test_ui_command_icons_match_screenshot() {
     std::printf("test_ui_command_icons_match_screenshot (panel tables DS:0x11BA vs DOSBox capture)\n");
     using C = gaius::systems::construction::CommandId;
-    const C page1[] = {C::Road, C::Plaza, C::ReservoirPipe, C::Well, C::Fountain, C::Wall, C::Tower, C::Barracks,
-                       C::Prefecture, C::Forum};
-    const int frames[] = {28, 7, 19, 8, 11, 12, 10, 16, 14, 17};
+    // Page 1's slots in the order the capture shows them: the back arrow, then each command with the icon the click
+    // code pairs it with (the handler in record j belongs to slot j + 1; see command_icon_frame).
+    const C page1[] = {C::MainToolbar, C::Road, C::Plaza, C::ReservoirPipe, C::Well, C::Fountain, C::Wall, C::Tower,
+                       C::Barracks, C::Prefecture, C::Forum};
+    const int frames[] = {28, 7, 19, 8, 11, 12, 10, 16, 14, 17, 18};
     for (size_t i = 0; i < std::size(page1); ++i) CHECK(gaius::ui::command_icon_frame(page1[i]) == frames[i]);
+    // Page 2 (culture) and the main bar, from the same tables: a Temple is a cross, a Hospital a plus, a School 1+1=2,
+    // an Oracle an eye, a Hippodrome a horse.
+    CHECK(gaius::ui::command_icon_frame(C::Temple) == 23);
+    CHECK(gaius::ui::command_icon_frame(C::Hospital) == 30);
+    CHECK(gaius::ui::command_icon_frame(C::School) == 32);
+    CHECK(gaius::ui::command_icon_frame(C::Oracle) == 31);
+    CHECK(gaius::ui::command_icon_frame(C::Hippodrome) == 26);
+    CHECK(gaius::ui::command_icon_frame(C::Housing) == 9);
+    CHECK(gaius::ui::command_icon_frame(C::ClearArea) == 5);
 
     std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
@@ -5731,7 +5774,7 @@ void test_ui_command_icons_match_screenshot() {
         }
     }
     stbi_image_free(shot);
-    std::printf("  10 icons: %d/%d pixels match\n", compared - mismatches, compared);
+    std::printf("  11 icons: %d/%d pixels match\n", compared - mismatches, compared);
     CHECK(mismatches == 0);
 }
 
@@ -6362,6 +6405,54 @@ void test_ui_toolbar_layout() {
     CHECK(full.panel().h <= 32);  // comparable to the original's 24px bar
 }
 
+void test_ui_original_bar() {
+    std::printf("test_ui_original_bar (the original's three-page control bar)\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+    const CommandId ring[] = {CommandId::Road, CommandId::Temple, CommandId::Housing, CommandId::Forum, CommandId::Workshop};
+    // Page sizes and the arrows: 9 buttons on the main bar, 11 on each other page, a back arrow first on those.
+    CHECK(original_bar_page(0).size() == 9 && original_bar_page(1).size() == 11 && original_bar_page(2).size() == 11);
+    CHECK(original_bar_page(1)[0].kind == BarKind::Back && original_bar_page(2)[0].kind == BarKind::Back);
+    CHECK(original_bar_page(0)[7].kind == BarKind::Page && original_bar_page(0)[7].page == 1);
+    CHECK(original_bar_page(0)[8].kind == BarKind::Page && original_bar_page(0)[8].page == 2);
+    // Every button has an icon frame, and every page-1 and page-2 tool agrees with command_icon_frame.
+    for (int page = 0; page < kBarPages; ++page)
+        for (const BarButton& b : original_bar_page(page)) {
+            CHECK(b.frame >= 0);
+            if (b.kind == BarKind::Tool) CHECK(b.frame == command_icon_frame(b.command));
+        }
+    // At 1x the bar is the original's, in one row of its 11 slots; at 3x and 4x it falls back to the flat list.
+    Toolbar bar(ring, 5, metrics_for_scale(1), 320, 200, true);
+    CHECK(bar.original_bar() && bar.rows() == 1 && bar.count() == 9 && bar.bar_page() == 0 && !bar.paged());
+    CHECK(!Toolbar(ring, 5, metrics_for_scale(4), 320, 200, true).original_bar());
+    CHECK(!Toolbar(ring, 5, metrics_for_scale(1), 320, 200, false).original_bar());
+    // The buttons sit in slots from the left; a click on one answers with its index, and the others' rects are empty.
+    for (int i = 0; i < bar.count(); ++i) {
+        const Rect r = bar.button(i);
+        CHECK(r.w > 0 && bar.hit_test(r.x + 1, r.y + 1) == i);
+    }
+    CHECK(bar.button(9).w == 0);
+    // Selecting a command turns to its page; the housing button is on the main bar, the road's on the first page.
+    bar.show_command(CommandId::Temple);
+    CHECK(bar.bar_page() == 2 && bar.count() == 11 && bar.index_of(CommandId::Temple) == 1);
+    bar.show_command(CommandId::Road);
+    CHECK(bar.bar_page() == 1 && bar.index_of(CommandId::Road) == 1 && bar.index_of(CommandId::Temple) == -1);
+    bar.show_command(CommandId::Housing);
+    CHECK(bar.bar_page() == 0 && bar.index_of(CommandId::Housing) == 5);
+    // The Tower is shown but not available; the label row names a button.
+    bar.set_bar_page(1);
+    CHECK(bar.entry(7).command == CommandId::Tower && !bar.entry(7).available);
+    CHECK(std::string(bar.label(1)) == "Road" && std::string(bar.label(0)) == "Main Toolbar");
+    bar.set_bar_page(0);
+    CHECK(std::string(bar.label(0)) == "Go to Province" && std::string(bar.label(1)) == "Go to Forum");
+    // The flat list's buttons are all tools, in order, and the original-bar calls work on it as well.
+    Toolbar flat(ring, 5, metrics_for_scale(1), 320, 200);
+    CHECK(!flat.original_bar() && flat.entry(1).kind == BarKind::Tool && flat.entry(1).command == CommandId::Temple);
+    CHECK(flat.index_of(CommandId::Forum) == 3);
+    flat.show_command(CommandId::Workshop);
+    CHECK(flat.page() == 0);
+}
+
 void test_ui_toolbar_paging() {
     std::printf("test_ui_toolbar_paging (past 2x: at most half the screen, page arrows)\n");
     using namespace gaius::ui;
@@ -6556,6 +6647,7 @@ int main() {
     test_ui_toolbar_layout();
     test_ui_hit_test_matches_drawn_buttons();
     test_ui_toolbar_paging();
+    test_ui_original_bar();
     test_ui_font_rendering();
     test_ui_toolbar_render();
     test_ui_toolbar_variant_label();
@@ -6605,6 +6697,7 @@ int main() {
     test_battle_race_matches_saves();
     test_cohort2_handover();
     test_platform_paths();
+    test_platform_game_detection();
     test_ui_settings_file();
     test_ui_strings();
     test_settings_page_rows();

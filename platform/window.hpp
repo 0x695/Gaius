@@ -41,6 +41,9 @@ public:
     Window(const Window&) = delete;
     Window& operator=(const Window&) = delete;
 
+    // The window's icon (taskbar, title bar, Alt+Tab): `size` x `size` pixels, one little-endian word each, bytes R, G, B, A.
+    void set_icon(const uint32_t* pixels, int size);
+
     void set_mode(WindowMode mode);
     // Waiting for the display's refresh when presenting (on by default).
     void set_vsync(bool on);

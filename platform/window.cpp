@@ -3,11 +3,59 @@
 
 #include <SDL.h>
 
+#if defined(_WIN32)
+#include <SDL_syswm.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
 namespace gaius::platform {
+
+namespace {
+
+#if defined(_WIN32)
+// Whether Windows is set to dark mode for apps (Settings > Personalization > Colors).
+bool windows_apps_use_dark_theme() {
+    DWORD light = 1, size = sizeof(light);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size) != ERROR_SUCCESS)
+        return false;
+    return light == 0;
+}
+
+// The title bar follows the system's theme: DWMWA_USE_IMMERSIVE_DARK_MODE (20; 19 before Windows 10 20H1), asked of
+// dwmapi at run time so older systems and other toolchains still link.
+void follow_system_title_bar(SDL_Window* window) {
+    SDL_SysWMinfo info;
+    SDL_VERSION(&info.version);
+    if (!SDL_GetWindowWMInfo(window, &info) || info.subsystem != SDL_SYSWM_WINDOWS) return;
+    HWND hwnd = info.info.win.window;
+    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+    if (!dwm) return;
+    using SetAttribute = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+    auto set_attribute = reinterpret_cast<SetAttribute>(reinterpret_cast<void*>(GetProcAddress(dwm, "DwmSetWindowAttribute")));
+    if (set_attribute) {
+        const BOOL dark = windows_apps_use_dark_theme() ? TRUE : FALSE;
+        if (FAILED(set_attribute(hwnd, 20, &dark, sizeof(dark)))) set_attribute(hwnd, 19, &dark, sizeof(dark));
+        // Repaint the frame now rather than at the next resize.
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    FreeLibrary(dwm);
+}
+#else
+void follow_system_title_bar(SDL_Window*) {}
+#endif
+
+}  // namespace
 
 Window::Window(const std::string& title, int logical_w, int logical_h, int initial_w, int initial_h,
                WindowMode mode)
@@ -25,6 +73,7 @@ Window::Window(const std::string& title, int logical_w, int logical_h, int initi
     window_ = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, initial_w, initial_h,
                                 flags);
     if (!window_) throw std::runtime_error(std::string("platform::Window: SDL_CreateWindow failed: ") + SDL_GetError());
+    follow_system_title_bar(window_);
 
     renderer_ = SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!renderer_) {
@@ -46,6 +95,15 @@ Window::~Window() {
     if (texture_) SDL_DestroyTexture(texture_);
     if (renderer_) SDL_DestroyRenderer(renderer_);
     if (window_) SDL_DestroyWindow(window_);
+}
+
+void Window::set_icon(const uint32_t* pixels, int size) {
+    // SDL copies the pixels when it sets the icon, so the surface can go at once.
+    SDL_Surface* surface = SDL_CreateRGBSurfaceFrom(const_cast<uint32_t*>(pixels), size, size, 32, size * 4, 0x000000FFu,
+                                                    0x0000FF00u, 0x00FF0000u, 0xFF000000u);
+    if (!surface) return;
+    SDL_SetWindowIcon(window_, surface);
+    SDL_FreeSurface(surface);
 }
 
 void Window::set_mode(WindowMode mode) {

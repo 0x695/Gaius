@@ -71,15 +71,68 @@ inline constexpr double kMaxPanelShare = 0.5;
 // hit_test's answers for the page arrows.
 inline constexpr int kPreviousPage = -2, kNextPage = -3;
 
+// --- The original's control bar -------------------------------------------
+//
+// The original has one bar of up to 11 buttons (x = 8 + 24 * slot) and three
+// pages for it (`DS:0x6D0E`): the main bar (go to the province, go to the
+// Forum, save and load, maps, clear land, housing, bath houses, and a button
+// for each of the other two pages), the infrastructure page (a back arrow,
+// then road, plaza, reservoir, well, fountain, wall, tower, barracks,
+// prefecture and forum) and the culture page (a back arrow, then temple,
+// hospital, school, oracle, heavy industry, market, workshop, theater,
+// coliseum and hippodrome). Pressing a building's button keeps the page, so
+// several can be placed in a row; the arrow goes back to the main bar. The
+// pages and their icons are the executable's own tables (renderer findings
+// section 7); the names "infrastructure" and "culture" for the two page
+// buttons are Gaius's reading of their icons (I with an arrow, C with a
+// cross), since the executable has no text for them.
+enum class BarKind {
+    Tool,   // selects a placing command
+    Page,   // turns to another page of the bar
+    Go,     // leaves the city: the province, the Forum or the maps
+    Files,  // the save and load screen
+    Back,   // to the main bar
+};
+
+inline constexpr int kBarSlots = 11;
+inline constexpr int kBarPages = 3;
+
+struct BarButton {
+    BarKind kind = BarKind::Tool;
+    systems::construction::CommandId command = systems::construction::CommandId::NoAction;  // Tool, Go
+    int frame = -1;       // POINTERS.PL8
+    int page = 0;         // Page: where it turns to
+    bool available = true;  // false: drawn dimmed, and does nothing (a command Gaius has not transcribed)
+};
+
+// The buttons of page `page` (0-2) in slot order.
+const std::vector<BarButton>& original_bar_page(int page);
+
 class Toolbar {
 public:
-    Toolbar(const systems::construction::CommandId* tools, int count, Metrics m, int screen_w, int screen_h);
+    // With `original_bar` the toolbar is the original's paged bar (above) when its 11 slots fit the panel at this
+    // scale -- on the desktop's -- and otherwise the flat list of `tools`, which pages by arrows when it overflows.
+    Toolbar(const systems::construction::CommandId* tools, int count, Metrics m, int screen_w, int screen_h,
+            bool original_bar = false);
 
-    int count() const { return static_cast<int>(tools_.size()); }
+    // Whether the original's bar is what shows (and then count() is the buttons of the page showing).
+    bool original_bar() const { return bar_; }
+    int bar_page() const { return bar_page_; }
+    void set_bar_page(int page);
+    // What button `i` is. In the flat list every button is a Tool.
+    BarButton entry(int i) const;
+    // The text for button `i`'s label row.
+    const char* label(int i) const;
+    // The index of the button for `command` among those showing (the flat list's own index, whatever the page), or -1.
+    int index_of(systems::construction::CommandId command) const;
+    // Turns to the page that has `command`'s button (the original's bar), or to the page of its tool (the flat list).
+    void show_command(systems::construction::CommandId command);
+
+    int count() const { return bar_ ? static_cast<int>(entries_.size()) : static_cast<int>(tools_.size()); }
     // Paging: whether the tools need more than one page, how many pages, the
     // one showing, and turning it (wrapping around). show_tool turns to the
     // page holding tool i.
-    bool paged() const { return per_page_ < count(); }
+    bool paged() const { return !bar_ && per_page_ < count(); }
     int pages() const { return paged() ? (count() + per_page_ - 1) / per_page_ : 1; }
     int page() const { return page_; }
     void turn_page(int delta);
@@ -87,7 +140,9 @@ public:
     // The arrows' boxes; empty when not paged.
     Rect previous_arrow() const;
     Rect next_arrow() const;
-    systems::construction::CommandId tool(int i) const { return tools_[static_cast<size_t>(i)]; }
+    systems::construction::CommandId tool(int i) const {
+        return bar_ ? entries_[static_cast<size_t>(i)].command : tools_[static_cast<size_t>(i)];
+    }
     const Metrics& metrics() const { return m_; }
     int columns() const { return cols_; }
     int rows() const { return rows_; }
@@ -112,6 +167,9 @@ public:
 
 private:
     std::vector<systems::construction::CommandId> tools_;
+    bool bar_ = false;
+    int bar_page_ = 0;
+    std::vector<BarButton> entries_;  // the original's bar: the page showing
     Metrics m_;
     int cols_ = 1;
     int rows_ = 1;
@@ -146,7 +204,9 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
 // -1 if it has no button. Read from the panel's button tables (DS:0x1178,
 // DS:0x11BA, DS:0x11FC: 11 records per page of POINTERS frame + far pointer to
 // the click handler, which sets the command id; drawn by 0x211CB at y = 180,
-// x = 8 + 24 * slot). Two captures show pages 0 and 1 in exactly this order.
+// x = 8 + 24 * slot). A button's handler is the previous record's, so a command's
+// icon is the frame of the record after its own (see toolbar.cpp). Two captures
+// show pages 0 and 1 in exactly this order.
 int command_icon_frame(systems::construction::CommandId id);
 
 }  // namespace gaius::ui

@@ -13,21 +13,6 @@
 
 namespace gaius::platform {
 
-bool looks_like_game_folder(const std::string& dir) {
-    if (dir.empty()) return false;
-    std::error_code ec;
-    if (!std::filesystem::is_directory(dir, ec)) return false;
-    bool scenario = false, sprites = false;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        std::string name = entry.path().filename().string();
-        std::transform(name.begin(), name.end(), name.begin(),
-                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-        if (name == "EMPIRE2.001") scenario = true;
-        if (name == "HOUSES.PL8") sprites = true;
-    }
-    return scenario && sprites;
-}
-
 #if defined(__ANDROID__)
 
 namespace {

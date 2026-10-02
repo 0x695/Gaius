@@ -17,6 +17,7 @@
 // Controls:
 //   left-drag with middle mouse / single-finger touch drag / left gamepad
 //     stick  -> pan
+//   arrow keys / WASD / the mouse resting at the window's edge -> scroll the map (the original's scroll speed)
 //   scroll wheel / gamepad triggers                        -> zoom
 //   right-click / two-finger tap / gamepad B                -> cycle save
 //     layer (save-file mode only; no-op for an EMPIRE2 scenario)
@@ -91,6 +92,9 @@
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
+#include "apps/viewer/intro.hpp"
+#include "apps/viewer/window_icon.hpp"
+#include "platform/console.hpp"
 #include "platform/game_import.hpp"
 #include "platform/input.hpp"
 #include "platform/paths.hpp"
@@ -271,6 +275,8 @@ std::vector<ui::Catalog> load_languages() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // On Windows the viewer has no console of its own; started from a terminal it borrows that one for its log lines.
+    platform::attach_parent_console();
     // A phone or tablet shows the game's 320 x 200 screen in landscape.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     // Gaius's settings (ui/settings.hpp), before anything else: they may name
@@ -301,6 +307,7 @@ int main(int argc, char** argv) {
         // No folder or file given: a career from the game's files, wherever
         // they are, or the setup screen that explains where they go.
         in_path = viewer::find_game_folder(settings);
+        viewer::remember_game_folder(settings, settings_path, in_path);
         if (in_path.empty()) {
             if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
                 std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
@@ -317,6 +324,11 @@ int main(int argc, char** argv) {
             }
         }
     }
+    // A folder named on the command line is remembered too, so a plain start finds it next time.
+    if (fs::is_directory(in_path) && platform::looks_like_game_folder(in_path))
+        viewer::remember_game_folder(settings, settings_path, in_path);
+    bool no_intro = false;  // --no-intro: straight to the start screen
+    std::string intro_shot_path;  // --intro-screenshot out.png: the opening's frame, headless
     std::string screenshot_path;
     int screenshot_frames = 0;
     double test_pan_x = 0, test_pan_y = 0, test_zoom = 1.0;
@@ -345,6 +357,8 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--paused") == 0) start_paused = true;
         if (std::strcmp(argv[i], "--mute") == 0) mute = true;
+        if (std::strcmp(argv[i], "--no-intro") == 0) no_intro = true;
+        if (std::strcmp(argv[i], "--intro-screenshot") == 0 && i + 1 < argc) intro_shot_path = argv[++i];
         if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) start_screen = argv[++i];
         if (std::strcmp(argv[i], "--forum-tab") == 0 && i + 1 < argc) start_forum_tab = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-action") == 0 && i + 1 < argc) test_actions.push_back(std::atoi(argv[++i]));
@@ -418,6 +432,9 @@ int main(int argc, char** argv) {
     viewer::SaveLayer layer = viewer::SaveLayer::Tiles;
     if (test_layer >= 0 && test_layer < viewer::kSaveLayerCount) layer = viewer::kSaveLayerOrder[test_layer];
     int tool_index = 0;
+    // The original's bar has no tool selected until a button is pressed (the main bar and the arrow back to it mean
+    // "no command"), so a click on the map does nothing then. The flat list always has one.
+    bool tool_armed = true;
 
     try {
         if (new_career) {
@@ -1274,6 +1291,20 @@ int main(int argc, char** argv) {
                                 screenshot_path.empty() ? window_mode_of(settings.window_mode)
                                                         : platform::WindowMode::Windowed);
         window.set_vsync(settings.frame_cap == 0);
+        window.set_icon(viewer::kWindowIcon, viewer::kWindowIconSize);
+        if (!intro_shot_path.empty()) {
+            std::vector<uint8_t> shot;
+            viewer::run_intro(window, kLogicalW, kLogicalH, have_font ? &game_font : nullptr, 0, &shot);
+            stbi_write_png(intro_shot_path.c_str(), kLogicalW, kLogicalH, 3, shot.data(), kLogicalW * 3);
+            std::printf("wrote intro screenshot to %s\n", intro_shot_path.c_str());
+            return 0;
+        }
+        // The title, for a couple of seconds, before the start screen.
+        if (screen == Screen::Start && screenshot_path.empty() && !no_intro && run_months == 0 &&
+            !viewer::run_intro(window, kLogicalW, kLogicalH, have_font ? &game_font : nullptr)) {
+            SDL_Quit();
+            return 0;
+        }
 
         // Toolbar. Sized from the physical window (or an explicit
         // --ui-scale), but laid out in LOGICAL coordinates, which is what
@@ -1293,7 +1324,8 @@ int main(int argc, char** argv) {
             return ui::metrics_for(bp);
         };
         ui::Metrics metrics = toolbar_metrics();
-        ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH);
+        ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
+        if (toolbar.original_bar()) tool_armed = false;
         int hovered = -1;
         if (save_mode) {
             std::printf("toolbar: %s scale=%dx  %d buttons (%dx%d px) in %d row(s), panel %d px tall\n",
@@ -1497,8 +1529,11 @@ int main(int argc, char** argv) {
             if (screenshot_path.empty()) window.set_mode(window_mode_of(settings.window_mode));
             window.set_vsync(settings.frame_cap == 0);
             metrics = toolbar_metrics();
-            toolbar = ui::Toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH);
-            toolbar.show_tool(tool_index);
+            const int bar_page = toolbar.bar_page();
+            toolbar = ui::Toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
+            if (toolbar.original_bar()) toolbar.set_bar_page(bar_page);
+            else toolbar.show_command(kBuildTools[tool_index]);
+            if (!toolbar.original_bar()) tool_armed = true;
             cam.visible_h = kLogicalH - toolbar.panel().h;
             cam.clamp();
             for (const ui::Catalog& c : languages)
@@ -1687,7 +1722,7 @@ int main(int argc, char** argv) {
             }
             return;
         }
-        if (!save_mode || screen != Screen::City || drag_last_x < 0) return;
+        if (!save_mode || screen != Screen::City || drag_last_x < 0 || !tool_armed) return;
         const auto tool = kBuildTools[tool_index];
         if (systems::construction::placement_spec(tool).kind !=
             systems::construction::PlacementKind::DragAutoTiled) {
@@ -1740,8 +1775,8 @@ int main(int argc, char** argv) {
         }
         const auto drag_tool_here = [&]() {
             if (screen == Screen::City)
-                return systems::construction::placement_spec(kBuildTools[tool_index]).kind ==
-                       systems::construction::PlacementKind::DragAutoTiled;
+                return tool_armed && systems::construction::placement_spec(kBuildTools[tool_index]).kind ==
+                                         systems::construction::PlacementKind::DragAutoTiled;
             if (screen == Screen::Province) {
                 const int id = kProvinceCommands[province_command].id;
                 return id == 35 || id == 36 || id == 37 || id == 42;
@@ -1937,13 +1972,47 @@ int main(int argc, char** argv) {
                 return;
             }
             if (hit >= 0) {
-                if (hit == tool_index && cycle_variant()) return;  // tapping the selected button again
-                tool_index = hit;
+                const ui::BarButton button = toolbar.entry(hit);
+                switch (button.kind) {
+                    case ui::BarKind::Page:  // 0x26, 0x27: another page of the bar, and no command
+                        toolbar.set_bar_page(button.page);
+                        tool_armed = false;
+                        play_effect(0);
+                        return;
+                    case ui::BarKind::Back:  // command 1, the main bar
+                        toolbar.set_bar_page(0);
+                        tool_armed = false;
+                        play_effect(0);
+                        return;
+                    case ui::BarKind::Go:
+                        play_effect(0);
+                        switch_to(button.command == systems::construction::CommandId::GoToProvince ? 1
+                                  : button.command == systems::construction::CommandId::Maps       ? 2
+                                                                                                   : 3);
+                        return;
+                    case ui::BarKind::Files:
+                        play_effect(0);
+                        switch_to(4);
+                        return;
+                    case ui::BarKind::Tool: break;
+                }
+                if (!button.available) {
+                    std::printf("tool: %s isn't in Gaius yet\n", systems::construction::command_name(button.command));
+                    return;
+                }
+                int picked = -1;
+                for (int k = 0; k < kBuildToolCount; ++k)
+                    if (kBuildTools[k] == button.command) picked = k;
+                if (picked < 0) return;
+                if (tool_armed && picked == tool_index && cycle_variant()) return;  // tapping the selected button again
+                tool_index = picked;
+                tool_armed = true;
                 std::printf("tool: %s\n", systems::construction::command_name(kBuildTools[tool_index]));
                 play_effect(0);  // 0x0FFA5
                 return;
             }
             if (toolbar.contains(lx, ly)) return;  // panel background, not a button
+            if (!tool_armed) return;               // no command chosen: the map does nothing
 
             int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / city_cell_px;
             int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / city_cell_px;
@@ -2009,6 +2078,8 @@ int main(int argc, char** argv) {
 
         Uint32 last_step_ms = SDL_GetTicks();
         Uint32 last_pad_ms = SDL_GetTicks();
+        Uint32 last_scroll_ms = SDL_GetTicks();
+        Uint32 edge_since = 0;  // when the pointer reached the window's edge, 0 while it is not there
         Uint32 last_frame_ms = SDL_GetTicks();
         double pad_pointer_x = 0, pad_pointer_y = 0;
         bool pad_pointer_moved = false;
@@ -2080,7 +2151,8 @@ int main(int argc, char** argv) {
                             play_effect(0);
                         } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + kBuildToolCount - 1) % kBuildToolCount;
-                            toolbar.show_tool(tool_index);
+                            tool_armed = true;
+                            toolbar.show_command(kBuildTools[tool_index]);
                             play_effect(0);
                         }
                         break;
@@ -2196,7 +2268,8 @@ int main(int argc, char** argv) {
                             play_effect(0);
                         } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + 1) % kBuildToolCount;
-                            toolbar.show_tool(tool_index);
+                            tool_armed = true;
+                            toolbar.show_command(kBuildTools[tool_index]);
                             std::printf("build tool: %s\n",
                                         systems::construction::command_name(kBuildTools[tool_index]));
                             play_effect(0);
@@ -2290,6 +2363,55 @@ int main(int argc, char** argv) {
                 if (key >= 0 && !active_buttons.empty()) {
                     const int fired = ui::process_buttons(active_buttons, button_tracker, pointer);
                     if (fired >= 0) on_button(key, fired);
+                }
+            }
+
+            // Scrolling the map: the arrow keys and WASD, and the mouse resting at the window's edge (after a short
+            // pause, so passing over the edge on the way to a button or the title bar does nothing), at the scroll
+            // speed of the original's options. Held buttons (a drag, a build) keep the pointer from scrolling.
+            {
+                const Uint32 scroll_now = SDL_GetTicks();
+                const double scroll_dt = std::min(0.1, (scroll_now - last_scroll_ms) / 1000.0);
+                last_scroll_ms = scroll_now;
+                double sx = 0, sy = 0;
+                const bool map_view = screen == Screen::City || screen == Screen::Province;
+                const bool focused = (SDL_GetWindowFlags(window.sdl_window()) & SDL_WINDOW_INPUT_FOCUS) != 0;
+                if (map_view && focused && !platform::text_entry()) {
+                    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+                    if (keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A]) sx -= 1;
+                    if (keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D]) sx += 1;
+                    if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) sy -= 1;
+                    if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) sy += 1;
+                    double ex = 0, ey = 0;
+                    int mx = 0, my = 0, pw_edge = 0, ph_edge = 0;
+                    const Uint32 mouse = SDL_GetMouseState(&mx, &my);
+                    window.physical_size(&pw_edge, &ph_edge);
+                    constexpr int kEdgePx = 6;
+                    if (settings.edge_scroll && mouse == 0 && SDL_GetMouseFocus() == window.sdl_window()) {
+                        if (mx <= kEdgePx) ex = -1;
+                        else if (mx >= pw_edge - 1 - kEdgePx) ex = 1;
+                        if (my <= kEdgePx) ey = -1;
+                        else if (my >= ph_edge - 1 - kEdgePx) ey = 1;
+                    }
+                    if (ex != 0 || ey != 0) {
+                        if (edge_since == 0) edge_since = scroll_now;
+                        if (scroll_now - edge_since >= 250) {
+                            sx += ex;
+                            sy += ey;
+                        }
+                    } else {
+                        edge_since = 0;
+                    }
+                } else {
+                    edge_since = 0;
+                }
+                if (sx != 0 || sy != 0) {
+                    Camera& c = screen == Screen::Province ? pcam : cam;
+                    const double speed = 120.0 + 4.0 * game_options.scroll_speed();  // logical pixels a second at zoom 1
+                    const double norm = sx != 0 && sy != 0 ? 0.7071 : 1.0;
+                    c.x += sx * norm * speed * scroll_dt / c.zoom;
+                    c.y += sy * norm * speed * scroll_dt / c.zoom;
+                    c.clamp();
                 }
             }
 
@@ -2556,7 +2678,8 @@ int main(int argc, char** argv) {
                     city_image_dirty = false;
                 }
                 render_sprite_view(city_image, sprites.palette, cam, frame);
-                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
+                ui::render(toolbar, tool_armed ? toolbar.index_of(kBuildTools[tool_index]) : -1, hovered,
+                           viewer::heat_color, frame, kLogicalW, kLogicalH,
                            have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
                            have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
             } else if (save_mode) {
@@ -2567,7 +2690,8 @@ int main(int argc, char** argv) {
                 // world math stays a single uniform mapping; the panel
                 // simply occludes the bottom, and handle_select_logical
                 // keeps clicks there from reaching the occluded cells.
-                ui::render(toolbar, tool_index, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
+                ui::render(toolbar, tool_armed ? toolbar.index_of(kBuildTools[tool_index]) : -1, hovered,
+                           viewer::heat_color, frame, kLogicalW, kLogicalH,
                            have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
                            have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
             } else {

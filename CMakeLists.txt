@@ -146,6 +146,8 @@ add_library(gaius_platform_rules STATIC platform/path_rules.cpp)
 target_include_directories(gaius_platform_rules PUBLIC ${PROJECT_SOURCE_DIR})
 
 add_library(gaius_platform STATIC
+  platform/console.cpp
+  platform/game_detect.cpp
   platform/window.cpp
   platform/input.cpp
   platform/paths.cpp
@@ -154,6 +156,10 @@ add_library(gaius_platform STATIC
 target_link_libraries(gaius_platform PUBLIC gaius_platform_rules)
 target_include_directories(gaius_platform PUBLIC ${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(gaius_platform PUBLIC ${SDL2_LIBRARIES})
+if(WIN32)
+  # The registry, the folder dialog and the title bar's theme (platform/game_detect.cpp, window.cpp).
+  target_link_libraries(gaius_platform PUBLIC advapi32 ole32 shell32 uuid)
+endif()
 target_compile_options(gaius_platform PUBLIC ${SDL2_CFLAGS_OTHER})
 
 set(GAIUS_GAME_LIBS gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform
@@ -169,6 +175,19 @@ endif()
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
 target_link_libraries(gaius_viewer PRIVATE ${GAIUS_GAME_LIBS})
+if(WIN32)
+  # The icon and the version strings (apps/viewer/gaius.rc; the icon is drawn by packaging/icon/make_icon.py).
+  enable_language(RC)
+  target_sources(gaius_viewer PRIVATE apps/viewer/gaius.rc)
+  # A GUI program: no console window behind the game (platform/console.hpp borrows the terminal's when there is
+  # one). The entry stays `main`, which SDL's SDL2main or the CRT provides either way.
+  set_target_properties(gaius_viewer PROPERTIES WIN32_EXECUTABLE ON)
+  if(MSVC)
+    target_link_options(gaius_viewer PRIVATE /ENTRY:mainCRTStartup)
+  else()
+    target_link_options(gaius_viewer PRIVATE -mwindows)
+  endif()
+endif()
 # The language files sit beside the executable (ui/strings.hpp).
 add_custom_command(TARGET gaius_viewer POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/lang $<TARGET_FILE_DIR:gaius_viewer>/lang)
