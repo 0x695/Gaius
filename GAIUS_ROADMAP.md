@@ -24,7 +24,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | **Done** | Checks on real hardware: an Android phone, a Steam Deck |
-| 10 | Tooling scripts | **Done** | The IGA entry is drafted (`docs/IGA_ENTRY.md`), not yet applied in that project |
+| 10 | Tooling scripts | **Done** | IGA format pages for Caesar (its row links here for now) |
 
 **1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
 
@@ -337,7 +337,7 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 
 ## Phase 10 — Tooling scripts
 
-**Status: Done** (2026-10-02). Left: applying the IGA entry, which is that project's content (`docs/IGA_ENTRY.md` has it drafted).
+**Status: Done** (2026-10-02). Left, in the IGA's own repository: format pages for Caesar.
 
 **Goal:** simple tooling for players and modders: a collection of scripts over the command-line tools `tools/` already builds, not an editor or an embedding API.
 
@@ -348,8 +348,10 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 - [x] **Checks** — `check_saves.py` runs `sim_check` on every save and `month_check` on every pair up to two months apart (both ways round within a month): all 17 real saves rebuild exactly but `CAESARXS` and `CAESARXW`, which were written between a month's steps; the six `UX` saves chain. `sim_check` and `month_check` now exit 0 on a match, 1 on a difference; `sim_check`'s verdict doesn't include the population count, which a mid-month save legitimately differs on.
 - [x] **Tools** — new: `dump_voc`, `save_diff`, `save_inspect --summary` (and the global words are named in its full dump); `dump_pl8` reads `.PL1` and has `--cols` and `--frames`.
 
+- [x] **IGA entry** (2026-10-02) — Gaius is an engine project on the IGA's Caesar hub, the "wanted" callout is gone, the assets format row moved from undocumented to partial (linking `docs/FORMATS.md`), and a devlog entry says so, with the same disclosure the IGA's rules call for (a sibling project by the same author). Recorded in `docs/IGA_ENTRY.md`.
+
 **Open**
-- [ ] **IGA entry** — the record for `engine-projects.json`, and what it makes untrue in the IGA (Caesar I's "wanted" text, its `CLAUDE.md`), are drafted in `docs/IGA_ENTRY.md`; applying them is that project's change.
+- [ ] **IGA format pages** — `.VPX`, `.PL8`, palettes, `.SAV` and `EMPIRE2` have written specs here (`docs/FORMATS.md`, the findings) but no page on the IGA yet; each needs its "what this can't tell you" callout. That is work in the IGA, not here.
 
 **Deliverable:** the game's files and saves inspectable and exportable from a few scripts.
 
