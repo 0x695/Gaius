@@ -99,6 +99,25 @@ struct Notice {
     bool alternate = false; // advice whose condition holds shows its other text
 };
 
+// The 16 news lines and the 10 advice lines the notice screen draws, 40-character records as the executable holds them
+// (flat 0x7618A and 0x7640B); drawn at (0, 186) in the large font over ROME1.VPX (news) or ROME2.VPX (advice). Advice
+// topic t has records 2t and 2t + 1, the second for its alternate condition.
+inline constexpr std::array<const char*, 16> kNewsText = {
+    " ROME-Barbarians overunning the East.   ", " ROME-The Emperor is dangerously ill.   ",
+    " ROME-The Emperor is dead.              ", " ROME-Major uprisings in Gaul.          ",
+    " ROME-Carthaginian fleet sunk off Malta.", " ROME-Ides of March plot  uncovered.    ",
+    " ROME-Mutiny by 73rd legion put down.   ", " ROME-Emperor's nephew marries a horse!.",
+    " ROME-Senator Publius found murdered.   ", " ROME-Religious nazarene held in Judea. ",
+    " ROME-Elephants spotted in the Alps!    ", " ROME-Praetorian guard sent to Epirus.  ",
+    " ROME-10000 Christians fed to the lions.", " ROME-Trouble at the Campus Martius.    ",
+    " ROME-Pantheon built in Capital.        ", " ROME-Locals revolting in Germanicus.   "};
+inline constexpr std::array<const char*, 10> kAdviceText = {
+    " LOCAL-The emperor wants a road to Rome ", " LOCAL-Now all roads lead to Rome ?!!.  ",
+    " LOCAL-More investment needed in roads. ", " LOCAL-Roads are promoting good trade.  ",
+    " LOCAL-Locals are demanding a new fort. ", " LOCAL-Unrest decreasing in the region. ",
+    " LOCAL-The walls are in poor repair.    ", " LOCAL-Province workers lying idle.     ",
+    " LOCAL-People demand straighter roads!. ", " LOCAL-The roads engineer is happy!.    "};
+
 // 0x2933B: when the year reaches DS:0x6C98, the next notice is set (walk & 7)
 // + 1 years on and the screen 0x09AFD shows, by the last draw's low bit, news
 // (topic += low7 & 4, back to 0 past 15) or advice (topic cycles 0-4; its

@@ -78,14 +78,15 @@ inline constexpr int kPreviousPage = -2, kNextPage = -3;
 // Forum, save and load, maps, clear land, housing, bath houses, and a button
 // for each of the other two pages), the infrastructure page (a back arrow,
 // then road, plaza, reservoir, well, fountain, wall, tower, barracks,
-// prefecture and forum) and the culture page (a back arrow, then temple,
+// prefecture and forum) and the construction page (a back arrow, then temple,
 // hospital, school, oracle, heavy industry, market, workshop, theater,
 // coliseum and hippodrome). Pressing a building's button keeps the page, so
 // several can be placed in a row; the arrow goes back to the main bar. The
 // pages and their icons are the executable's own tables (renderer findings
-// section 7); the names "infrastructure" and "culture" for the two page
-// buttons are Gaius's reading of their icons (I with an arrow, C with a
-// cross), since the executable has no text for them.
+// section 7). The page buttons are named "Infrastructure" and
+// "Construction": the plaque the original shows at the top right while the
+// pointer is over them (DOSBox captures, 2026-10-02); the executable's
+// string table has no text for them.
 enum class BarKind {
     Tool,   // selects a placing command
     Page,   // turns to another page of the bar
@@ -96,6 +97,10 @@ enum class BarKind {
 
 inline constexpr int kBarSlots = 11;
 inline constexpr int kBarPages = 3;
+// The bar's own geometry (0x211CB, findings section 46): the panel is the bottom 24 rows of the screen, a button's
+// 16 x 16 icon is drawn at x = 8 + 24 * slot, 4 rows into it, and the funds are a five-digit number at (268, 184).
+inline constexpr int kBarPanelH = 24, kBarPitch = 24, kBarX0 = 8, kBarIconPx = 16, kBarIconY = 4;
+inline constexpr int kBarFundsX = 268, kBarFundsY = 184;
 
 struct BarButton {
     BarKind kind = BarKind::Tool;
@@ -110,8 +115,9 @@ const std::vector<BarButton>& original_bar_page(int page);
 
 class Toolbar {
 public:
-    // With `original_bar` the toolbar is the original's paged bar (above) when its 11 slots fit the panel at this
-    // scale -- on the desktop's -- and otherwise the flat list of `tools`, which pages by arrows when it overflows.
+    // With `original_bar` the toolbar is the original's paged bar (above) at the desktop's 1x scale -- its 24-row panel
+    // and 24-pixel pitch, as the original lays it out -- and otherwise the flat list of `tools`, which pages by arrows
+    // when it overflows.
     Toolbar(const systems::construction::CommandId* tools, int count, Metrics m, int screen_w, int screen_h,
             bool original_bar = false);
 
@@ -199,6 +205,19 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
 // the original never lets a label overflow a fixed-width bar. Dropped
 // silently otherwise, so a very long tool name never doubles up with a
 // clipped, unreadable funds figure.
+
+// The game's own pictures of the bar's panel, drawn under the buttons: PANEL1A.VPX (the main bar) and PANEL1B.VPX
+// (the infrastructure and construction pages), both 320 x 200 in the city palette, of which the bottom 24 rows show.
+struct BarArt {
+    formats::IndexedImage main;
+    formats::IndexedImage build;
+};
+
+// Draws the original's paged bar -- only when `bar.original_bar()` -- over a frame: the panel, each button's POINTERS
+// icon at its place, the chosen command's thin frame, and the funds at (268, 184). `selected` is a button index or -1.
+void render_original_bar(const Toolbar& bar, int selected, const BarArt* art, const formats::PL8Sheet* icons,
+                         const formats::Palette* palette, const GameFont* font, int funds, std::vector<uint8_t>& rgb, int w,
+                         int h);
 
 // The POINTERS.PL8 frame the original's control panel shows for a command, or
 // -1 if it has no button. Read from the panel's button tables (DS:0x1178,

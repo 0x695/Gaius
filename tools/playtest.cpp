@@ -232,6 +232,7 @@ struct Game {
         bool placed = false;
         switch (tool) {
             case CommandId::Road: placed = construction::place_road(state.city, drag, x, y); break;
+            case CommandId::ReservoirPipe: placed = construction::place_pipe(state.city, drag, x, y); break;
             case CommandId::Wall: placed = construction::place_wall(state.city, drag, x, y); break;
             case CommandId::Plaza: placed = construction::place_plaza(state.city, x, y); break;
             case CommandId::ClearArea: placed = construction::clear_area(state, sim.random, x, y); break;
@@ -487,7 +488,7 @@ char city_char(const model::CityState& s, int x, int y) {
     if (t <= 0x35) return '.';
     if (t >= 0x36 && t <= 0x43) return '#';
     if (t >= 0x44 && t < 0x5E) return '=';
-    if (t == 0xA4) return 'w';
+    if (t == 0xA4 || t == 0xB8) return 'w';
     if (t >= 0xC8 && t <= 0xCB) return 'h';
     if (t >= 0xCC && t <= 0xD7) return 'H';
     if (t >= 0xE0 && t <= 0xE7) return 'F';
@@ -692,10 +693,11 @@ struct Bot {
 
         for (const Block& b : blocks) {
             if (b.type == 'H') {
-                // reservoirs along the bottom row, every 7 columns, markets in odd blocks every 12
-                const int ry = b.y0 + b.h - 1;
+                // wells along the bottom row, every 3 columns, markets in odd blocks every 12
+                const int ry = b.y0 + b.h / 2;
                 for (int x = x_lo; x <= x_hi; ++x) {
-                    const int dx = ((x - (fx + 3 + 3 * (std::abs(b.k) & 1))) % 7 + 7) % 7;
+                    static const int step = std::getenv("PT_WELL_STEP") ? std::atoi(std::getenv("PT_WELL_STEP")) : 3;
+                    const int dx = ((x - (fx + 3 * (std::abs(b.k) & 1))) % step + step) % step;
                     if (dx == 0 && role[ry][x] == 'h') role[ry][x] = 'w';
                 }
                 if ((std::abs(b.k) & 1) == 1) {
@@ -887,7 +889,8 @@ struct Bot {
         }
     }
 
-    // Reservoirs (water to radius 3) along the strip's bottom row, every seven columns.
+    // Wells (water to the cells next to them) along the strip's bottom row, every third column. A reservoir only goes on
+    // water and pipes carry its water to fountains, so a city's own water is wells unless a lake is at hand.
     void water_for(int x, int y) {
         const Block* bk = nullptr;
         for (const Block& b : blocks)
@@ -896,16 +899,16 @@ struct Bot {
                 break;
             }
         if (!bk || bk->type != 'H') return;
-        const int ry = bk->y0 + bk->h - 1;
+        const int ry = bk->y0 + bk->h / 2;  // the middle row of a three-row strip, the lower of two
         for (int cx = std::max(0, x - 6); cx <= std::min(model::kCityW - 1, x + 6); ++cx) {
-            if (role[ry][cx] != 'w' || s.city.tile[ry][cx] == 0xA4 || !grass(s, cx, ry)) continue;
+            if (role[ry][cx] != 'w' || s.city.tile[ry][cx] == 0xB8 || !grass(s, cx, ry)) continue;
             const int before = funds();
-            if (g.place_tool(CommandId::ReservoirPipe, cx, ry)) spent["reservoirs"] += before - funds();
+            if (g.place_tool(CommandId::Well, cx, ry)) spent["wells"] += before - funds();
         }
     }
 
     bool put(CommandId tool, int x, int y, const char* what) {
-        if (lazy_roads && tool != CommandId::Road && tool != CommandId::ReservoirPipe && tool != CommandId::Plaza &&
+        if (lazy_roads && tool != CommandId::Road && tool != CommandId::Well && tool != CommandId::Plaza &&
             tool != CommandId::Oracle && tool != CommandId::Hippodrome && tool != CommandId::School && tool != CommandId::Theater &&
             tool != CommandId::Coliseum) {
             road_label = what;
@@ -947,8 +950,8 @@ struct Bot {
     int reservoirs_in(int r) {
         int n = 0;
         for (const Pt& p : reservoir_queue)
-            if (within(p.x, p.y, r) && s.city.tile[p.y][p.x] != 0xA4 && grass(s, p.x, p.y))
-                n += put(CommandId::ReservoirPipe, p.x, p.y, "reservoirs");
+            if (within(p.x, p.y, r) && s.city.tile[p.y][p.x] != 0xB8 && grass(s, p.x, p.y))
+                n += put(CommandId::Well, p.x, p.y, "wells");
         return n;
     }
 
@@ -1823,7 +1826,7 @@ struct Bot {
         reach += 3;
         const int r = roads_in(reach), w = reservoirs_in(reach);
         char b[100];
-        std::snprintf(b, sizeof b, "expanding to reach %d: roads %d reservoirs %d", reach, r, w);
+        std::snprintf(b, sizeof b, "expanding to reach %d: roads %d wells %d", reach, r, w);
         if (std::getenv("PT_QUIET") == nullptr) std::puts(b);
         return true;
     }

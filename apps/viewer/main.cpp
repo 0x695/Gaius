@@ -93,6 +93,7 @@
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
 #include "apps/viewer/intro.hpp"
+#include "apps/viewer/overlays.hpp"
 #include "apps/viewer/window_icon.hpp"
 #include "platform/console.hpp"
 #include "platform/game_import.hpp"
@@ -337,6 +338,8 @@ int main(int argc, char** argv) {
     std::vector<TestBuild> test_builds;  // repeatable: --test-build may appear many times
     struct TestClick { int x, y; };
     std::vector<TestClick> test_clicks;  // logical-space clicks, for headless UI tests
+    int test_hover_x = -1, test_hover_y = -1;  // --test-hover X Y: the pointer, in logical coordinates
+    int test_notice_kind = 0, test_notice_topic = 0, test_notice_alt = 0;  // --test-notice KIND TOPIC [ALT]
     int ui_scale_override = -1;          // -1 = use the size heuristic
     std::string assets_dir;
     int run_months = 0;
@@ -399,6 +402,15 @@ int main(int argc, char** argv) {
             c.x = std::atoi(argv[++i]);
             c.y = std::atoi(argv[++i]);
             test_clicks.push_back(c);
+        }
+        if (std::strcmp(argv[i], "--test-hover") == 0 && i + 2 < argc) {
+            test_hover_x = std::atoi(argv[++i]);
+            test_hover_y = std::atoi(argv[++i]);
+        }
+        if (std::strcmp(argv[i], "--test-notice") == 0 && i + 2 < argc) {
+            test_notice_kind = std::atoi(argv[++i]);
+            test_notice_topic = std::atoi(argv[++i]);
+            if (i + 1 < argc && argv[i + 1][0] != '-') test_notice_alt = std::atoi(argv[++i]);
         }
         if (std::strcmp(argv[i], "--ui-scale") == 0 && i + 1 < argc) {
             std::string v = argv[++i];
@@ -479,6 +491,11 @@ int main(int argc, char** argv) {
     bool have_name_art = false;
     ui::InterfaceArt interface_art;  // the original's advisor screens
     bool have_interface_art = false;
+    ui::BarArt bar_art;  // PANEL1A.VPX and PANEL1B.VPX: the city bar's panel
+    bool have_bar_art = false;
+    formats::IndexedImage rome_news, rome_advice;  // ROME1.VPX and ROME2.VPX: the yearly notice's pictures
+    formats::Palette rome_palette;                 // ROME1.256
+    bool have_rome = false;
     ui::RatingsArt ratings_art;      // TEMPLE.VPX and its columns
     bool have_ratings_art = false;
     formats::IndexedImage governor_picture;  // C_VITAE.VPX
@@ -557,6 +574,25 @@ int main(int argc, char** argv) {
                 try {
                     battle_art = ui::load_battle_art(dir);
                     have_battle_art = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    bar_art.main = formats::vpx::decode(asset("PANEL1A.VPX")).image;
+                    bar_art.build = formats::vpx::decode(asset("PANEL1B.VPX")).image;
+                    have_bar_art = true;
+                } catch (const formats::FormatError&) {
+                }
+                try {
+                    rome_news = formats::vpx::decode(asset("ROME1.VPX")).image;
+                    rome_advice = formats::vpx::decode(asset("ROME2.VPX")).image;
+                    rome_palette = formats::pal256::load(asset("ROME1.256"));
+                    // The file keeps entries 1-31 and 234-254 as a placeholder green: the engine fills them with the
+                    // interface colours (SHADE.256's), which is why the large font reads dark on this screen.
+                    for (size_t i = 1; i < 255; ++i) {
+                        const formats::RGB c = rome_palette.colors[i];
+                        if (c.r == 0 && c.g > 200 && c.b == 0) rome_palette.colors[i] = sprites.palette.colors[i];
+                    }
+                    have_rome = true;
                 } catch (const formats::FormatError&) {
                 }
                 try {
@@ -746,6 +782,7 @@ int main(int argc, char** argv) {
         bool placed = false;
         switch (tool) {
             case construction::CommandId::Road: placed = construction::place_road(state.city, drag, x, y); break;
+            case construction::CommandId::ReservoirPipe: placed = construction::place_pipe(state.city, drag, x, y); break;
             case construction::CommandId::Wall: placed = construction::place_wall(state.city, drag, x, y); break;
             case construction::CommandId::Plaza: placed = construction::place_plaza(state.city, x, y); break;
             case construction::CommandId::ClearArea: placed = construction::clear_area(state, sim.random, x, y); break;
@@ -766,8 +803,15 @@ int main(int argc, char** argv) {
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
     enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap,
-                        NameEntry, Settings };
+                        NameEntry, Settings, Choice, News };
     Screen settings_return = Screen::City;  // where Resume goes back to
+    bool choice_forum = true;               // the Choice screen: the Forum type menu, or the Industry type menu
+    bool choice_time = false;               // whether time was running when the menu opened
+    // The yearly notice screen (0x09AFD): kind 1 news or 2 advice, its topic, and where it returns to.
+    int news_kind = 0, news_topic = 0;
+    bool news_alternate = false, news_time = false;
+    Screen news_return = Screen::City;
+    int pointer_lx = -1, pointer_ly = -1;  // the pointer in logical coordinates, -1 outside the window
     viewer::SettingsView settings_view;
     settings_view.languages = languages;
     settings_view.game_dir = game_dir;
@@ -783,6 +827,10 @@ int main(int argc, char** argv) {
     bool notice_is_hints = false;         // the notice page shows the touch hints, not the funds warning
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
+    const auto leave_news = [&]() {
+        screen = news_return;
+        time_running = news_time;
+    };
     Screen files_return = Screen::Forum;  // where the save / load page goes back to
     bool files_saving = false;
     int funding_level = 0, start_difficulty = 0;  // the start screen's DS:0x6CBA and DS:0x6CB8
@@ -822,6 +870,17 @@ int main(int argc, char** argv) {
         // promotion screen, so the hook leaves it unanswered and stops time;
         // the answer is applied from there (administration::accept_promotion,
         // defer_promotion), which is all 0x29023 would have done with it.
+        sim.on_notice = [&](int kind, int topic, bool alternate) {
+            // The screen needs the pictures and the game's font; without them the notice passes unseen.
+            if (!have_rome || !have_interface_art || screen == Screen::News || screen == Screen::Promotion) return;
+            news_kind = kind;
+            news_topic = topic;
+            news_alternate = alternate;
+            news_return = screen;
+            news_time = time_running;
+            screen = Screen::News;
+            time_running = false;
+        };
         sim.on_promotion = [&](model::CityState&, bool to_caesar) {
             promotion_to_caesar = to_caesar;
             screen = Screen::Promotion;
@@ -950,6 +1009,7 @@ int main(int argc, char** argv) {
                 return name_return_to_forum ? viewer::forum_page(state, forum_tab, sim.speed, rating_hint)
                                             : viewer::start_page(funding_level, start_difficulty, governor_name);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons);
+            case Screen::Choice: return viewer::choice_page(choice_forum, choice_forum ? forum_grade : workshop_goods);
             case Screen::Settings: {
                 viewer::SettingsView v = settings_view;
                 v.messages_on = model::global_word(state, 0x6C78) != 0;
@@ -969,11 +1029,14 @@ int main(int argc, char** argv) {
                 (forum_tab == viewer::kGovernor && have_governor_picture) ||
                 (forum_tab == viewer::kLegion && have_province_sprites));
     };
+    // The type menus are drawn over the city when the original's art is there, and as a page when it is not.
+    const auto choice_overlay = [&]() { return have_interface_art && have_sprites; };
     const auto page_screen = [&]() {
+        if (screen == Screen::Choice && choice_overlay()) return false;
         return screen == Screen::Forum || screen == Screen::Promotion ||
                (screen == Screen::Battle && !have_battle_art) ||
                screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files ||
-               screen == Screen::Notice || screen == Screen::Settings;
+               screen == Screen::Notice || screen == Screen::Settings || screen == Screen::Choice;
     };
     auto apply_page_action = [&](int action) {
         namespace admin = systems::administration;
@@ -1486,6 +1549,21 @@ int main(int argc, char** argv) {
             order_cohort = patrol_x = patrol_y = -1;
             province_image_dirty = true;
         };
+        // The Select Forum Type / Select Industry Type menus: the chosen type becomes the command; Cancel leaves none.
+        const auto choose_type = [&](int action) {
+            screen = Screen::City;
+            time_running = choice_time;
+            const int option = action - viewer::kActionChoice;
+            if (option < 0 || option > 7) return;
+            const auto command = choice_forum ? systems::construction::CommandId::Forum : systems::construction::CommandId::Workshop;
+            (choice_forum ? forum_grade : workshop_goods) = option;
+            for (int k = 0; k < kBuildToolCount; ++k)
+                if (kBuildTools[k] == command) tool_index = k;
+            tool_armed = true;
+            toolbar.show_command(command);
+            std::printf("tool: %s\n", tool_label().c_str());
+            play_effect(0);
+        };
 
         // The original screens' button tables: which one is running, and
         // what each button does (its handler).
@@ -1835,6 +1913,15 @@ int main(int argc, char** argv) {
                 screen = have_forum_picture ? Screen::ForumHall : Screen::City;
                 return;
             }
+            if (screen == Screen::News) {
+                leave_news();  // 0x09AFD waits for a click
+                return;
+            }
+            if (screen == Screen::Choice && choice_overlay()) {
+                const int item = viewer::type_menu_item(lx, ly);
+                if (item >= 0) choose_type(viewer::kActionChoice + item);
+                return;
+            }
             if (screen == Screen::Notice && have_interface_art && !notice_is_hints) {
                 apply_page_action(viewer::kActionContinue);  // 0x084B1 waits for a click
                 return;
@@ -1845,6 +1932,8 @@ int main(int argc, char** argv) {
                 if (action >= 0) {
                     if (screen == Screen::Settings) {
                         on_settings_action(action);
+                    } else if (screen == Screen::Choice) {
+                        choose_type(action);
                     } else {
                         apply_page_action(action);
                     }
@@ -1880,7 +1969,7 @@ int main(int argc, char** argv) {
                 city_image_dirty = province_image_dirty = true;
                 return;
             }
-            if (const int tab = strip_hit(lx, ly); tab >= 0) {
+            if (const int tab = (screen == Screen::City && toolbar.original_bar()) ? -1 : strip_hit(lx, ly); tab >= 0) {
                 switch_to(tab);
                 return;
             }
@@ -2000,6 +2089,22 @@ int main(int argc, char** argv) {
                     std::printf("tool: %s isn't in Gaius yet\n", systems::construction::command_name(button.command));
                     return;
                 }
+                if (button.command == systems::construction::CommandId::Forum ||
+                    button.command == systems::construction::CommandId::Workshop) {
+                    // 0x1770D / 0x17931: the type menu opens, unless the limit of 30 is reached (then the button does nothing).
+                    namespace msg = systems::messages;
+                    const bool forum = button.command == systems::construction::CommandId::Forum;
+                    if (model::global_word(state, forum ? 0x6CA0 : 0x6C9E) >= 30) {
+                        sim.messages.post(msg::plain(forum ? msg::Id::NoForum : msg::Id::NoFactory));
+                        return;
+                    }
+                    choice_forum = forum;
+                    choice_time = time_running;
+                    time_running = false;
+                    screen = Screen::Choice;
+                    play_effect(0);
+                    return;
+                }
                 int picked = -1;
                 for (int k = 0; k < kBuildToolCount; ++k)
                     if (kBuildTools[k] == button.command) picked = k;
@@ -2059,10 +2164,18 @@ int main(int argc, char** argv) {
             std::printf("--test-click (%d,%d): ", c.x, c.y);
             handle_select_logical(c.x, c.y, true);
         }
+        if (test_hover_x >= 0) {
+            pointer_lx = test_hover_x;
+            pointer_ly = test_hover_y;
+            hovered = screen == Screen::City ? toolbar.hit_test(pointer_lx, pointer_ly) : -1;
+        }
+        if (save_mode && test_notice_kind > 0 && sim.on_notice) sim.on_notice(test_notice_kind, test_notice_topic, test_notice_alt != 0);
         for (int action : test_actions) {
             std::printf("--test-action %d\n", action);
             if (save_mode && screen == Screen::Settings) {
                 on_settings_action(action);
+            } else if (save_mode && screen == Screen::Choice) {
+                choose_type(action);
             } else if (save_mode && page_screen()) {
                 apply_page_action(action);
             }
@@ -2130,6 +2243,10 @@ int main(int argc, char** argv) {
                         // screen, or back out of it.
                         if (!save_mode) {
                             running = false;
+                        } else if (screen == Screen::News) {
+                            leave_news();
+                        } else if (screen == Screen::Choice) {
+                            choose_type(viewer::kActionBack);
                         } else if (screen == Screen::Settings) {
                             if (settings_view.confirm != viewer::SettingsView::Confirm::None)
                                 settings_view.confirm = viewer::SettingsView::Confirm::None;
@@ -2187,6 +2304,14 @@ int main(int argc, char** argv) {
                             } else if (settings_return != Screen::Start) {
                                 screen = settings_return;
                             }
+                            break;
+                        }
+                        if (save_mode && screen == Screen::News) {
+                            leave_news();
+                            break;
+                        }
+                        if (save_mode && screen == Screen::Choice) {
+                            choose_type(viewer::kActionBack);  // no command chosen
                             break;
                         }
                         if (save_mode && message_visible()) {
@@ -2286,9 +2411,14 @@ int main(int argc, char** argv) {
                         handle_select_logical(lx, ly, false);
                         break;
                     }
-                    case platform::CommandType::SelectMove:
+                    case platform::CommandType::SelectMove: {
+                        int lx = 0, ly = 0;
+                        const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
+                        pointer_lx = inside ? lx : -1;
+                        pointer_ly = inside ? ly : -1;
                         select_move(cmd->x, cmd->y);
                         break;
+                    }
                     case platform::CommandType::CancelDrag:
                         cancel_drag();
                         break;
@@ -2296,6 +2426,10 @@ int main(int argc, char** argv) {
                         if (!save_mode) break;
                         int lx = 0, ly = 0;
                         const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
+                        pointer_lx = inside ? lx : -1;
+                        pointer_ly = inside ? ly : -1;
+                        // The game's own pointer is drawn over the picture; the system's goes while it is there.
+                        if (have_icons && have_sprites && !cmd->touch) SDL_ShowCursor(inside ? SDL_DISABLE : SDL_ENABLE);
                         hovered = inside && screen == Screen::City ? toolbar.hit_test(lx, ly) : -1;
                         page_hovered = -1;
                         hall_hover = inside && screen == Screen::ForumHall ? forum_clicks.region_at(lx, ly) : 0;
@@ -2567,6 +2701,15 @@ int main(int argc, char** argv) {
                     city_image_dirty = province_image_dirty = true;
                 }
                 ui::compose_battle(battle_screen, state, battle_art, frame);
+            } else if (save_mode && screen == Screen::News) {
+                // 0x09AFD: the picture (ROME1 for news, ROME2 for advice) and the line at (0, 186) in the large font.
+                formats::IndexedImage picture = news_kind == 1 ? rome_news : rome_advice;
+                const char* line = news_kind == 1
+                                       ? systems::administration::kNewsText[static_cast<size_t>(std::clamp(news_topic, 0, 15))]
+                                       : systems::administration::kAdviceText[static_cast<size_t>(
+                                             std::clamp(news_topic, 0, 4) * 2 + (news_alternate ? 1 : 0))];
+                ui::draw_text(picture, interface_art, ui::Font::Font1, 0, 186, line);
+                ui::canvas_to_rgb(picture, rome_palette, frame);
             } else if (save_mode && screen == Screen::EmpireMap) {
                 // 0x09276 + 0x0D21E: the map of the Empire and the provinces given.
                 formats::IndexedImage empire;
@@ -2678,10 +2821,93 @@ int main(int argc, char** argv) {
                     city_image_dirty = false;
                 }
                 render_sprite_view(city_image, sprites.palette, cam, frame);
-                ui::render(toolbar, tool_armed ? toolbar.index_of(kBuildTools[tool_index]) : -1, hovered,
-                           viewer::heat_color, frame, kLogicalW, kLogicalH,
-                           have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
-                           have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
+                const int selected_button = tool_armed ? toolbar.index_of(kBuildTools[tool_index]) : -1;
+                if (toolbar.original_bar()) {
+                    // The original's own bar and what it draws over the city (viewer/overlays.hpp).
+                    if (have_interface_art && screen == Screen::City) {
+                        const int col0 = static_cast<int>(cam.x) / city_cell_px, row0 = static_cast<int>(cam.y) / city_cell_px;
+                        viewer::draw_minimap(frame, kLogicalW, kLogicalH, state.city, col0, row0,
+                                             static_cast<int>(kLogicalW / cam.zoom) / city_cell_px,
+                                             static_cast<int>(cam.visible_h / cam.zoom) / city_cell_px);
+                    }
+                    ui::render_original_bar(toolbar, selected_button, have_bar_art ? &bar_art : nullptr, &toolbar_icons,
+                                            &sprites.palette, have_font ? &game_font : nullptr,
+                                            model::global_word(state, systems::economy::kFunds), frame, kLogicalW,
+                                            kLogicalH);
+                    if (have_interface_art && screen == Screen::City && hovered >= 0)
+                        viewer::draw_title_plaque(frame, kLogicalW, kLogicalH, interface_art, toolbar.label(hovered));
+                } else {
+                    ui::render(toolbar, selected_button, hovered, viewer::heat_color, frame, kLogicalW, kLogicalH,
+                               have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
+                               have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
+                }
+                if (screen == Screen::City && tool_armed && pointer_lx >= 0 && !toolbar.contains(pointer_lx, pointer_ly)) {
+                    namespace construction = systems::construction;
+                    const auto tool = kBuildTools[tool_index];
+                    const construction::PlacementSpec spec = construction::placement_spec(tool);
+                    int fw = 1, fh = 1;
+                    if (spec.kind == construction::PlacementKind::MultiCell) fw = spec.width, fh = spec.height;
+                    if (spec.kind == construction::PlacementKind::VariantSelected) fw = spec.width, fh = spec.height;
+                    const int cell_x = static_cast<int>(cam.x + pointer_lx / cam.zoom) / city_cell_px;
+                    const int cell_y = static_cast<int>(cam.y + pointer_ly / cam.zoom) / city_cell_px;
+                    const int sx = static_cast<int>((cell_x * city_cell_px - cam.x) * cam.zoom);
+                    const int sy = static_cast<int>((cell_y * city_cell_px - cam.y) * cam.zoom);
+                    bool drew_building = false;
+                    if (spec.kind != construction::PlacementKind::DragAutoTiled &&
+                        spec.kind != construction::PlacementKind::NonPlacing) {
+                        // The building itself: render a small window with and without it, and draw what differs.
+                        model::CityMap with = state.city;
+                        bool fits = cell_x >= 0 && cell_y >= 0 && cell_x + fw <= model::kCityW && cell_y + fh <= model::kCityH;
+                        if (fits && spec.kind == construction::PlacementKind::VariantSelected) {
+                            const uint8_t seed = tool == construction::CommandId::Forum
+                                                     ? static_cast<uint8_t>(0xE0 + forum_grade)
+                                                     : static_cast<uint8_t>(0xF5 + workshop_goods / 4);
+                            for (int dy = 0; dy < fh && fits; ++dy)
+                                for (int dx = 0; dx < fw && fits; ++dx)
+                                    fits = construction::is_buildable_terrain(with.tile[cell_y + dy][cell_x + dx]);
+                            if (fits)
+                                for (int dy = 0; dy < fh; ++dy)
+                                    for (int dx = 0; dx < fw; ++dx) {
+                                        with.tile[cell_y + dy][cell_x + dx] = seed;
+                                        with.operational_state[cell_y + dy][cell_x + dx] = static_cast<uint8_t>(4 * dy + dx);
+                                    }
+                        } else if (fits) {
+                            fits = construction::place(with, tool, cell_x, cell_y);
+                        }
+                        if (fits) {
+                            const int c0 = std::max(0, cell_x - 1), r0 = std::max(0, cell_y - 4);
+                            const int c1 = std::min(model::kCityW, cell_x + fw + 1), r1 = std::min(model::kCityH, cell_y + fh + 1);
+                            formats::IndexedImage before, after;
+                            render::render_city(state.city, sprites, c0, r0, c1 - c0, r1 - r0, before, render_phase, nullptr);
+                            render::render_city(with, sprites, c0, r0, c1 - c0, r1 - r0, after, render_phase, nullptr);
+                            for (int vy = 0; vy < kLogicalH; ++vy)
+                                for (int vx = 0; vx < kLogicalW; ++vx) {
+                                    const int wx = static_cast<int>(cam.x + vx / cam.zoom) - c0 * city_cell_px;
+                                    const int wy = static_cast<int>(cam.y + vy / cam.zoom) - r0 * city_cell_px;
+                                    if (wx < 0 || wy < 0 || wx >= after.width || wy >= after.height) continue;
+                                    const size_t k = static_cast<size_t>(wy) * after.width + wx;
+                                    if (after.pixels[k] == before.pixels[k]) continue;
+                                    const formats::RGB c = sprites.palette.colors[after.pixels[k]];
+                                    const size_t i = (static_cast<size_t>(vy) * kLogicalW + vx) * 3;
+                                    frame[i] = c.r;
+                                    frame[i + 1] = c.g;
+                                    frame[i + 2] = c.b;
+                                    drew_building = true;
+                                }
+                        }
+                    }
+                    if (!drew_building)
+                        viewer::draw_dashed_frame(frame, kLogicalW, kLogicalH, sx, sy,
+                                                  static_cast<int>(fw * city_cell_px * cam.zoom),
+                                                  static_cast<int>(fh * city_cell_px * cam.zoom));
+                    const std::string cost = std::to_string(systems::economy::construction_cost(tool, forum_grade));
+                    if (have_font) ui::draw_game_text(frame, kLogicalW, kLogicalH, sx + 1, sy + 3, cost.c_str(), 1, game_font);
+                }
+                if (screen == Screen::Choice && choice_overlay()) {
+                    const int hover_item =
+                        pointer_lx >= 0 ? viewer::type_menu_item(pointer_lx, pointer_ly) : -1;
+                    viewer::draw_type_menu(frame, kLogicalW, kLogicalH, interface_art, choice_forum, hover_item);
+                }
             } else if (save_mode) {
                 viewer::render_city_map_layer(state.city, layer, city_cell_px, cam.x, cam.y, cam.zoom, kLogicalW,
                                                kLogicalH, frame);
@@ -2697,7 +2923,7 @@ int main(int argc, char** argv) {
             } else {
                 render_empire_frame(map, cam, frame);
             }
-            if (save_mode && screen == Screen::City)
+            if (save_mode && screen == Screen::City && !toolbar.original_bar())
                 ui::render_strip(screen_tabs, 0, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
             if (save_mode && touch_undo && !drag_undo.empty() && (screen == Screen::City || screen == Screen::Province))
                 ui::render_strip({{ui::tr("Undo"), 950}}, -1, undo_strip, frame, kLogicalW, kLogicalH, page_metrics,
@@ -2727,6 +2953,24 @@ int main(int argc, char** argv) {
                         ui::draw_text(frame, kLogicalW, kLogicalH, kMessageBox.x + 4, y, line.c_str(), 1,
                                       formats::RGB{232, 226, 200});
                 }
+            }
+            // The original's pointer, an orange arrow (POINTERS frame 0), over everything; with a command chosen the cost
+            // ghost takes its place on the map (where the captures show no arrow).
+            if (save_mode && have_icons && have_sprites && pointer_lx >= 0 && (screenshot_path.empty() || test_hover_x >= 0) &&
+                !toolbar_icons.frames.empty() && !toolbar_icons.frames[0].pixels.empty() &&
+                !(screen == Screen::City && tool_armed && !toolbar.contains(pointer_lx, pointer_ly))) {
+                const formats::PL8Frame& arrow = toolbar_icons.frames[0];
+                for (int iy = 0; iy < arrow.height; ++iy)
+                    for (int ix = 0; ix < arrow.width; ++ix) {
+                        const uint8_t idx = arrow.pixels[static_cast<size_t>(iy) * arrow.width + ix];
+                        const int x = pointer_lx + ix, y = pointer_ly + iy;
+                        if (idx == 0 || x >= kLogicalW || y >= kLogicalH) continue;
+                        const formats::RGB c = sprites.palette.colors[idx];
+                        const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
+                        frame[i] = c.r;
+                        frame[i + 1] = c.g;
+                        frame[i + 2] = c.b;
+                    }
             }
             window.present_rgb24(frame);
             // The Settings screen's frame rate: vsync, or a cap (SDL_Delay).

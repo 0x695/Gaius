@@ -115,6 +115,9 @@ struct SimState {
     // years, 3 to wait 24; anything else leaves it unanswered, offered again
     // next year. Without it nothing is answered.
     std::function<int(model::CityState& state, bool to_caesar)> on_promotion;
+    // The yearly notice (0x2933B -> the screen 0x09AFD): kind 1 news, 2 advice; the topic, and for advice whether its
+    // alternate text applies. The viewer shows the screen and stops time; nothing else depends on it.
+    std::function<void(int kind, int topic, bool alternate)> on_notice;
     // Set when a year's settlement dismisses the governor: the third missed
     // tribute in a row (economy::Settlement::dismissed, DS:0x6D6A = 0x3C, the
     // game's end). The caller clears it.

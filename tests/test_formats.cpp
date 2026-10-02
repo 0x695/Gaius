@@ -41,6 +41,7 @@
 #include "model/city_state.hpp"
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
+#include "apps/viewer/overlays.hpp"
 #include "platform/game_import.hpp"
 #include "platform/paths.hpp"
 #include "ui/settings.hpp"
@@ -1764,6 +1765,153 @@ void test_construction_road_rebuild_real_saves() {
         CHECK(identical == c.identical);
         CHECK(refused == 0 && others_changed == 0);
     }
+}
+
+// Reservoir/pipe (0x13846): a reservoir on water, pipe on land, crossings under roads and gates, over water.
+void test_construction_pipes() {
+    std::printf("test_construction_pipes (reservoir on water, pipe on land, crossings)\n");
+    using namespace gaius::systems::construction;
+    auto f = fresh();
+    for (auto& row : f->city.tile) row.fill(0x1D);
+    DragState drag;
+    const auto& tile = f->city.tile;
+
+    // A click on water builds a reservoir and remembers the water in 7BB4; another beside it is refused.
+    f->city.tile[20][20] = 0x4A;
+    f->city.tile[20][21] = 0x4A;
+    CHECK(place_pipe(f->city, drag, 20, 20));
+    CHECK(tile[20][20] == 0xA4 && f->city.operational_state[20][20] == 0x4A);
+    CHECK(!place_pipe(f->city, drag, 21, 20) && tile[20][21] == 0x4A);
+
+    // On land beside the reservoir it is pipe, not another reservoir, and it joins the reservoir.
+    CHECK(place_pipe(f->city, drag, 19, 20));
+    CHECK(tile[20][19] == 0x45 && tile[20][20] == 0xA4);
+    CHECK(place_pipe(f->city, drag, 18, 20));
+    CHECK(tile[20][18] == 0x45 && tile[20][19] == 0x45);
+    // A pipe south of a lone pipe is vertical, and turns the one above it the same way.
+    CHECK(place_pipe(f->city, drag, 18, 21));
+    CHECK(tile[21][18] == 0x44);
+    // Pipe over a pipe is refused for charging (the engine flags it failed) but still re-tiles.
+    CHECK(!place_pipe(f->city, drag, 18, 20));
+    // A lone pipe on open ground is horizontal.
+    CHECK(place_pipe(f->city, drag, 70, 70));
+    CHECK(tile[70][70] == 0x45);
+
+    // A corner: pipes at the east and the south make the south-east piece.
+    CHECK(place_pipe(f->city, drag, 51, 50));
+    CHECK(place_pipe(f->city, drag, 50, 51));
+    CHECK(place_pipe(f->city, drag, 50, 50));
+    CHECK(tile[50][50] == 0x46);
+
+    // Under a road: 0x36 -> 0x42 and 0x37 -> 0x43, refused beside a piece already holding the crossing.
+    f->city.tile[30][30] = 0x36;
+    f->city.tile[31][30] = 0x36;
+    CHECK(place_pipe(f->city, drag, 30, 30));
+    CHECK(tile[30][30] == 0x42);
+    CHECK(!place_pipe(f->city, drag, 30, 31));
+    f->city.tile[35][35] = 0x37;
+    CHECK(place_pipe(f->city, drag, 35, 35));
+    CHECK(tile[35][35] == 0x43);
+    // Through a wall gate: 0x93 -> 0xA1, 0x92 -> 0xA0.
+    f->city.tile[36][40] = 0x93;
+    f->city.tile[38][40] = 0x92;
+    CHECK(place_pipe(f->city, drag, 40, 36) && tile[36][40] == 0xA1);
+    CHECK(place_pipe(f->city, drag, 40, 38) && tile[38][40] == 0xA0);
+
+    // Across water: a pipe beside water 0x4A / 0x56 / 0x5A turns it into a pipe across, 0x8A / 0x72 / 0x8E.
+    CHECK(place_pipe(f->city, drag, 39, 60));
+    f->city.tile[60][40] = 0x4A;
+    CHECK(place_pipe(f->city, drag, 40, 60));
+    CHECK(tile[60][40] == 0x8A);
+    CHECK(place_pipe(f->city, drag, 39, 62));
+    f->city.tile[62][40] = 0x56;
+    CHECK(place_pipe(f->city, drag, 40, 62) && tile[62][40] == 0x72);
+    CHECK(place_pipe(f->city, drag, 39, 64));
+    f->city.tile[64][40] = 0x5A;
+    CHECK(place_pipe(f->city, drag, 40, 64) && tile[64][40] == 0x8E);
+    // Water with no pipe beside it is a place for a reservoir, whichever of its pieces it is.
+    for (uint8_t water : {0x4E, 0x52, 0x56, 0x5A, 0x62, 0x66, 0x6A, 0x6E}) {
+        f->city.tile[80][80] = water;
+        CHECK(place_pipe(f->city, drag, 80, 80));
+        CHECK(tile[80][80] == 0xA4 && f->city.operational_state[80][80] == water);
+        f->city.tile[80][80] = 0x1D;
+    }
+    // Deep water (below 0x1D) takes a reservoir too, but not beside a pipe.
+    f->city.tile[85][85] = 0x05;
+    CHECK(place_pipe(f->city, drag, 85, 85) && tile[85][85] == 0xA4);
+    f->city.tile[90][90] = 0x05;
+    CHECK(place_pipe(f->city, drag, 89, 90));
+    CHECK(!place_pipe(f->city, drag, 90, 90) && tile[90][90] == 0x05);
+
+    // Refused: nothing there, road corners, a wall, a building.
+    f->city.tile[5][5] = 0;
+    CHECK(!place_pipe(f->city, drag, 5, 5));
+    f->city.tile[5][8] = 0x40;
+    CHECK(!place_pipe(f->city, drag, 8, 5));
+    f->city.tile[5][12] = 0x95;
+    CHECK(!place_pipe(f->city, drag, 12, 5));
+    f->city.tile[5][14] = 0xC8;
+    CHECK(!place_pipe(f->city, drag, 14, 5));
+    CHECK(!place_pipe(f->city, drag, -1, 5) && !place_pipe(f->city, drag, 5, 100));
+
+    // The table: 53 patterns, every real piece in 0x44-0x49 and the first four refusing.
+    for (size_t i = 0; i < kPipePatterns.size(); ++i)
+        CHECK(i < 4 ? kPipePatterns[i].tile == 0 : (kPipePatterns[i].tile >= 0x44 && kPipePatterns[i].tile <= 0x49));
+}
+
+// The real saves: every reservoir stands on a water piece with no other reservoir beside it, and the pipe network
+// rebuilds the way the roads do (the plain pieces reset to open ground and laid again in row order).
+void test_construction_pipes_real_saves() {
+    std::printf("test_construction_pipes_real_saves (reservoirs and pipes vs the real saves)\n");
+    std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    using namespace gaius::systems::construction;
+    const char* names[] = {"CAESARXX.SAV", "CAESARWX.SAV", "CAESARVX.SAV", "CAESARUX.SAV", "CAESARXW.SAV", "CAESARXV.SAV",
+                           "CAESARXU.SAV", "CAESARXT.SAV", "CAESARXS.SAV", "CAESARXR.SAV", "CAESARXQ.SAV", "BAESARUX.SAV",
+                           "AAESARUX.SAV", "DAESARUX.SAV", "EAESARUX.SAV", "FAESARUX.SAV", "GAESARUX.SAV"};
+    int reservoirs = 0;
+    for (const char* name : names) {
+        fs::path p = fs::path(dir) / "gaius_test_saves" / name;
+        if (!fs::exists(p)) {
+            skip(std::string(name) + " not found");
+            continue;
+        }
+        CityState st = load(save::load(p.string()));
+        const auto saved = std::make_unique<CityMap>(st.city);
+        std::vector<std::pair<int, int>> pipes;
+        for (int y = 0; y < kCityH; ++y) {
+            for (int x = 0; x < kCityW; ++x) {
+                const uint8_t t = saved->tile[y][x];
+                if (t == 0xA4) {
+                    ++reservoirs;
+                    const uint8_t under = saved->operational_state[y][x];
+                    CHECK(under < 0x1D || under == 0x4A || under == 0x4E || under == 0x52 || under == 0x56 || under == 0x5A ||
+                          under == 0x62 || under == 0x66 || under == 0x6A || under == 0x6E);
+                    for (const auto& [dx, dy] : {std::pair{1, 0}, std::pair{0, 1}})
+                        if (x + dx < kCityW && y + dy < kCityH) CHECK(saved->tile[y + dy][x + dx] != 0xA4);
+                }
+                if (t >= 0x44 && t <= 0x49) {
+                    pipes.push_back({x, y});
+                    st.city.tile[y][x] = 0x1D;
+                }
+            }
+        }
+        DragState drag;
+        int refused = 0;
+        for (const auto& [x, y] : pipes) refused += !place_pipe(st.city, drag, x, y);
+        int identical = 0, others_changed = 0;
+        for (int y = 0; y < kCityH; ++y) {
+            for (int x = 0; x < kCityW; ++x) {
+                const uint8_t t = saved->tile[y][x];
+                if (t >= 0x44 && t <= 0x49) identical += st.city.tile[y][x] == t;
+                else others_changed += st.city.tile[y][x] != t;
+            }
+        }
+        std::printf("  %s: %d/%zu plain pipe pieces rebuilt identical (refused %d, other cells changed %d)\n", name,
+                    identical, pipes.size(), refused, others_changed);
+        CHECK(identical == static_cast<int>(pipes.size()) && refused == 0 && others_changed == 0);
+    }
+    CHECK(reservoirs > 0);
 }
 
 // Forum (0x14D2F) and Workshop (0x15377), and removing their records on
@@ -6426,6 +6574,28 @@ void test_ui_original_bar() {
     CHECK(bar.original_bar() && bar.rows() == 1 && bar.count() == 9 && bar.bar_page() == 0 && !bar.paged());
     CHECK(!Toolbar(ring, 5, metrics_for_scale(4), 320, 200, true).original_bar());
     CHECK(!Toolbar(ring, 5, metrics_for_scale(1), 320, 200, false).original_bar());
+    // The original's geometry: a 24-row panel at the bottom, 16 x 16 icons at x = 8 + 24 * slot, 4 rows into it.
+    CHECK(bar.panel().y == 200 - kBarPanelH && bar.panel().h == kBarPanelH && bar.panel().w == 320);
+    for (int i = 0; i < bar.count(); ++i) {
+        const Rect r = bar.button(i);
+        CHECK(r.x == 8 + 24 * i && r.y == bar.panel().y + 4 && r.w == 16 && r.h == 16);
+    }
+    CHECK(!Toolbar(ring, 5, metrics_for_scale(2), 320, 200, true).original_bar());  // only at 1x
+    // Drawn without the game's files: the panel, a frame round the chosen command, and the funds as five digits.
+    {
+        std::vector<uint8_t> rgb(320 * 200 * 3, 0);
+        render_original_bar(bar, 4, nullptr, nullptr, nullptr, nullptr, 8000, rgb, 320, 200);
+        const auto lit = [&](int x0, int y0, int x1, int y1) {
+            for (int y = y0; y < y1; ++y)
+                for (int x = x0; x < x1; ++x)
+                    if (rgb[(static_cast<size_t>(y) * 320 + x) * 3] != 0) return true;
+            return false;
+        };
+        CHECK(lit(0, 176, 320, 200) && !lit(0, 0, 320, 176));
+        CHECK(lit(kBarFundsX, kBarFundsY, kBarFundsX + 40, kBarFundsY + 7));  // the funds
+        const Rect chosen = bar.button(4);
+        CHECK(lit(chosen.x - 1, chosen.y - 1, chosen.x, chosen.y + chosen.h + 1));  // the frame round the chosen command
+    }
     // The buttons sit in slots from the left; a click on one answers with its index, and the others' rects are empty.
     for (int i = 0; i < bar.count(); ++i) {
         const Rect r = bar.button(i);
@@ -6451,6 +6621,36 @@ void test_ui_original_bar() {
     CHECK(flat.index_of(CommandId::Forum) == 3);
     flat.show_command(CommandId::Workshop);
     CHECK(flat.page() == 0);
+}
+
+// What the original draws over the city: the type menus' rows, the minimap's colours, the notice texts.
+void test_viewer_overlays() {
+    std::printf("test_viewer_overlays (type menu rows, minimap, notice texts)\n");
+    namespace vw = gaius::viewer;
+    // The menu's eight rows, 12 apart from y = 47 (a row's text is at 48), between the panel's edges; nothing outside them.
+    CHECK(vw::type_menu_item(160, 47) == 0 && vw::type_menu_item(160, 58) == 0 && vw::type_menu_item(160, 59) == 1);
+    CHECK(vw::type_menu_item(160, 48 + 12 * 7) == 7 && vw::type_menu_item(160, 48 + 12 * 8) == -1);
+    CHECK(vw::type_menu_item(64, 60) == -1 && vw::type_menu_item(160, 20) == -1);
+    CHECK(vw::type_menu_contains(64, 16) && vw::type_menu_contains(255, 159) && !vw::type_menu_contains(256, 100) &&
+          !vw::type_menu_contains(100, 160));
+    // The minimap: water below 0x1D, 0x4A-0x6F and a reservoir; land otherwise; the view as a red frame.
+    CHECK(vw::minimap_water(0x05) && vw::minimap_water(0x4A) && vw::minimap_water(0x6F) && vw::minimap_water(0xA4));
+    CHECK(!vw::minimap_water(0x00) && !vw::minimap_water(0x1D) && !vw::minimap_water(0x36) && !vw::minimap_water(0xC8));
+    auto city = std::make_unique<gaius::model::CityMap>();
+    for (auto& row : city->tile) row.fill(0x1D);
+    for (int y = 40; y < 44; ++y)
+        for (int x = 40; x < 44; ++x) city->tile[y][x] = 0x4A;  // one 4 x 4 block of water: one blue pixel at (10, 10)
+    std::vector<uint8_t> rgb(320 * 200 * 3, 0);
+    vw::draw_minimap(rgb, 320, 200, *city, 0, 0, 20, 11);
+    const auto px = [&](int x, int y) { return std::array<int, 3>{rgb[(static_cast<size_t>(y) * 320 + x) * 3], rgb[(static_cast<size_t>(y) * 320 + x) * 3 + 1], rgb[(static_cast<size_t>(y) * 320 + x) * 3 + 2]}; };
+    CHECK(px(10, 10) == (std::array<int, 3>{0, 93, 130}));    // water
+    CHECK(px(20, 20) == (std::array<int, 3>{186, 113, 1}));   // land
+    CHECK(px(0, 0) == (std::array<int, 3>{167, 19, 18}));     // the view's frame, top left
+    CHECK(px(26, 5) == (std::array<int, 3>{0, 0, 0}) && px(5, 26) == (std::array<int, 3>{0, 0, 0}));  // the shadow
+    // The notice texts: 40-character records, news prefixed ROME-, advice LOCAL-.
+    for (const char* t : gaius::systems::administration::kNewsText) CHECK(std::strlen(t) == 40 && std::string(t).find("ROME-") == 1);
+    for (const char* t : gaius::systems::administration::kAdviceText) CHECK(std::strlen(t) == 40 && std::string(t).find("LOCAL-") == 1);
+    CHECK(std::string(gaius::systems::administration::kNewsText[1]).find("Emperor is dangerously ill") != std::string::npos);
 }
 
 void test_ui_toolbar_paging() {
@@ -6648,6 +6848,7 @@ int main() {
     test_ui_hit_test_matches_drawn_buttons();
     test_ui_toolbar_paging();
     test_ui_original_bar();
+    test_viewer_overlays();
     test_ui_font_rendering();
     test_ui_toolbar_render();
     test_ui_toolbar_variant_label();
@@ -6666,6 +6867,8 @@ int main() {
     test_pl8_corpus_sanity();
     test_pl8_matches_real_screenshots();
     test_construction_drag_rules();
+    test_construction_pipes();
+    test_construction_pipes_real_saves();
     test_construction_forum_and_workshop();
     test_service_fountain_supply();
     test_service_events();

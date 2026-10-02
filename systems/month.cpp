@@ -368,7 +368,10 @@ void run_step(model::CityState& state, SimState& sim) {
                 administration::defer_promotion(state, choice == 2 ? 9 : 24);
             }
         }
-        administration::yearly_notice(state, sim.random, sim.province_wear_threshold, sim.linked_towns);
+        const administration::Notice notice =
+            administration::yearly_notice(state, sim.random, sim.province_wear_threshold, sim.linked_towns);
+        if (notice.kind != administration::Notice::Kind::None && sim.on_notice)
+            sim.on_notice(static_cast<int>(notice.kind), notice.topic, notice.alternate);
     }
 }
 

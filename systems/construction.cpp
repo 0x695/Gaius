@@ -14,7 +14,7 @@ PlacementSpec placement_spec(CommandId id) {
     using K = PlacementKind;
     switch (id) {
         // --- Single-cell seeds (handler writes one `mov es:[bx], imm`) ---
-        case CommandId::ReservoirPipe: return {K::SingleCell, 0xA4, 1, 1};
+        case CommandId::ReservoirPipe: return {K::DragAutoTiled, 0, 1, 1};  // pipes by drag, a reservoir on water
         case CommandId::Tower:         return {K::SingleCell, 0x9E, 1, 1};  // handler also writes 0x9F/0x9A/0x9B variants by orientation
         case CommandId::Well:          return {K::SingleCell, 0xB8, 1, 1};
         case CommandId::Fountain:      return {K::SingleCell, 0xBA, 1, 1};
@@ -254,6 +254,63 @@ const std::array<RoadPattern, 161> kRoadPatterns = {{
     {{1, 1, 1, 1, 1, 1, 1, 1}, 0x40, {4, 4, 4, 4}},
 }};
 
+// 3496:074A, extracted from the executable.
+const std::array<RoadPattern, 53> kPipePatterns = {{
+    {{2, 1, 1, 1, 2, 2, 2, 2}, 0x00, {0, 0, 0, 0}},
+    {{2, 2, 2, 1, 1, 1, 2, 2}, 0x00, {0, 0, 0, 0}},
+    {{2, 2, 2, 2, 2, 1, 1, 1}, 0x00, {0, 0, 0, 0}},
+    {{1, 1, 2, 2, 2, 2, 2, 1}, 0x00, {0, 0, 0, 0}},
+    {{1, 0, 0, 0, 0, 1, 1, 0}, 0x48, {1, 0, 0, 3}},
+    {{1, 1, 0, 0, 0, 0, 1, 0}, 0x48, {2, 0, 0, 1}},
+    {{0, 0, 0, 0, 1, 0, 1, 1}, 0x47, {0, 0, 1, 2}},
+    {{0, 0, 0, 1, 1, 0, 1, 0}, 0x47, {0, 0, 3, 1}},
+    {{0, 1, 1, 0, 1, 0, 0, 0}, 0x46, {0, 3, 1, 0}},
+    {{0, 0, 1, 0, 1, 1, 0, 0}, 0x46, {0, 1, 2, 0}},
+    {{1, 0, 1, 1, 0, 0, 0, 0}, 0x49, {1, 2, 0, 0}},
+    {{1, 0, 1, 0, 0, 0, 0, 1}, 0x49, {3, 1, 0, 0}},
+    {{0, 1, 1, 0, 0, 0, 1, 0}, 0x45, {0, 3, 0, 1}},
+    {{0, 0, 1, 1, 0, 0, 1, 0}, 0x45, {0, 2, 0, 1}},
+    {{0, 0, 1, 0, 0, 0, 1, 1}, 0x45, {0, 1, 0, 2}},
+    {{0, 0, 1, 0, 0, 1, 1, 0}, 0x45, {0, 1, 0, 3}},
+    {{1, 0, 0, 0, 1, 0, 0, 1}, 0x44, {3, 0, 1, 0}},
+    {{1, 1, 0, 0, 1, 0, 0, 0}, 0x44, {2, 0, 1, 0}},
+    {{1, 0, 0, 0, 1, 1, 0, 0}, 0x44, {1, 0, 2, 0}},
+    {{1, 0, 0, 1, 1, 0, 0, 0}, 0x44, {1, 0, 3, 0}},
+    {{0, 0, 1, 1, 0, 1, 1, 0}, 0x45, {0, 2, 0, 3}},
+    {{0, 1, 1, 0, 0, 0, 1, 1}, 0x45, {0, 3, 0, 2}},
+    {{1, 0, 0, 0, 1, 1, 0, 1}, 0x44, {3, 0, 2, 0}},
+    {{1, 1, 0, 1, 1, 0, 0, 0}, 0x44, {2, 0, 3, 0}},
+    {{1, 0, 1, 1, 0, 2, 0, 1}, 0x49, {3, 2, 0, 0}},
+    {{0, 1, 1, 0, 1, 1, 0, 2}, 0x46, {0, 3, 2, 0}},
+    {{0, 2, 0, 1, 1, 0, 1, 1}, 0x47, {0, 0, 3, 2}},
+    {{1, 1, 0, 2, 0, 1, 1, 0}, 0x48, {2, 0, 0, 3}},
+    {{0, 2, 0, 2, 0, 2, 0, 2}, 0x45, {0, 0, 0, 0}},
+    {{1, 0, 0, 0, 1, 0, 0, 0}, 0x44, {1, 0, 1, 0}},
+    {{0, 0, 1, 0, 0, 0, 1, 0}, 0x45, {0, 1, 0, 1}},
+    {{1, 0, 0, 2, 0, 2, 0, 0}, 0x44, {1, 0, 0, 0}},
+    {{0, 0, 1, 0, 0, 2, 0, 2}, 0x45, {0, 1, 0, 0}},
+    {{0, 2, 0, 0, 1, 0, 0, 2}, 0x44, {0, 0, 1, 0}},
+    {{0, 2, 0, 2, 0, 0, 1, 0}, 0x45, {0, 0, 0, 1}},
+    {{1, 1, 0, 2, 0, 2, 0, 2}, 0x44, {2, 0, 0, 0}},
+    {{1, 2, 0, 2, 0, 2, 0, 1}, 0x44, {3, 0, 0, 0}},
+    {{0, 2, 1, 1, 0, 2, 0, 2}, 0x45, {0, 2, 0, 0}},
+    {{0, 1, 1, 2, 0, 2, 0, 2}, 0x45, {0, 3, 0, 0}},
+    {{0, 2, 0, 2, 1, 1, 0, 2}, 0x44, {0, 0, 2, 0}},
+    {{0, 2, 0, 1, 1, 2, 0, 2}, 0x44, {0, 0, 3, 0}},
+    {{0, 2, 0, 2, 0, 2, 1, 1}, 0x45, {0, 0, 0, 2}},
+    {{0, 2, 0, 2, 0, 1, 1, 2}, 0x45, {0, 0, 0, 3}},
+    {{1, 2, 1, 2, 0, 2, 0, 2}, 0x49, {1, 1, 0, 0}},
+    {{0, 2, 1, 2, 1, 2, 0, 2}, 0x46, {0, 1, 1, 0}},
+    {{0, 2, 0, 2, 1, 2, 1, 2}, 0x47, {0, 0, 1, 1}},
+    {{1, 2, 0, 2, 0, 2, 1, 2}, 0x48, {1, 0, 0, 1}},
+    {{1, 1, 0, 0, 1, 1, 0, 0}, 0x44, {2, 0, 2, 0}},
+    {{1, 0, 0, 1, 1, 0, 0, 1}, 0x44, {3, 0, 3, 0}},
+    {{0, 0, 1, 1, 0, 0, 1, 1}, 0x45, {0, 2, 0, 2}},
+    {{0, 1, 1, 0, 0, 1, 1, 0}, 0x45, {0, 3, 0, 3}},
+    {{1, 2, 0, 2, 1, 2, 0, 2}, 0x44, {1, 0, 1, 0}},
+    {{0, 2, 1, 2, 0, 2, 1, 2}, 0x45, {0, 1, 0, 1}},
+}};
+
 namespace {
 
 // (drow, dcol), clockwise from north: the snapshot's order (0334:4161).
@@ -295,9 +352,22 @@ int mark(const DragState& drag, Flags& flags, int lo, int hi) {
     return n;
 }
 
-// 0x17CB9: the first pattern that fits; 0 (modes untouched) if none does.
-uint8_t match_pattern(DragState& drag, const Flags& flags) {
-    for (const RoadPattern& p : kRoadPatterns) {
+// 0x17C6C: as mark, but only the four orthogonal neighbours (north, east, south, west).
+int mark_orthogonal(const DragState& drag, Flags& flags, int lo, int hi) {
+    int n = 0;
+    for (size_t i = 0; i < flags.size(); i += 2) {
+        if (drag.neighbours[i] >= lo && drag.neighbours[i] <= hi) {
+            flags[i] = 1;
+            ++n;
+        }
+    }
+    return n;
+}
+
+// 0x17CB9 (roads, walls) and 0x17DB5 (pipes): the first pattern that fits; 0 (modes untouched) if none does.
+template <size_t N>
+uint8_t match_pattern(DragState& drag, const Flags& flags, const std::array<RoadPattern, N>& table) {
+    for (const RoadPattern& p : table) {
         bool fits = true;
         for (size_t j = 0; j < flags.size() && fits; ++j) fits = p.neighbours[j] == 2 || p.neighbours[j] == flags[j];
         if (!fits) continue;
@@ -306,6 +376,8 @@ uint8_t match_pattern(DragState& drag, const Flags& flags) {
     }
     return 0;
 }
+
+uint8_t match_pattern(DragState& drag, const Flags& flags) { return match_pattern(drag, flags, kRoadPatterns); }
 
 // How one orthogonal neighbour is re-tiled for modes 1-4. Mode 1 writes
 // `straight` unless the neighbour is `straight_unless` (walls only); modes
@@ -384,7 +456,123 @@ uint8_t wall_form(uint8_t road_tile) {
     }
 }
 
+// The tile at (x, y), or 0 off the grid (the engine reads whatever lies beyond the map; no piece is ever there).
+uint8_t tile_at(const model::CityMap& city, int x, int y) { return in_grid(x, y) ? city.tile[y][x] : 0; }
+
+// 0x1EA26: the pattern's modes against the pieces already beside the cell -- a corner that has no opening towards
+// the new piece refuses it.
+bool pipe_neighbours_connect(const model::CityMap& city, const DragState& drag, int x, int y) {
+    if (drag.modes[0] > 0 && one_of(tile_at(city, x, y - 1), {0x48, 0x49})) return false;
+    if (drag.modes[1] > 0 && one_of(tile_at(city, x + 1, y), {0x46, 0x49})) return false;
+    if (drag.modes[2] > 0 && one_of(tile_at(city, x, y + 1), {0x46, 0x47})) return false;
+    if (drag.modes[3] > 0 && one_of(tile_at(city, x - 1, y), {0x47, 0x48})) return false;
+    return true;
+}
+
+// 0x1EC13, 0x1EE5B, 0x1F06A, 0x1F2B5: each orthogonal neighbour, by its mode (1 straight, 2 and 3 the corners; 4
+// does nothing for pipes). Pieces that are already pipe through (the crossings), a reservoir, and anything above 0xB8
+// are left alone.
+void retile_pipe_neighbours(model::CityMap& city, const DragState& drag, int x, int y) {
+    struct Side {
+        int dx, dy;
+        std::initializer_list<uint8_t> skip;
+        uint8_t straight, corner2, corner3;
+    };
+    static const Side sides[4] = {
+        {0, -1, {0x43, 0xA0, 0x8E, 0x72, 0xA4}, 0x44, 0x46, 0x47},
+        {1, 0, {0x42, 0xA1, 0x8A, 0xA4}, 0x45, 0x47, 0x48},
+        {0, 1, {0x43, 0xA0, 0x8E, 0x72, 0xA4}, 0x44, 0x48, 0x49},
+        {-1, 0, {0x42, 0xA1, 0x8A, 0xA4}, 0x45, 0x49, 0x46},
+    };
+    for (size_t k = 0; k < 4; ++k) {
+        const Side& s = sides[k];
+        const int nx = x + s.dx, ny = y + s.dy;
+        if (!in_grid(nx, ny)) continue;
+        uint8_t& t = city.tile[ny][nx];
+        if (one_of(t, s.skip) || t > 0xB8) continue;
+        switch (drag.modes[k]) {
+            case 1: t = s.straight; break;
+            case 2: t = s.corner2; break;
+            case 3: t = s.corner3; break;
+            default: break;
+        }
+    }
+}
+
 }  // namespace
+
+bool place_pipe(model::CityMap& city, DragState& drag, int x, int y) {
+    if (!in_grid(x, y)) return false;
+    uint8_t& t = city.tile[y][x];
+    snapshot_neighbours(city, drag, x, y);
+    Flags flags{};
+    if (t == 0) return false;
+
+    // A reservoir on water: refused beside another reservoir (orthogonally).
+    const auto reservoir = [&]() {
+        if (mark_orthogonal(drag, flags, 0xA4, 0xA4) != 0) return false;
+        const uint8_t under = t;
+        t = 0xA4;
+        city.operational_state[y][x] = under;  // 7BB4 keeps the tile the reservoir stands on
+        return true;
+    };
+    // Water a pipe can cross: a pipe beside it makes a pipe across (unless a neighbour already holds that piece),
+    // otherwise it is a place for a reservoir.
+    const auto water = [&](uint8_t crossing) {
+        if (mark_orthogonal(drag, flags, 0x44, 0x45) == 0) return reservoir();
+        if (mark(drag, flags, crossing, crossing) != 0) return false;
+        t = crossing;
+        return true;
+    };
+    // A pipe under a road or through a wall gate, unless a neighbour already holds the piece.
+    const auto through = [&](uint8_t piece) {
+        if (mark(drag, flags, piece, piece) != 0) return false;
+        t = piece;
+        return true;
+    };
+
+    if (t < 0x1D) {
+        if (mark_orthogonal(drag, flags, 0x44, 0x45) != 0) return false;
+        return reservoir();
+    }
+    if (t <= 0x35 || (t >= 0x44 && t <= 0x49)) {
+        mark(drag, flags, 0x42, 0x49);
+        mark(drag, flags, 0x8A, 0x91);
+        mark(drag, flags, 0x72, 0x75);
+        mark(drag, flags, 0xA0, 0xA1);
+        mark(drag, flags, 0xA4, 0xA6);
+        mark(drag, flags, 0xB9, 0xBD);
+        const uint8_t tile = match_pattern(drag, flags, kPipePatterns);
+        if (tile == 0) return false;
+        const bool over_pipe = t >= 0x44 && t <= 0x49;  // laid over a pipe the engine flags it failed: no charge
+        // 0x1E8B9: a corner may not face the opposite corner on the diagonal, nor a piece that cannot connect.
+        if ((tile == 0x46 && tile_at(city, x + 1, y + 1) == 0x48) || (tile == 0x47 && tile_at(city, x - 1, y + 1) == 0x49) ||
+            (tile == 0x48 && tile_at(city, x - 1, y - 1) == 0x46) || (tile == 0x49 && tile_at(city, x + 1, y - 1) == 0x47) ||
+            !pipe_neighbours_connect(city, drag, x, y))
+            return false;
+        t = tile;
+        retile_pipe_neighbours(city, drag, x, y);
+        return !over_pipe;
+    }
+    switch (t) {
+        case 0x36: return through(0x42);
+        case 0x37: return through(0x43);
+        case 0x93: return through(0xA1);
+        case 0x92: return through(0xA0);
+        case 0x62:
+        case 0x66:
+        case 0x6A:
+        case 0x6E:
+            if (mark_orthogonal(drag, flags, 0x44, 0x45) != 0) return false;
+            return reservoir();
+        case 0x4A:
+        case 0x4E:
+        case 0x52: return water(0x8A);
+        case 0x56: return water(0x72);
+        case 0x5A: return water(0x8E);
+        default: return false;
+    }
+}
 
 bool place_road(model::CityMap& city, DragState& drag, int x, int y) {
     if (!in_grid(x, y)) return false;

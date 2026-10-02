@@ -161,13 +161,17 @@ Toolbar::Toolbar(const systems::construction::CommandId* tools, int count, Metri
     rows_ = std::max(1, (n + cols_ - 1) / cols_);
     per_page_ = n;
     const int bar_rows = (kBarSlots + fit_cols - 1) / fit_cols;
-    if (original_bar && bar_rows <= max_rows) {
-        // The original's bar: its 11 slots, the page's buttons in them.
+    if (original_bar && m_.scale == 1 && bar_rows == 1 && screen_w >= kBarX0 + kBarPitch * kBarSlots) {
+        // The original's bar: its 11 slots, the page's buttons in them, laid out as the original lays them out.
         bar_ = true;
-        cols_ = std::min(fit_cols, kBarSlots);
-        rows_ = bar_rows;
+        cols_ = kBarSlots;
+        rows_ = 1;
         per_page_ = kBarSlots;
         set_bar_page(0);
+        panel_ = Rect{0, screen_h - kBarPanelH, screen_w, kBarPanelH};
+        grid_x0_ = kBarX0;
+        grid_y0_ = panel_.y + kBarIconY;
+        return;
     } else if (rows_ > max_rows) {
         // Paged: an arrow at each end of the rows, the tools between.
         cols_ = std::max(3, fit_cols);
@@ -201,7 +205,7 @@ const char* Toolbar::label(int i) const {
     if (i < 0 || i >= count()) return "";
     const BarButton b = entry(i);
     switch (b.kind) {
-        case BarKind::Page: return b.page == 1 ? tr("Infrastructure") : tr("Culture");
+        case BarKind::Page: return b.page == 1 ? tr("Infrastructure") : tr("Construction");
         case BarKind::Files: return tr("Save and load");
         default: return systems::construction::command_name(b.command);
     }
@@ -252,6 +256,7 @@ Rect Toolbar::next_arrow() const {
 
 Rect Toolbar::button(int i) const {
     if (i < 0 || i >= count()) return Rect{};
+    if (bar_) return Rect{grid_x0_ + kBarPitch * i, grid_y0_, kBarIconPx, kBarIconPx};
     const int stride = m_.button_px() + m_.gap_px;
     if (!paged()) {
         const int col = i % cols_;
@@ -398,6 +403,63 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
 }  // namespace gaius::ui
 
 namespace gaius::ui {
+
+void render_original_bar(const Toolbar& bar, int selected, const BarArt* art, const formats::PL8Sheet* icons,
+                         const formats::Palette* palette, const GameFont* font, int funds, std::vector<uint8_t>& rgb, int w,
+                         int h) {
+    if (!bar.original_bar() || w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * h * 3) return;
+    const Rect p = bar.panel();
+    // The panel: the game's own picture of it (PANEL1A for the main bar, PANEL1B for the building pages), else a flat one.
+    const formats::IndexedImage* image = nullptr;
+    if (art && palette) image = bar.bar_page() == 0 ? &art->main : &art->build;
+    if (image && image->width == w && image->height == h && !image->pixels.empty()) {
+        for (int y = p.y; y < p.y + p.h; ++y)
+            for (int x = 0; x < w; ++x) put(rgb, w, h, x, y, palette->colors[image->pixels[static_cast<size_t>(y) * w + x]]);
+    } else {
+        fill_rect(rgb, w, h, p, kPanelFill);
+        for (int x = p.x; x < p.x + p.w; ++x) put(rgb, w, h, x, p.y, kPanelTopEdge);
+    }
+    for (int i = 0; i < bar.count(); ++i) {
+        const Rect b = bar.button(i);
+        const BarButton info = bar.entry(i);
+        const formats::PL8Frame* icon =
+            (icons && palette && info.frame >= 0 && info.frame < static_cast<int>(icons->frames.size()) &&
+             !icons->frames[static_cast<size_t>(info.frame)].pixels.empty())
+                ? &icons->frames[static_cast<size_t>(info.frame)]
+                : nullptr;
+        if (icon) {
+            for (int iy = 0; iy < icon->height; ++iy)
+                for (int ix = 0; ix < icon->width; ++ix) {
+                    const uint8_t idx = icon->pixels[static_cast<size_t>(iy) * icon->width + ix];
+                    if (idx != 0) put(rgb, w, h, b.x + ix, b.y + iy, palette->colors[idx]);
+                }
+        } else {
+            fill_rect(rgb, w, h, b, kButtonFill);
+            stroke_rect(rgb, w, h, b, kButtonEdge);
+        }
+        if (!info.available) {
+            for (int y = b.y; y < b.y + b.h; ++y)
+                for (int x = b.x; x < b.x + b.w; ++x) {
+                    const size_t k = (static_cast<size_t>(y) * w + x) * 3;
+                    rgb[k] = static_cast<uint8_t>(rgb[k] / 3);
+                    rgb[k + 1] = static_cast<uint8_t>(rgb[k + 1] / 3);
+                    rgb[k + 2] = static_cast<uint8_t>(rgb[k + 2] / 3);
+                }
+        }
+        // The original shows the chosen command only by the pointer; a thin frame keeps it findable.
+        if (i == selected) stroke_rect(rgb, w, h, Rect{b.x - 1, b.y - 1, b.w + 2, b.h + 2}, kSelectedEdge);
+    }
+    // The funds (0x212A1): five digits in the game's font at (268, 184), padded with spaces.
+    const std::string digits = [&]() {
+        std::string s = std::to_string(std::max(0, funds));
+        if (s.size() > 5) s = s.substr(s.size() - 5);
+        return std::string(5 - s.size(), ' ') + s;
+    }();
+    if (font)
+        draw_game_text(rgb, w, h, kBarFundsX, kBarFundsY, digits.c_str(), 1, *font);
+    else
+        draw_text(rgb, w, h, kBarFundsX, kBarFundsY, digits.c_str(), 1, kLabelText);
+}
 
 // The panel's button tables (DS:0x1178, 0x11BA, 0x11FC, 0x123E) hold 6-byte records, a POINTERS.PL8 frame word and then
 // a far pointer to a click handler -- but the click code (0x12140-0x122F9) reads `lcall [slot * 6 + 0x116E]`, with

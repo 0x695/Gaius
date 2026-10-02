@@ -102,6 +102,7 @@ inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDi
                      kActionDifficultyUp = 703, kActionBegin = 704, kActionChooseName = 705;
 inline constexpr int kActionSlot = 710;  // + slot
 inline constexpr int kActionBack = 720;
+inline constexpr int kActionChoice = 740;  // + the option, 0-7 (the Forum type and Industry type menus)
 inline constexpr int kSaveSlots = 8;
 inline constexpr int kActionHint = 800;  // + ratings column (Peace, Culture, Prosperity, Empire)
 inline constexpr int kActionRankDown = 810, kActionRankUp = 811;
@@ -379,6 +380,24 @@ inline ui::Page files_page(bool saving, const std::vector<ui::PanelButton>& slot
     page.title = saving ? ui::tr("Save the game") : ui::tr("Load a game");
     page.rows.push_back({saving ? ui::tr("Choose a slot to write") : ui::tr("Choose a saved game"), ""});
     page.buttons = slots;
+    return page;
+}
+
+// The menu the original opens when the Forum or Workshop button is pressed (0x1770D calls 0334:A5B9, "Select Forum Type";
+// 0x17931 calls 0334:A66C, "Select Industry Type"): eight names to choose from, and a right click (here also Cancel)
+// to leave without a command. The Forum's names carry what the grade costs.
+inline ui::Page choice_page(bool forum, int current) {
+    ui::Page page;
+    page.title = forum ? ui::tr("Select Forum Type") : ui::tr("Select Industry Type");
+    page.rows.push_back({ui::tr(forum ? "Each type is a bigger forum" : "Workshops make the goods you choose"), ""});
+    for (int i = 0; i < 8; ++i) {
+        std::string text = forum ? systems::construction::kForumTypeNames[static_cast<size_t>(i)]
+                                 : systems::construction::kWorkshopGoodsNames[static_cast<size_t>(i)];
+        if (forum) text += " " + std::to_string(systems::construction::kForumGradeCost[static_cast<size_t>(i)]);
+        if (i == current) text = "> " + text;
+        page.buttons.push_back({text, kActionChoice + i});
+    }
+    page.buttons.push_back({ui::tr("Cancel"), kActionBack});
     return page;
 }
 

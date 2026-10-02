@@ -227,6 +227,9 @@ struct RoadPattern {
     std::array<uint8_t, 4> modes;       // re-tiling mode for north, east, south, west (0 = leave)
 };
 extern const std::array<RoadPattern, 161> kRoadPatterns;
+// The pipe's own table, 3496:074A: 53 entries of the same shape (the tile is a pipe piece 0x44-0x49; the first four
+// entries, diagonal-only neighbours, have tile 0 and refuse the cell).
+extern const std::array<RoadPattern, 53> kPipePatterns;
 
 // Road (0x131E7). On open ground or an existing road piece (0x1D-0x41) it
 // places the pattern's tile, clears 7BB4 and re-tiles the neighbours. It also
@@ -234,6 +237,20 @@ extern const std::array<RoadPattern, 161> kRoadPatterns;
 // 0x45 -> 0x42, 0x44 -> 0x43 (each only if no neighbour already holds the
 // result), and a road across a wall makes a gate: 0x93 -> 0x95, 0x92 -> 0x94.
 bool place_road(model::CityMap& city, DragState& drag, int x, int y);
+
+// Reservoir/pipe (0x13846, command 5). Dragging lays pipe; a click on water builds a reservoir.
+//   - On water (tiles below 0x1D, 0x4A/0x4E/0x52, 0x56, 0x5A, 0x62/0x66/0x6A/0x6E) it builds a reservoir 0xA4 and keeps
+//     the water tile under it in 7BB4 (Clear Area gives it back) -- unless a pipe (0x44/0x45) or another reservoir
+//     touches the cell orthogonally, which refuses it. Where a pipe does touch water 0x4A/0x4E/0x52, 0x56 or 0x5A the
+//     cell becomes a pipe across the water, 0x8A, 0x72 or 0x8E (refused if a neighbour already holds that piece).
+//   - On open ground (0x1D-0x35) or a pipe piece (0x44-0x49) it picks the pipe piece from the neighbours (pipes,
+//     reservoirs and fountains connect) with the table at 3496:074A, and re-tiles the four orthogonal neighbours by
+//     the pattern's modes (0x1E8B9 -> 0x1EC13 / 0x1EE5B / 0x1F06A / 0x1F2B5). Pipe over a pipe piece does the same but
+//     the engine marks it failed (DS:0x6D0A), so nothing is charged.
+//   - Across a road (0x36, 0x37) it makes 0x42 or 0x43 (a pipe under the road), across a wall gate (0x93, 0x92) 0xA1
+//     or 0xA0, each unless a neighbour already holds that piece.
+// Returns true when the engine's failure flag stays clear: only then is the cost charged.
+bool place_pipe(model::CityMap& city, DragState& drag, int x, int y);
 
 // Wall (0x1415E). On open ground or an existing wall piece it places the
 // wall form of the pattern's tile (0x36->0x93, 0x37->0x92, 0x38->0x96,
@@ -282,6 +299,11 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
 // decoded US image), which matches the manual's list.
 inline constexpr std::array<const char*, 8> kWorkshopGoodsNames = {
     "Glass", "Tin", "Pottery", "Copper", "Wine", "Ivory", "Wheat", "Spices"};
+
+// The eight Forum types the Select Forum Type menu offers (command 12's click handler, 0x1770D, calls the menu at
+// 0334:A5B9; the names are the string at flat 0x7781F), in grade order: grade g builds tile 0xE0 + g.
+inline constexpr std::array<const char*, 8> kForumTypeNames = {
+    "Aventine", "Caelian", "Esquiline", "Janiculan", "Regia", "Pincian", "Palatine", "Romanum"};
 
 // 3496:15A0: what each Forum grade costs, in denarii. Not charged yet -- there
 // is no treasury until Phase 7.
