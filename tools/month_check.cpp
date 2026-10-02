@@ -16,6 +16,9 @@
 // counted, not required to match.
 //
 // Usage: month_check <earlier.SAV> <later.SAV> [max_steps [--all]]
+// Exit status: 0 if some start step reproduces the later save, 1 if none does
+// (the saves may be in the wrong order, from different sessions, or too far
+// apart), 2 if a save can't be loaded.
 
 #include <cstdio>
 #include <cstdlib>
@@ -114,5 +117,5 @@ int main(int argc, char** argv) {
                     start, first, last, best.land_value, best.actors);
     }
     if (windows == 0) std::printf("  no start step reproduces the later save's tiles, records and globals\n");
-    return 0;
+    return windows == 0 ? 1 : 0;
 }

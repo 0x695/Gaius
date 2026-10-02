@@ -35,6 +35,10 @@ android/app/.cxx/
 android/build/
 *.apk
 
+# Game art and sound exported from a player's own copy (scripts/export_assets.py)
+# -- the original's property, never committed.
+export/
+
 # --- Original Caesar (1992) game assets — NEVER commit these. ---
 # See CLAUDE.md "Critical rule before touching anything" / GAIUS_MASTERPLAN.md
 # section 3 (IP posture). Tests/tools read these from a directory pointed at

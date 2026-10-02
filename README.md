@@ -2,7 +2,7 @@
 
 An open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the spirit of Julius/Augustus for Caesar III. Sibling project to **IGDK** and **IGA**.
 
-See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. **Phases 0-5 are complete**: the Layer 1 format library and CLI tools, the SDL2 platform layer and viewer, the Layer 2 data model, the service/housing/construction simulation systems, and a scalable build toolbar. See `docs/FORMATS.md` for per-format status and `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` for the reverse engineering behind the construction system.
+See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. **All ten phases are done**: every format the game ships is decoded; the simulation reproduces real saves; `gaius_viewer` plays a whole career (build, govern, fight, save, get promoted) with the original's art and sound on Windows, Linux, the Steam Deck and Android; and scripts export the game's files and check saves. Left: running it on a physical Android phone and a Steam Deck. See `docs/FORMATS.md` for per-format status and `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` for the reverse engineering behind the construction system.
 
 ## IP posture — read before doing anything else
 
@@ -31,12 +31,34 @@ Built alongside the library in `build/`:
 
 ```sh
 ./build/dump_vpx   <in.vpx>  <out.png> [palette.p32|palette.256]
-./build/dump_pl8   <in.pl8>  <out.png> [palette.p32|palette.256]
+./build/dump_pl8   <in.pl8|in.pl1> <out.png> [palette] [--cols N] [--frames <dir>]
+./build/dump_vas   <in.vas> <base.vpx> <palette> <prefix>
+./build/dump_voc   <in.voc> <out.wav>
+./build/xmi2mid    <in.xmi> <out.mid> [sequence]
+./build/render_audio <game dir> <NAME.XMI | effect 0-19> <out.wav> [rate]
 ./build/render_city <CAESARxx.SAV> <game dir> <out.png> [col row cols rows]
 ./build/empire_view <EMPIRE2.0xx> --ascii | --summary | --png <out.png>
-./build/save_inspect <CAESARxx.SAV>
+./build/save_inspect [--summary] <CAESARxx.SAV>
+./build/save_diff  <a.SAV> <b.SAV> [--cells N]
+./build/sim_check  <CAESARxx.SAV>
+./build/month_check <earlier.SAV> <later.SAV>
 ./build/bindiff_exe <a.exe> <b.exe> [--strings]
 ```
+
+## Scripts
+
+`scripts/` has small Python scripts over those tools (Python 3.8+, standard library only), each doing one job on your own copy of the game; `scripts/README.md` describes them.
+
+```sh
+python scripts/export_assets.py export/assets --game "/path/to/Caesar"   # every picture, sprite, sound and tune to PNG / WAV / MIDI
+python scripts/list_saves.py "/path/to/saves"                            # who governs, when, how rich
+python scripts/render_saves.py "/path/to/saves" --out export/cities      # each save's city, drawn with the game's sprites
+python scripts/compare_saves.py A.SAV B.SAV [--full]                     # what changed between two saves
+python scripts/check_saves.py "/path/to/saves"                           # Gaius's simulation against saves, for contributors
+python scripts/test_scripts.py                                           # the scripts' own tests
+```
+
+What `export_assets.py` writes is the original game's property: it refuses to write inside this repository except under `export/`, which git ignores.
 
 ## Viewer app (Phase 1)
 
@@ -68,8 +90,6 @@ packaging/  the Linux package and Steam Deck notes
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
 third_party/ymfm/  vendored ymfm, the YM3812 emulator the music plays on (BSD-3-Clause)
 ```
-
-Later work (platform packaging, and `scripts/` for tooling) lands in later roadmap phases — see `GAIUS_ROADMAP.md`.
 
 ## Licensing
 

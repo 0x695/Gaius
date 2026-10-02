@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Builds Gaius and runs its tests on Linux (the Steam Deck's platform) and
-# Windows. No game files are available here, so the corpus tests skip.
+# Windows, then the scripts' own tests. No game files are available here, so the
+# corpus tests skip.
 name: build
 
 on:
@@ -20,6 +21,8 @@ jobs:
         run: cmake --build build -j "$(nproc)"
       - name: Test
         run: ./build/gaius_tests
+      - name: Script tests
+        run: python3 scripts/test_scripts.py
       - name: Package
         run: packaging/linux/make_tarball.sh build gaius-linux-x86_64
       - uses: actions/upload-artifact@v4
@@ -39,3 +42,5 @@ jobs:
         run: cmake --build build --config RelWithDebInfo -j
       - name: Test
         run: ./build/RelWithDebInfo/gaius_tests.exe
+      - name: Script tests
+        run: python scripts/test_scripts.py

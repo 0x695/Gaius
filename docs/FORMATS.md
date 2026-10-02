@@ -120,12 +120,16 @@ All formats below are implemented, unit-tested, and (where a real asset was avai
 All in `tools/`, all built and smoke-tested against real files:
 
 - `dump_vpx <in.vpx> <out.png> [palette]` — decode + render to PNG.
-- `dump_pl8 <in.pl8> <out.png> [palette]` — decode all frames to a contact-sheet PNG.
+- `dump_pl8 <in.pl8|in.pl1> <out.png> [palette] [--cols N] [--frames DIR]` — decode all frames to a contact-sheet PNG (a row, or a grid with `--cols`), and with `--frames` each frame as an RGBA PNG with colour 0 transparent.
 - `dump_vas <in.vas> <base.vpx> <palette> <prefix>` — play an animation over a picture, one PNG a frame.
+- `dump_voc <in.voc> <out.wav>` — a sound effect as stored (8-bit mono at its own rate).
 - `xmi2mid <in.xmi> <out.mid> [sequence]` — convert a music cue to Standard MIDI.
 - `render_audio <game folder> <NAME.XMI | effect 0-19> <out.wav> [rate]` — play a tune or an effect as the game does (its driver on an emulated YM3812) into a WAV file.
 - `empire_view <in> --ascii|--png|--summary` — render or inspect an EMPIRE2 scenario.
-- `save_inspect <in.sav>` — print the block table and decode the global-words section.
+- `save_inspect [--summary] <in.sav>` — print the block table, decode the global-words section (naming the words the findings name) and list the walkers; `--summary` is one `key: value` line per fact.
+- `save_diff <a.sav> <b.sav> [--cells N]` — what changed between two saves: bytes per block, each global word, cells per city layer, walkers. Exit 0 identical, 1 different.
+- `sim_check <in.sav>`, `month_check <earlier.sav> <later.sav>` — the simulation against a save, or two. Exit 0 on a match, 1 on a difference.
+- `scripts/` wraps these for players and contributors (`scripts/README.md`): `export_assets.py` writes every picture, sheet, animation, sound, tune and map; the palette each `.VPX` is shown in is a table there, with its confidence (`PANEL1A`-`D` remain unresolved).
 - `bindiff_exe <a.exe> <b.exe> [--strings]` — decompress and diff two EXEPACK'd executables (byte-level runs + embedded-string set differences). Already run against both known `CSR.EXE` builds — see `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md` for what it found.
 
 ## What's next (see `GAIUS_ROADMAP.md`)

@@ -10,7 +10,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 ## At a glance
 
-*As of 2026-09-17.*
+*As of 2026-10-02.*
 
 | Phase | Area | Status | What's left |
 |---|---|---|---|
@@ -24,13 +24,13 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 7 | Forum, advisors, ratings | **Done** | — |
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | **Done** | Checks on real hardware: an Android phone, a Steam Deck |
-| 10 | Tooling scripts | Not started | Everything |
+| 10 | Tooling scripts | **Done** | The IGA entry is drafted (`docs/IGA_ENTRY.md`), not yet applied in that project |
 
 **1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
 
 **Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3887 checks, on Windows and, in CI, Linux. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
-**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Phase 9 is done (2026-09-17): sound, the Settings screen, per-OS folders, rebindable controls and gamepads, touch gestures, a paged toolbar, languages, a Linux package with Steam Deck notes and an Android APK / bundle. Next is Phase 10, the tooling scripts.
+**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Phase 9 is done (2026-09-17): sound, the Settings screen, per-OS folders, rebindable controls and gamepads, touch gestures, a paged toolbar, languages, a Linux package with Steam Deck notes and an Android APK / bundle. Phase 10 is done (2026-10-02): `scripts/` exports the game's files and inspects, renders, compares and checks saves. What is left is validation: a physical Android phone, a Steam Deck, the province view's picture, and a walker's path.
 
 ---
 
@@ -337,16 +337,19 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 
 ## Phase 10 — Tooling scripts
 
-**Status: Not started.**
+**Status: Done** (2026-10-02). Left: applying the IGA entry, which is that project's content (`docs/IGA_ENTRY.md` has it drafted).
 
 **Goal:** simple tooling for players and modders: a collection of scripts over the command-line tools `tools/` already builds, not an editor or an embedding API.
 
+**Done**
+- [x] **A `scripts/` folder** (2026-10-02) — Python 3.8+, standard library only, each script doing one job; `scripts/README.md`. Tools are found in `build/`, `$GAIUS_TOOLS` or `PATH`; the game folder is `--game`, `$GAIUS_GAME`, `$GAIUS_TEST_ASSETS` or Gaius's own. `scripts/test_scripts.py` tests them (14 checks, run in CI): their logic, the tools on synthetic saves and a synthetic `.VOC`, and with a game folder the whole export.
+- [x] **Asset export** — `export_assets.py`: the 20 pictures, 15 sprite sheets (a contact sheet each and every frame as a PNG), the two battle animations, the 23 effects (`dump_voc`, lossless), the 28 tunes as MIDI and with `--wav-music` the 14 `.XMI` as the game plays them, and the 50 provinces' maps, with a `MANIFEST.txt`. It refuses to write game art inside the repository unless git ignores the folder (`export/`). Which palette each picture is shown in is a table (`PICTURES`) with its confidence: `LOGO`, `ROME`, `IMPRSEN` and `ROME2` are inference, and `PANEL1A`-`D` are unresolved (their colours are a guess).
+- [x] **Saves** — `list_saves.py` (`save_inspect --summary`), `render_saves.py` (`render_city`), `compare_saves.py` (a short table, or `save_diff`: bytes per block, each named global word, cells per city layer, walkers).
+- [x] **Checks** — `check_saves.py` runs `sim_check` on every save and `month_check` on every pair up to two months apart (both ways round within a month): all 17 real saves rebuild exactly but `CAESARXS` and `CAESARXW`, which were written between a month's steps; the six `UX` saves chain. `sim_check` and `month_check` now exit 0 on a match, 1 on a difference; `sim_check`'s verdict doesn't include the population count, which a mid-month save legitimately differs on.
+- [x] **Tools** — new: `dump_voc`, `save_diff`, `save_inspect --summary` (and the global words are named in its full dump); `dump_pl8` reads `.PL1` and has `--cols` and `--frames`.
+
 **Open**
-- [ ] **A `scripts/` folder** — short, documented scripts, each doing one job over a user's game folder and saves.
-- [ ] **Asset export** — every picture and sprite sheet to PNG (`dump_vpx`, `dump_pl8`), the battle animations (`dump_vas`), the effects and tunes to WAV (`render_audio`) and the music to MIDI (`xmi2mid`).
-- [ ] **Saves** — inspect a save (`save_inspect`), render its city (`render_city`), compare two saves.
-- [ ] **Checks** — run the simulation checks over a folder of saves (`sim_check`, `month_check`), for anyone contributing saves.
-- [ ] **IGA entry** — document Gaius as the Caesar I engine reimplementation.
+- [ ] **IGA entry** — the record for `engine-projects.json`, and what it makes untrue in the IGA (Caesar I's "wanted" text, its `CLAUDE.md`), are drafted in `docs/IGA_ENTRY.md`; applying them is that project's change.
 
 **Deliverable:** the game's files and saves inspectable and exportable from a few scripts.
 
@@ -362,7 +365,7 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 
 ```text
 Phase 0  Repo + format library                    done
-Phase 1  Static viewer + platform skeleton        done (Android: emulator only)
+Phase 1  Static viewer + platform skeleton        done
 Phase 2  Normalized model + save round trip       done
 Phase 3  Service propagation                      done, validated on 17 saves
 Phase 4  Housing / population / the month         done, validated on 17 saves
@@ -370,8 +373,8 @@ Phase 5  Construction dispatcher + build mode     done
 Phase 6  Economy + military                       done
 Phase 7  Forum / ratings / win-loss               done
 Phase 8  Format completeness + save loader        done
-Phase 9  Platform packaging + polish              unblocked; parallel to 6-8
-Phase 10 Tooling scripts                          last
+Phase 9  Platform packaging + polish              done (not yet run on a phone or a Steam Deck)
+Phase 10 Tooling scripts                          done
 ```
 
 Cross-platform work (masterplan 5a) is spread across Phase 1 (foundations), Phase 5 (input parity in build mode) and Phase 9 (packaging), not saved for the end — by Phase 9, every platform should already have run real, if incomplete, gameplay many times.

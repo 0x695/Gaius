@@ -193,7 +193,13 @@ target_link_libraries(empire_view PRIVATE gaius_formats)
 target_link_libraries(empire_view PRIVATE stb_image_write)
 
 add_executable(save_inspect tools/save_inspect.cpp)
-target_link_libraries(save_inspect PRIVATE gaius_formats gaius_model)
+target_link_libraries(save_inspect PRIVATE gaius_formats gaius_model gaius_systems)
+
+add_executable(save_diff tools/save_diff.cpp)
+target_link_libraries(save_diff PRIVATE gaius_formats gaius_model gaius_systems)
+
+add_executable(dump_voc tools/dump_voc.cpp)
+target_link_libraries(dump_voc PRIVATE gaius_formats)
 
 add_executable(bindiff_exe tools/bindiff_exe.cpp)
 target_link_libraries(bindiff_exe PRIVATE gaius_formats)

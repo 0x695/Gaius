@@ -26,6 +26,10 @@
 // Land value is deliberately not compared: the engine never resets it, so it
 // carries history a single pass can't reproduce.
 //
+// Exit status: 0 if the coverage, the C9D4 bits, the tiles and 7BB4 all match
+// ("RESULT: match"), 1 if any differs, 2 if the save can't be loaded. The
+// population comparison is shown but doesn't decide it.
+//
 // Usage: sim_check <CAESARxx.SAV>
 
 #include <cstdio>
@@ -112,6 +116,8 @@ int main(int argc, char** argv) {
         for (const auto& e : examples) std::printf("%s\n", e.c_str());
     }
 
+    bool exact = match == model::kCityW * model::kCityH;
+
     // --- C9D4 bits the month-end rebuild sets (01 is water) ---
     std::printf("  C9D4 bits:");
     for (uint8_t bit : {uint8_t{0x01}, uint8_t{0x04}, uint8_t{0x08}, uint8_t{0x20}, uint8_t{0x40}, uint8_t{0x80}}) {
@@ -130,6 +136,7 @@ int main(int argc, char** argv) {
             }
         }
         std::printf("  0x%02X %d/10000 (saved-only %d, sim-only %d)", bit, bit_match, saved_only, sim_only);
+        exact = exact && saved_only == 0 && sim_only == 0;
     }
     std::printf("\n");
 
@@ -146,10 +153,17 @@ int main(int argc, char** argv) {
         }
     }
     std::printf("  tiles changed by the rebuild: %d, 7BB4 bytes changed: %d\n", tile_diff, level_diff);
+    exact = exact && tile_diff == 0 && level_diff == 0;
 
     // --- Population ---
     const int units = systems::housing::population_units(st.city);
     std::printf("  population units: computed %d, saved DS:0x6C10 %d (saved population DS:0x6C0E %d)\n", units,
                 saved_word(sf, 0x6C10), saved_word(sf, 0x6C0E));
-    return 0;
+
+    // The verdict covers the service layers, the tiles and 7BB4 -- not the population
+    // count, which the engine takes at step 101 and which housing changes afterwards
+    // (above). A save written between a month's steps can still differ in a layer: after
+    // the housing pass changed a house, or between step 101's reset and its scans.
+    std::printf("  RESULT: %s\n", exact ? "match" : "differs");
+    return exact ? 0 : 1;
 }
