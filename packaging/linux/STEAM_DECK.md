@@ -26,7 +26,7 @@ expects:
 |---|---|
 | Left stick | Move the pointer |
 | A | Click (hold and move the pointer to lay roads and walls) |
-| B | Back, the right mouse button |
+| B | The right mouse button: back out; with a building chosen, switches between placing it and the toolbar |
 | Right stick, d-pad | Scroll the map |
 | Triggers | Zoom |
 | X / LB | Next / previous building |

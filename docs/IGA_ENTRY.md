@@ -53,8 +53,9 @@ with no engine). The IGA's own rule ("mark gaps honestly") applies both ways, so
 the open items went into the devlog entry instead, from `GAIUS_ROADMAP.md`:
 
 - the province view's picture, not yet checked against a capture of the real screen;
-- the four `PANEL1A`-`D` panel pictures' palette (`scripts/export_assets.py` lists
-  it as unresolved);
+- the four `PANEL1A`-`D` panel pictures' palette (`scripts/export_assets.py` listed
+  it as unresolved; since 2026-10-03 only `PANEL1B` and `PANEL1C` are, and the
+  executable never loads them -- `PANEL1A` and `PANEL1D` are in `SHADE.256`);
 - a walker's path and the random draws' timing, which no save can pin;
 - nothing run yet on a physical Android phone or a Steam Deck.
 

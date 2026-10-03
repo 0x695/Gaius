@@ -1,8 +1,8 @@
 # Gaius
 
-An open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the spirit of Julius/Augustus for Caesar III. Sibling project to **IGDK** and **IGA**.
+An open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the spirit of Julius/Augustus for Caesar III. Sibling project to the **IGA**.
 
-See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. **All ten phases are done**: every format the game ships is decoded; the simulation reproduces real saves; `gaius_viewer` plays a whole career (build, govern, fight, save, get promoted) with the original's art and sound on Windows, Linux, the Steam Deck and Android; and scripts export the game's files and check saves. Left: running it on a physical Android phone and a Steam Deck. See `docs/FORMATS.md` for per-format status and `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` for the reverse engineering behind the construction system.
+See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. **All ten phases are done**: every format the game ships is decoded; the simulation reproduces real saves; `gaius_viewer` plays a whole career (build, govern, fight, save, get promoted) with the original's art and sound on Windows, Linux, the Steam Deck and Android; and scripts export the game's files and check saves. Play-testing against the real game continues in Phase 11 (the original's control bar, city screen, opening, pace and build preview). Left: running it on a physical Android phone and a Steam Deck, and Phase 11's open items. See `docs/FORMATS.md` for per-format status and `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` for the reverse engineering behind the construction system.
 
 ## IP posture — read before doing anything else
 
@@ -43,6 +43,7 @@ Built alongside the library in `build/`:
 ./build/sim_check  <CAESARxx.SAV>
 ./build/month_check <earlier.SAV> <later.SAV>
 ./build/bindiff_exe <a.exe> <b.exe> [--strings]
+./build/playtest   <game dir> play 0 0 3000   # a bot plays a whole career through the real game logic (PT_* knobs in tools/playtest.cpp)
 ```
 
 ## Scripts
@@ -60,33 +61,42 @@ python scripts/test_scripts.py                                           # the s
 
 What `export_assets.py` writes is the original game's property: it refuses to write inside this repository except under `export/`, which git ignores.
 
-## Viewer app (Phase 1)
+## Playing
+
+`gaius_viewer` is the game. It needs your own copy of Caesar (the folder that holds `CSR.EXE`; see the IP posture above).
 
 ```sh
-./build/gaius_viewer <EMPIRE2.0xx>
+./build/gaius_viewer                      # finds your Caesar folder, or asks where it is
+./build/gaius_viewer "/path/to/Caesar"    # the start screen: a new career
+./build/gaius_viewer CAESARxx.SAV         # a save (the game's files are looked for beside it, or --assets FOLDER)
+./build/gaius_viewer EMPIRE2.0xx          # a province's map
 ```
 
-Controls: middle-mouse-drag / single-finger touch-drag / gamepad left stick to pan, scroll wheel / gamepad triggers to zoom, F11 to cycle window mode, Escape to quit.
+At a glance: the left button chooses and builds; the right button switches between placing a building and the toolbar, as in the original; the middle button drags the map, which also scrolls with the arrow keys, WASD and the mouse at the window's edge; the wheel zooms. Tab picks the next building and V its variant, Space pauses, M changes screen, F9 cycles the developer data layers, F11 the window mode, and Escape opens Settings. Gamepads and touch work too (`packaging/linux/STEAM_DECK.md`, `android/README.md`), and every key and button can be rebound in Settings > Keys.
 
-For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/gaius_viewer <EMPIRE2.0xx> --screenshot out.png --frames 3`, optionally with `--test-pan X Y` / `--test-zoom Z` to exercise the camera without real input devices.
+Options for one run: `--no-intro` (skips Gaius's title and the original's opening), `--cursor original|gaius`, `--mute`, `--ui-scale N`, `--speed N`, `--save-dir DIR`. The settings (pointer, game pace, window, sound, language) are kept in `gaius.cfg` in the per-user folder (`%APPDATA%\Gaius` on Windows, `~/.config/gaius` on Linux); the game pace is the original's by default, with a faster one as a choice.
+
+For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/gaius_viewer <file> --screenshot out.png --frames 3`, optionally with `--test-pan X Y`, `--test-zoom Z`, `--test-build T X Y`, `--test-hover X Y` or `--screen province|maps|forum`.
 
 ## Repo layout
 
 ```text
-formats/    Layer 1 — exact import (VPX, P32, .256, PL8, EMPIRE2, SAV, EXEPACK)
-model/      Layer 2 — normalized data model (Phase 2): CityState/CityMap/Actor — see GAIUS_ROADMAP.md
-systems/    Layer 3 — simulation systems: service.hpp/.cpp (Phase 3/5, A2C4/C9D4/54A4 propagation + DS:153A tile dispatch), housing.hpp/.cpp (Phase 4, unrest gate + population), construction.hpp/.cpp (Phase 5, DS:127C command dispatch + placement)
-ui/         scalable toolbar (Phase 5) — metrics/font/toolbar, no SDL dependency
-platform/   window/input/paths abstraction (Phase 1) — see GAIUS_MASTERPLAN.md section 5a
+formats/    Layer 1 — exact import and write-back (VPX, P32, .256, PL8/PL1, EMPIRE2, SAV, VAS, VOC, XMI, GTL, screen data, EXEPACK)
+model/      Layer 2 — normalized data model: CityState/CityMap/Actor, loaded from and serialized to a save
+systems/    Layer 3 — the simulation, transcribed from the executable: service (A2C4/C9D4/54A4 propagation and the DS:153A tile dispatch), housing, month (the clock and the random numbers), actors, construction, economy, military, battle, province, plebs, administration, campaign, forum, messages, sounds
+render/     the city, the province and the empire map as the original draws them (no SDL)
+ui/         the original's screens and toolbar, fonts, settings and translations (no SDL, no apps/)
+audio/      the game's sound driver (AIL 2.14, transcribed) and sound layer, no SDL dependency
+platform/   window/input/paths abstraction — see GAIUS_MASTERPLAN.md section 5a
 apps/       gaius_viewer: the game (a Caesar folder, a save or an EMPIRE2 scenario); with no argument it finds the game or explains where it goes
 android/    Android target — see android/README.md
-tools/      CLI utilities built on formats/ and model/
+tools/      CLI utilities built on the layers above, and the playtest bot
+scripts/    small Python scripts over the tools
 tests/      dependency-free test harness (see above)
-docs/       FORMATS.md and findings addenda
-audio/      the game's sound driver (AIL 2.14, transcribed) and sound layer, no SDL dependency
+docs/       FORMATS.md, the findings (the reverse engineering behind each system), IGA_ENTRY.md, TRAILER_PROMPT.md
 lang/       Gaius's own texts in other languages (ui/strings.hpp); scripts/extract_strings.py makes the template
-scripts/    small scripts over the tools
-packaging/  the Linux package and Steam Deck notes
+packaging/  the Linux package, Steam Deck notes and Gaius's icon
+export/     git-ignored output of scripts/export_assets.py (the original's files, never committed)
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
 third_party/ymfm/  vendored ymfm, the YM3812 emulator the music plays on (BSD-3-Clause)
 ```

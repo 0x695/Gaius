@@ -1,31 +1,26 @@
 # Gaius — Master Plan
 
-**Gaius** is an open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the same spirit as Julius/Augustus for Caesar III. It is a sibling project to **IGDK** (Impression Games Dev Kit) and **IGA** (Impressions Games Archive).
+**Gaius** is an open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the same spirit as Julius/Augustus for Caesar III. It is a sibling project to the **IGA** (Impressions Games Archive).
 
-> Naming note: "Gaius" is the engine/game reimplementation itself (praenomen convention, matching "Julius"/"Augustus"). It is not a mod tool — it *is* the game, rebuilt from clean-room reverse engineering, that reads original Caesar assets and (eventually) becomes one of the embeddable engines IGDK can drive.
+> Naming note: "Gaius" is the engine/game reimplementation itself (praenomen convention, matching "Julius"/"Augustus"). It is not a mod tool — it *is* the game, rebuilt from clean-room reverse engineering, that reads original Caesar assets.
 
 ---
 
-## 1. Relationship to the existing project family
+## 1. Relationship to the IGA
 
 ```text
 IGA  (Impressions Games Archive)
   - reference hub: formats, mechanics, history for all 6 Tier-1 games
   - documents Gaius's findings as the Caesar-I engine reimplementation entry
 
-IGDK (Impression Games Dev Kit)
-  - modding IDE: asset conversion, map/scenario/campaign editors, live preview
-  - embeds engines as submodules (Augustus for Caesar III, eventually Gaius for Caesar I)
-
 Gaius (this project)
   - the actual Caesar (1992) engine reimplementation
   - consumes original CSR.EXE-era assets, reproduces simulation + rendering
-  - is itself a target IGDK could embed after 1.0
 ```
 
-Gaius is scoped, resourced, and versioned independently. It does **not** depend on IGDK to make progress. IGDK integration (an embedding API, editors, a live preview) is out of scope for 1.0 (decided 2026-09-16); 1.0's tooling is a collection of scripts.
+Gaius is scoped, resourced, and versioned independently, and does not depend on the IGA to make progress. 1.0's tooling is a collection of scripts.
 
-**Directory placement:** `gaius/` should sit *beside* `igdk/` and `iga/`, never nested inside either, for the same `CLAUDE.md` context-bleed reasons already established for IGA/IGDK.
+**Directory placement:** `gaius/` should sit *beside* `iga/`, never nested inside it, for the same `CLAUDE.md` context-bleed reasons already established for the IGA.
 
 ---
 
@@ -38,12 +33,12 @@ A playable, moddable, open-source Caesar (1992) that:
 3. Can load and save the original `.SAV` format exactly (round-trip byte compatibility as a stretch goal, semantic compatibility as the baseline goal).
 4. **Runs everywhere**: Windows, Linux, Steam Deck and Android — this is a first-class goal, not a stretch platform, and it shapes early architecture decisions (see section 5a). macOS, iOS and Raspberry Pi are out of scope for 1.0 (decided 2026-09-16).
 5. Ships modern QoL expected of any 2020s remaster/port: arbitrary window sizes, fullscreen/borderless/windowed toggle, resolution-independent UI scaling, remappable input across mouse+keyboard/touch/gamepad, and sensible save/config file locations per platform.
-6. Is legible enough — clean modern data structures, documented systems — that IGDK or IGA contributors can pick up any subsystem without re-deriving it from the disassembly.
+6. Is legible enough — clean modern data structures, documented systems — that any contributor can pick up any subsystem without re-deriving it from the disassembly.
 7. Ships simple tooling: a collection of scripts to export the game's assets and inspect, render and check saves.
 
 Non-goals (for now): Caesar II support (different engine entirely — see IGA scope notes), touching Activision-held IP beyond what's needed for interoperability, network multiplayer, or matching 1993 performance constraints (we have vastly more headroom).
 
-Not in 1.0: macOS, iOS, Raspberry Pi, and IGDK integration (embedding API, editors, live preview).
+Not in 1.0: macOS, iOS and Raspberry Pi.
 
 ---
 
@@ -59,6 +54,8 @@ Same rule as the rest of the project family: Activision holds the IP (Caesar 199
 
 ## 4. Current state of knowledge (as of this plan)
 
+> **Status (2026-10-03):** this section is the plan's starting snapshot, kept as written. Everything listed below as unresolved was resolved during Phases 3-8; each bullet now says where. The roadmap (`GAIUS_ROADMAP.md`) and `docs/` are the current record.
+
 The reverse-engineering corpus is already substantial and has been consolidated into `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` — **that document is the authoritative technical reference going forward.** This master plan does not repeat it; it builds the software project on top of it. Summary of what's proven vs. open (full detail + confidence labels are in that doc, section 73–74 and 80):
 
 ### Proven / high confidence
@@ -70,13 +67,13 @@ The reverse-engineering corpus is already substantial and has been consolidated 
 - Construction/action menu strings and infrastructure/construction toolbar taxonomy (from manual + executable strings cross-check).
 
 ### Explicitly unresolved (tracked as blockers below)
-- The **construction command → object type → city tile ID → footprint** pipeline is not fully decoded (this is the single highest-value remaining RE target).
-- City terrain *generation* (new-game/new-city procedural terrain) source is not yet located — the manual states terrain is randomly generated per province/city, but the generator routine hasn't been pinned down.
-- Heavy Industry and Market **do** run through the same 43A5 tile-dispatch mechanism as civic buildings (tiles `0xF3` and `0xF4`), confirmed by disassembly and by reproducing real saves' land value layer exactly — see `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 15. That corrects this document's earlier claim that they don't. Those handlers only do service propagation, though: the *economic* behaviour (goods, labour, sales) isn't in them and is still suspected to run through the object/actor system. Workshop may be the unidentified 3×3 building on tiles `0xF5`/`0xF6`; Fort hasn't been located.
-- `EDATA.CSR`, `CONTFRM.GD8`, `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, and the VAS win/lose animation format are undeciphered.
-- The save **loader** (as opposed to the serializer) hasn't been reverse engineered, so the save layout is currently proven one-directional.
-- Renderer tile-lookup tables (how a tile ID maps to a sprite frame) are not yet recovered.
-- 480/120/720-byte save tables are unidentified.
+- The **construction command → object type → city tile ID → footprint** pipeline is not fully decoded (this is the single highest-value remaining RE target). **Resolved (Phase 5):** the dispatcher `DS:127C` and every command's seed tile and footprint (`docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` sections 12-13).
+- City terrain *generation* (new-game/new-city procedural terrain) source is not yet located — the manual states terrain is randomly generated per province/city, but the generator routine hasn't been pinned down. **Resolved:** `campaign::generate_city` (dispatch findings section 31.2).
+- Heavy Industry and Market **do** run through the same 43A5 tile-dispatch mechanism as civic buildings (tiles `0xF3` and `0xF4`), confirmed by disassembly and by reproducing real saves' land value layer exactly — see `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` section 15. That corrects this document's earlier claim that they don't. Those handlers only do service propagation, though: the *economic* behaviour (goods, labour, sales) isn't in them and is still suspected to run through the object/actor system. Workshop may be the unidentified 3×3 building on tiles `0xF5`/`0xF6`; Fort hasn't been located. **Resolved:** the economy is `systems::economy` (dispatch findings section 25), the Workshop is `0xF5`/`0xF6` with its record table (19.1) and the Fort is a province command (28.7).
+- `EDATA.CSR`, `CONTFRM.GD8`, `P_BLOCKS.PL8`, `TEMPLBIT.PL8`, and the VAS win/lose animation format are undeciphered. **Resolved (Phase 8):** dispatch findings section 34; `P_BLOCKS.PL8` is the panel pieces (section 38.3).
+- The save **loader** (as opposed to the serializer) hasn't been reverse engineered, so the save layout is currently proven one-directional. **Resolved:** the loader reads exactly the writer's records (dispatch findings section 33.1), and `formats::save::write` writes files the engine reads.
+- Renderer tile-lookup tables (how a tile ID maps to a sprite frame) are not yet recovered. **Resolved:** `docs/CAESAR_CITY_RENDERER_FINDINGS.md`.
+- 480/120/720-byte save tables are unidentified. **Resolved:** the forum, barracks and workshop records (dispatch findings section 22).
 
 These gaps don't block starting the engine — they block *specific* systems, so the roadmap below sequences work to stay unblocked as long as possible.
 
@@ -87,8 +84,8 @@ A GOG digital distribution of Caesar Deluxe has since been supplied and inspecte
 - **Continuity confirmed:** the package's `US/CSR.EXE` is byte-identical to the build already fully analyzed — nothing already documented changes.
 - **A second, distinct `CSR.EXE` build now exists** (international/multi-language: English+German+French, smaller and not yet decompressed/analyzed) — a genuinely new, unblocked RE opportunity: bindiffing two known builds of "the same" logic is a fast way to confirm or refute provisional findings.
 - **The `COHORT.CSR` "missing file" is resolved but reclassified:** it's not shipped content, it's a 14-byte runtime handoff file CSR.EXE writes before exiting to a battle screen. `LOADER.EXE`, `HIRES!.COM`, `COHORT.EXE`, and the two `.MAP` files remain genuinely absent from every archive supplied so far.
-- **A concrete, actionable entry point for the battle-resolution system was found:** `CAESAR.BAT`'s launch loop shows `CSR.EXE` accepts a `cohort` command-line argument that triggers its own internal battle resolution (the manual's Tortoise/Assault/Flank/Charge screen, used when the external Cohort 2 product isn't installed). This significantly de-risks Phase 6 (masterplan/roadmap previously treated battle resolution as having *no* RE corpus at all to build from).
-- **`.MDI` files (international build) are standard MIDI (SMF)** — zero custom format work needed, and they're a straightforwardly better music source than the original `.XMI`/AIL pipeline unless bit-for-bit 1993 fidelity is specifically wanted.
+- **A concrete, actionable entry point for the battle-resolution system was found:** `CAESAR.BAT`'s launch loop shows `CSR.EXE` accepts a `cohort` command-line argument that triggers its own internal battle resolution (the manual's Tortoise/Assault/Flank/Charge screen, used when the external Cohort 2 product isn't installed). This significantly de-risks Phase 6 (masterplan/roadmap previously treated battle resolution as having *no* RE corpus at all to build from). **Corrected (2026-09-17, dispatch findings section 44):** `csr.exe cohort` resumes the game after Cohort 2 fought the battle; the internal battle screen runs from the province map (sections 27 and 38).
+- **`.MDI` files (international build) are standard MIDI (SMF)** — zero custom format work needed, and they're a straightforwardly better music source than the original `.XMI`/AIL pipeline unless bit-for-bit 1993 fidelity is specifically wanted. **Corrected (2026-09-15, dispatch findings section 34.5):** they are re-orchestrations for General MIDI, not the `.XMI` cues in another container. Gaius plays the `.XMI` files through the AIL driver, transcribed in `audio/` (section 45), and does not use the `.MDI` files.
 - One format false-alarm resolved (`MINIFONT.PL1` is just PL8 under a different extension — importer should sniff structure, not trust extensions), and one new open question raised (`CONTFRM.GD8` content varies by build/region, still undeciphered but now known to be localizable rather than static).
 
 See the roadmap for how these land in specific phases.
@@ -102,8 +99,7 @@ Adopting the layered model already proposed during RE (COMPLETE.md sections 76-7
 ```text
 ┌─────────────────────────────────────────────────────────┐
 │ Layer 4 — Tooling                                        │
-│   scripts over the tools/ CLIs for 1.0; editors and IGDK │
-│   integration after 1.0                                  │
+│   scripts over the tools/ CLIs                           │
 ├─────────────────────────────────────────────────────────┤
 │ Layer 3 — Original-format export                         │
 │   write-back to EMPIRE2 / .SAV / resource formats         │
@@ -116,6 +112,8 @@ Adopting the layered model already proposed during RE (COMPLETE.md sections 76-7
 │   VPX/P32/256/PL8 decoders, EMPIRE2 reader, save reader   │
 └─────────────────────────────────────────────────────────┘
 ```
+
+*In the code (2026-10-03):* `formats/` is Layer 1; `model/` is Layer 2; `systems/` is the simulation (called Layer 3 in the README and `CLAUDE.md`); save write-back is `formats::save::write` over `model::serialize`; `render/`, `ui/` and `apps/viewer/` draw and run it; Layer 4's tooling is `tools/` and `scripts/`.
 
 ### Engine module breakdown (from the reconstructed simulation model)
 
@@ -146,16 +144,18 @@ gaius/
   scripts/         # Layer 4 for 1.0: asset export, save inspection and checks over tools/
   tools/           # CLI utilities: dump_vpx, dump_pl8, decode_save, empire_view, etc.
 docs/
-  (mirrors ROADMAP.md / FORMATS.md / UI_SPEC.md convention from IGDK)
+  (FORMATS.md, the findings addenda and IGA_ENTRY.md; this plan and the roadmap sit at the root)
 ```
+
+*The file names above are the plan's.* What exists is in the README's repository layout: `systems/` holds service, housing, month, actors, construction, economy, military, battle, province, plebs, administration, campaign, forum, messages and sounds. Water, roads, religion and entertainment turned out to be parts of `service`, `construction` and `housing`; there is no `empire_route`, `population` or `save/` module (the province map's road trace is in `province`, population in `housing`, saving in `formats/save`).
 
 ### Tech stack
 
-- **C++17**, matching the IGDK ecosystem for eventual embedding, plus the fact that a lot of the low-level bit-twiddling (RLE decode, packed structs) is exactly the kind of thing C++ handles cleanly and the Python prototypes (`caesar_vpx.py`, `empire2_tools.py`, `caesar_save_layout.py`) already validate the algorithms.
-- **SDL2** (SDL3 if stable enough by the time Phase 1 starts) for windowing/rendering/input — chosen specifically *because* it already has first-class backends for Windows/Linux/Android, plus a known-good track record on Steam Deck (via Proton or native Linux build). No upstream engine to embed here (unlike IGDK+Augustus) — Gaius *is* the engine, so it owns its own rendering loop and must own cross-platform concerns directly rather than inheriting them.
+- **C++17**, because a lot of the low-level bit-twiddling (RLE decode, packed structs) is exactly the kind of thing C++ handles cleanly and the Python prototypes (`caesar_vpx.py`, `empire2_tools.py`, `caesar_save_layout.py`) already validate the algorithms.
+- **SDL2** (SDL3 if stable enough by the time Phase 1 starts) for windowing/rendering/input — chosen specifically *because* it already has first-class backends for Windows/Linux/Android, plus a known-good track record on Steam Deck (via Proton or native Linux build). No upstream engine to embed here — Gaius *is* the engine, so it owns its own rendering loop and must own cross-platform concerns directly rather than inheriting them.
 - Rendering target: an internal logical-resolution framebuffer (period-accurate 320×200-style coordinate space for game logic and original sprite alignment) composited to an arbitrary physical window/display size at draw time. This is the single decision that makes resolution/windowed-mode/DPI-scaling/touch-hit-testing all tractable later instead of requiring a rewrite — see section 5a.
-- Python prototypes remain the scratch/validation layer: fastest way to test a new RE hypothesis against real files before porting to C++. Every Python tool in the corpus should eventually have a C++ equivalent in `formats/`, but the Python stays in the repo as a `tools/re/` sandbox — it's cheap to keep and useful for future RE work.
-- Data interchange for tooling: PNG for graphics (matches IGDK's Augustus-compatible PNG+assetlist convention), JSON/XML for map/scenario metadata.
+- Python prototypes remain the scratch/validation layer: fastest way to test a new RE hypothesis against real files before porting to C++. Every Python tool in the corpus should eventually have a C++ equivalent in `formats/`, but the Python stays in the repo as a `tools/re/` sandbox — it's cheap to keep and useful for future RE work. (As of 2026-10-03 there is no `tools/re/`; `scripts/` holds the Python this repo ships.)
+- Data interchange for tooling: PNG for graphics, JSON/XML for map/scenario metadata.
 - Build system: CMake with per-platform toolchain files (Android NDK, standard desktop) from the start, not bolted on later — this is what actually determines whether Phase 0's scaffolding pays off on mobile.
 
 ## 5a. Platform targets & QoL — designed in from Phase 1, not retrofitted

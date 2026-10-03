@@ -85,7 +85,7 @@ The language files (`lang/`) are copied into the APK's assets by the
 the stock SDL2 `android-project` template, edited: namespace and application
 id, `ndkVersion`, CMake instead of ndk-build, ABIs, signing, assets.
 
-The launcher icon is still SDL's template icon.
+The launcher icon is Gaius's own (`packaging/icon/make_icon.py` writes the five sizes under `app/src/main/res/mipmap-*`).
 
 ## Third-party licensing
 

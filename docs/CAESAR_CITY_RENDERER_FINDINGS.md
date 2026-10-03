@@ -38,7 +38,7 @@ For each cell (`0x1FFEF`), `303E:[0x0E]` is set to the tile id, then:
 - **Tiles `0xA8`/`0xAB`/`0xAE`/`0xB1`** add `(DS:0x6D3A >> 2) & 1`.
 - Anything still below `0xC8` is drawn by `303E:0BF0` as **`FIXTS.PL8` frame = tile id**, opaque.
 
-`0x1FB94` is a second loop, for the overlay map modes. It draws `SHADE.PL8` frames chosen from land value, water and similar layers (`DS:0x6D26` selects which) and isn't implemented.
+`0x1FB94` is a second loop, for the overlay map modes. It draws `SHADE.PL8` frames chosen from land value, water and similar layers (`DS:0x6D26` selects which) and isn't implemented. (The original's maps screen, a separate small map of the whole city, is: `ui::compose_maps_screen`, dispatch findings section 39.)
 
 ## 4. Buildings (`0x20204`)
 
@@ -88,7 +88,7 @@ A search of the captures with the decoded sheets finds 13 `HOUSES`, 13 `HOUSES2`
   - **In Gaius.** `gaius_viewer` drives `RenderPhase` from the simulation's step count the same way.
 - ~~The workshop records at `DS:0x585C`~~ **Resolved:** they are the save's `table_720`, and drive the `0xF5`/`0xF6` rows (section 4). Walkers turned out to be the separate actor table at `DS:0x5D84` (section 8).
 - The overlay map modes (`0x1FB94`, `SHADE.PL8`).
-- What moves the actors (their types' behaviour), `SPRITE2.PL8`, `FIXT3.PL8` and the province view.
+- ~~What moves the actors (their types' behaviour), `SPRITE2.PL8`, `FIXT3.PL8` and the province view.~~ The actors' behaviour is `systems::actors` and `systems::province` (dispatch findings sections 20 and 28), and the province view is drawn from `FIXT3.PL8` and `SPRITE2.PL8` (`render::render_province`). Still open: a capture to check that frame = tile there.
 - `HOUSES.PL8` frame 43 (8×16) and `HOUSES2.PL8` frames not listed above.
 
 ## 7. Text and the control panel
@@ -108,6 +108,7 @@ Loaded alongside the city sheets (`0xFBD3`-`0xFC58`): `P_BLOCKS.PL8` and `POINTE
   - **Drawing, slot by slot** (command: frame). Page 0, the main bar: Go to Province 21, Go to Forum 6, save/load (id `0x28`) 51, Maps 33, Clear Area 5, Housing 9, Bath Houses 22, the infrastructure page (`0x26`) 52, the culture page (`0x27`) 53. Page 1: back 28, Road 7, Plaza 19, Reservoir/pipe 8, Well 11, Fountain 12, Wall 10, Tower 16, Barracks 14, Prefecture 17, Forum 18. Page 2: back 28, Temple 23, Hospital 30, School 32, Oracle 31, Heavy Industry 20, Market 34, Workshop 27, Theater 24, Coliseum 25, Hippodrome 26. Province page: back to the city 13, Go to Forum 35, then 40, 41, 42 (clear, road and Imperial Highway), Fort 15, 43, 39 (Great Wall and Tower), Patrol 36, Attack 37, Go Home 38.
   - **Checked against the running game.** The page-1 capture shows exactly slots 0-10 of page 1 in this order, and `test_ui_command_icons_match_screenshot` matches all eleven icons pixel for pixel; the page-0 capture's "Housing" title appears with the house icon (9) pressed.
   - **In Gaius.** `ui::command_icon_frame` holds the table, and the toolbar draws the real icons when the game's files are present.
+- **The panel pictures (`0x0FDED`, dispatch findings sections 47-48).** `PANEL1A.VPX` for page 0 and the province view, `PANEL1D.VPX` for pages 1 and 2: 320 x 200 pictures in `SHADE.256` whose bottom 24 rows are the bar. `PANEL1B` and `PANEL1C` are never loaded.
 - **`P_BLOCKS.PL8`** holds the frame, border and button pieces of the advisor and management screens: 31 of its 40 frames are found in those captures.
 
 ## 8. Walkers and other city actors (2026-09-13)

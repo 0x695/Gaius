@@ -10,7 +10,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 ## At a glance
 
-*As of 2026-10-02.*
+*As of 2026-10-03.*
 
 | Phase | Area | Status | What's left |
 |---|---|---|---|
@@ -25,12 +25,13 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 8 | Format completeness & save write-back | **Done** | Province view unchecked against a capture |
 | 9 | Packaging & polish | **Done** | Checks on real hardware: an Android phone, a Steam Deck |
 | 10 | Tooling scripts | **Done** | IGA format pages for Caesar (its row links here for now) |
+| 11 | Play-testing and fidelity | **In progress** | The Tower, the original's start screen, captures of the province view; see [Phase 11](#phase-11--play-testing-and-fidelity-to-the-originals-screens) |
 
-**1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS, Raspberry Pi and IGDK integration (the embedding API, editors and live preview) are out of scope for 1.0.
+**1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS and Raspberry Pi are out of scope for 1.0.
 
-**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 3887 checks, on Windows and, in CI, Linux. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
+**Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 4537 checks with the game's files (2772, the rest skipping, without them), on Windows and, in CI, Linux. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
-**Critical path now:** a whole career is playable in `gaius_viewer` -- a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Phase 9 is done (2026-09-17): sound, the Settings screen, per-OS folders, rebindable controls and gamepads, touch gestures, a paged toolbar, languages, a Linux package with Steam Deck notes and an Android APK / bundle. Phase 10 is done (2026-10-02): `scripts/` exports the game's files and inspects, renders, compares and checks saves. What is left is validation: a physical Android phone, a Steam Deck, the province view's picture, and a walker's path.
+**Where it stands:** a whole career is playable in `gaius_viewer` — a new game from the start screen, build, govern from the Forum, fight in the province, save and load, get promoted to a new province or dismissed. Phase 8 is done: every file the game ships is decoded. Phase 9 is done (2026-09-17): sound, the Settings screen, per-OS folders, rebindable controls and gamepads, touch gestures, a paged toolbar, languages, a Linux package with Steam Deck notes and an Android APK / bundle. Phase 10 is done (2026-10-02): `scripts/` exports the game's files and inspects, renders, compares and checks saves. Since then (2026-10-02 onwards) hands-on play, checked against the real game in DOSBox, has gone into Phase 11: the original's control bar, city screen, message box, opening, pace and build preview, and the reservoir rule. What is left is validation (a physical Android phone, a Steam Deck, the province view's picture, a walker's path) and the open items of Phase 11.
 
 ---
 
@@ -38,10 +39,10 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **Status: Done.** See `docs/FORMATS.md` for what each decoder covers and how it's tested.
 
-**Goal:** stand up the repo and port the validated Python prototypes into a C++ library, as IGDK's Phase 0 did for `sgformat`.
+**Goal:** stand up the repo and port the validated Python prototypes into a C++ library.
 
 **Done**
-- [x] **Repo** — `gaius/`, CMake build, VS Code config (mirroring IGDK's setup).
+- [x] **Repo** — `gaius/`, CMake build, VS Code config.
 - [x] **`formats/vpx`** — ported from `caesar_vpx.py`. `EMAP2.VPX` matches `EMAP2_decoded.png`: 0/64000 pixels differ (golden-image test).
 - [x] **`formats/p32`, `formats/pal256`** — palettes. `.P32` checked through the VPX golden test; `.256` against all eight real files, their `.P32` pairs, and `CSR.EXE`, which sends the bytes straight to the VGA DAC (2026-09-13).
 - [x] **`formats/pl8`** — sprite sheets. Checked against the documented `HOUSES.PL8` example; found which header word is the frame count and the trailing placeholder frames.
@@ -66,7 +67,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 - [x] **Rendering through a logical framebuffer** (masterplan 5a), never a fixed-pixel blit; letterboxing in `platform/window.cpp`. The game's own city sprites draw since 2026-09-13 (`render::render_city`), once screenshots showed the city palette is `SHADE.256` and PL8 pixels are four interleaved streams.
 - [x] **Window modes** — windowed, borderless and fullscreen switching; resize; letterbox coordinate mapping. Verified under `SDL_VIDEODRIVER=dummy`.
 - [x] **Per-OS paths** — `platform/paths.cpp` via `SDL_GetPrefPath`.
-- [x] **Android build** (2026-09-08) — see `android/README.md`. The SDL2 `android-project` template builds `apps/android_hello/` against the unmodified platform layer; runs on the `Medium_Phone` emulator (x86_64), confirmed by logcat and `adb screencap`.
+- [x] **Android build** (2026-09-08) — see `android/README.md`. The SDL2 `android-project` template built `apps/android_hello/` (since replaced by the whole game, Phase 9) against the unmodified platform layer; runs on the `Medium_Phone` emulator (x86_64), confirmed by logcat and `adb screencap`.
 - [x] **Empire-map viewer** — all 50 scenarios, with the same terrain classification as `empire_view`; checked at three zoom levels (`--test-zoom`/`--test-pan`).
 - [x] **Save viewer** (2026-09-08) — `apps/viewer/save_view.hpp`: the 100×100 tile grid and four service layers as heatmaps; the file size picks the mode (1602 bytes EMPIRE2, 57126 `.SAV`). Real saves open since 2026-09-12, and the first view is the city in the game's own sprites, with walkers.
 - [x] **Input abstraction** (masterplan 5a point 4) — `platform/input`: mouse, touch and gamepad all become one `Command` stream.
@@ -77,14 +78,11 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **RE blockers:** none. The tile→sprite rules, once tracked as tech debt, were transcribed on 2026-09-13 and match DOSBox captures pixel for pixel (`docs/CAESAR_CITY_RENDERER_FINDINGS.md`).
 
-<details>
-<summary>History</summary>
+**History**
 
 - The Android SDK was thought unavailable at handoff; that was the previous environment. This machine had Android Studio; the NDK came from `sdkmanager`.
 - Before real saves existed, the save viewer was verified against a synthetic in-memory `SaveFile` (`test_save_view_render_synthetic`) and showed raw-byte heat gradients only.
 - PL8 atlas assembly waited on the in-city palette until the 2026-09-13 screenshots.
-
-</details>
 
 ---
 
@@ -107,14 +105,11 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **RE blockers:** none. The save loader was read in Phase 8 (dispatch findings section 33.1): it reads exactly the writer's records, then rebuilds `DS:0x6BFE`, resets the land value ceiling and copies the messages option.
 
-<details>
-<summary>History</summary>
+**History**
 
 - 2026-09-12: the save *writer* was read. `global_words_128` isn't a descending DS range — the old formula was wrong for 107 of 128 words (`docs/FORMATS.md`).
 - 2026-09-13: every block's runtime address mapped. `table_480` forums, `table_120` barracks, `table_720` workshops, `table_8` workshops per goods, `table_10` population milestones, `table_50` provinces given, `table_60_a-d`/`table_72` yearly histories, `final_state` named words.
 - 2026-09-14: the loader's read order, and the economy words named (findings section 25).
-
-</details>
 
 ---
 
@@ -137,15 +132,12 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 - C9D4 producers are confirmed by disassembly: `0x04` Bath Houses, `0x08` Market, `0x40` School and Hospital, `0x20` Forum and Prefecture (renamed "administration" on 2026-09-14, when the population tax turned out to read it); `0x02` is derived from `0x10` by `0x2DA0D`.
 - Heavy Industry (`0xF3`) and Market (`0xF4`) run through this dispatcher; their economic side is Phase 6's.
 
-<details>
-<summary>History</summary>
+**History**
 
 - The first version was built from RE-corpus parameter tables and was wrong in several places, though every unit test passed — the tests encoded the same wrong values. `tools/sim_check` against real saves found all of it in one run.
 - It skipped Barracks, School, Oracle, Plaza and Prefecture for lack of documented parameters rather than invent numbers. All four real ones are now transcribed; "Plaza" was never a `DS:153A` handler (its supposed tile, `0xF3`, is Heavy Industry).
 - Five handlers had wrong parameters *and* names (`0xEE` Prefecture, `0xEF` Barracks, `0xF3` Heavy Industry, `0xF4` Market, `0xEB` Oracle); nine handlers were missing entirely.
 - `0x20` was first "religious" (HIGH CONFIDENCE in the corpus), downgraded when Prefecture was found setting it, renamed when its consumer was found.
-
-</details>
 
 ---
 
@@ -169,14 +161,11 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **RE blockers:** none left.
 
-<details>
-<summary>History</summary>
+**History**
 
 - The first version rested on a misread table: tiles `0x00`-`0x15` looked like housing but the engine never dispatches them. `DS:1212`'s entries for `0xCA`-`0xFF` had been read as `DS:153A` tiles `0x00`-`0x35` (findings section 16).
 - Blockers that closed on 2026-09-13: the tile-to-grade mapping (`0xC8`-`0xD7`), the population table (a placeholder until `3496:007E` was found), and the "21 untraced handlers" (obsolete — those tiles are never dispatched).
 - The last untranscribed piece, routine `0x29624`, turned out to be fire.
-
-</details>
 
 ---
 
@@ -201,8 +190,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 
 **RE blockers:** none left. The four Appendix C items this phase existed to close (construction far-pointer table, command IDs, command → handler, footprints) are all closed.
 
-<details>
-<summary>History: six RE passes to find the dispatcher</summary>
+**History: six RE passes to find the dispatcher**
 
 Kept because *why* the dead ends failed is the lesson for the next table anyone hunts in this binary. Full detail: dispatch findings sections 1-14.
 
@@ -213,8 +201,6 @@ Kept because *why* the dead ends failed is the lesson for the next table anyone 
 5. **Pass 6 — solved.** Scanning the whole image for runs of ≥8 four-byte entries sharing a segment word found 19 tables; one was `DS:127C`. Its call sites had been in the very first `lcall` sweep, unrecognised.
 
 Limits carried at the time, all since closed: the six drag and variant commands (2026-09-13), placeholder font and generated footprint icons (2026-09-13), costs not charged (2026-09-14), drag cancel (2026-09-14).
-
-</details>
 
 ### Still open in Phases 0-5
 
@@ -237,7 +223,7 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 - [x] **Economic actors** (2026-09-13, findings section 20) — type 8 workshop traders sell on market cells and feed their workshop's 0-7 level; 4 barracks patrols; 5-7 invaders; 10 rioters; 0-2 forum citizens.
 - [x] **`systems::economy`** (2026-09-14, findings section 25) — the loop as the engine has it: heavy industry in reach adds 2 to a workshop's level, markets let its traders sell, levels become the industrial tax, housing grades the population tax, and the year's settlement pays operating costs and the tribute. Also construction costs, emergency funds and donations. Every save's funds history balances year by year; each save's last year is reproduced exactly.
 - [x] **`systems::military`, the Legion** (2026-09-14, findings section 26) — the yearly recruitment (`0x289C0`: regular Centuries from wages, irregular from population x conscription) and the assignment of Centuries to Cohorts (`0x28A8F`, mobilized/demobilized). All 17 saves' regulars, irregulars and Cohorts reproduced.
-- [x] **`systems::battle`** (2026-09-14, findings section 27) — the four tactics against the province's race (16 races, strengths per tactic), rounds, casualties, morale, victory, defeat and retreat. All 17 saves' race words reproduced. Not modeled: the screen itself and the Cohort 2 hand-over.
+- [x] **`systems::battle`** (2026-09-14, findings section 27) — the four tactics against the province's race (16 races, strengths per tactic), rounds, casualties, morale, victory, defeat and retreat. All 17 saves' race words reproduced. Not modeled at the time: the screen itself and the Cohort 2 hand-over, both done below.
 - [x] **Auxiliaries and the plebs** (2026-09-14, findings section 29) — army duty's plebs / 16 are the auxiliaries (`0x2DD21`), in the full pleb model below. `0x23272`, once read as a fort transfer, applies Cohort 2's battle result from `cohort.csr`: not needed.
 - [x] **`systems::province`, the province actors** (2026-09-14, findings section 28) — the province walker, barbarian armies (the 18-month spawner, marching, wrecking, pillaging towns, invading the city), and Cohorts halting, patrolling, attacking and going home into battle. Save actors checked against the map's occupancy bits.
 - [x] **Towns, the highway and road wear** (2026-09-14, findings section 28.6) — the road trace `0x2E377`, towns growing when linked to the city and shrinking when not, the Imperial Highway link, the monthly province pass.
@@ -250,9 +236,9 @@ Every checklist item in Phases 0-5 is done. What remains is validation, a few un
 
 **Deliverable:** the full economic loop (industry → workshop → market → taxes) and a province level with combat. **Met.**
 
-- [x] **The original battle screen** (2026-09-16, findings section 38) -- `WAR2.VPX`, the bars, banners and figures, the tactic buttons, the round messages, the `.VAS` animations and the retreat dialog, in `ui::BattleScreen`.
+- [x] **The original battle screen** (2026-09-16, findings section 38) — `WAR2.VPX`, the bars, banners and figures, the tactic buttons, the round messages, the `.VAS` animations and the retreat dialog, in `ui::BattleScreen`.
 
-- [x] **The Cohort 2 hand-over** (2026-09-17, findings section 44) -- the offer on `WARMESS.VPX`, "Cohort ?", the battle written into its words and `csr0.dat` / `cohort.csr`, and the result taken back (`0x23272`); `gaius_viewer --cohort-command` runs Cohort 2 through a command of the player's choosing.
+- [x] **The Cohort 2 hand-over** (2026-09-17, findings section 44) — the offer on `WARMESS.VPX`, "Cohort ?", the battle written into its words and `csr0.dat` / `cohort.csr`, and the result taken back (`0x23272`); `gaius_viewer --cohort-command` runs Cohort 2 through a command of the player's choosing.
 
 Every Phase 6 item is done.
 
@@ -264,34 +250,34 @@ Every Phase 6 item is done.
 
 **Goal:** the administrative layer — seven advisors, four ratings (Peace, Culture, Prosperity, Empire), promotion, the annual tribute, plebs.
 
-**Open**
+**Done**
 - [x] **`systems::plebs`** (2026-09-14, done in Phase 6, findings section 29) — each duty's need, welfare growing or shrinking the pleb count, the assignment, and the fire, collapse and road-wear thresholds their coverage sets. Every save reproduced.
 - [x] **`systems::administration`** (2026-09-14, findings section 30) — Peace, Culture, Prosperity and Empire, their population caps and average; promotion's requirements, the new province's pick, accepting or waiting 9 or 24 years, Caesar; the yearly notice. The average in all 17 saves, Culture in 14, Peace and Prosperity across the one pair of consecutive years.
 - [x] **`systems::campaign`** (2026-09-15, findings section 31) — a new game (`0x056B8`), a new province's reset (`0x05730`: funds by rank, plebs, the Legion, cleared city, the Prima Cohors, the highway's entry) and the city's random terrain (`0x06F05`: lakes, erosion, shores, grass, the river). Every save's shores obey the transcribed rule.
 - [x] **Forum UI** (2026-09-15, findings section 32) — `systems::forum` transcribes the buttons (every arrow's limits, the Tribune's duty transfers, the Military Advisor's Cohort cycling and mobilizing, salary and donation); `gaius_viewer`'s Forum has the Treasurer, Tribune, Legion, ratings and governor pages. Promotion opens its page and an accepted one starts the new province from its `EMPIRE2.0NN`; the third missed tribute (`SimState::dismissed`) and becoming Caesar end the game. The layouts are Gaius's own; the names are the executable's tables (provinces, emblems, Cohort states).
-- [x] **The Forum's other figures and the advice** (2026-09-16, findings section 36) -- the statue's rank cheat, the histories graphed by the man in the blue robe, the industry report, and the ratings screen's 14 advice texts, in `systems::forum` and on the viewer's History, Industry and Ratings pages. The industry average matches all 17 saves.
-- [x] **The map of the Empire** (2026-09-16, findings section 37) -- `EMAP2.VPX` with the given provinces' markers, pixel-exact against the map capture, opened from the governor's page.
+- [x] **The Forum's other figures and the advice** (2026-09-16, findings section 36) — the statue's rank cheat, the histories graphed by the man in the blue robe, the industry report, and the ratings screen's 14 advice texts, in `systems::forum` and on the viewer's History, Industry and Ratings pages. The industry average matches all 17 saves.
+- [x] **The map of the Empire** (2026-09-16, findings section 37) — `EMAP2.VPX` with the given provinces' markers, pixel-exact against the map capture, opened from the governor's page.
 - [x] **Maps panel** (2026-09-15) — Water, Administration, Land Value, Road and Housing (Urbanization) overlays on the city, drawn from the modeled layers. The Trouble overlay came with the original maps screen (2026-09-16, section 39). On 2026-10-02 the layers were renamed to the original's own terms and this panel followed: its Land value overlay had been drawing the unrest layer (`54A4`), so it now draws `A2C4`, and an Unrest overlay was added.
 
 **Deliverable:** the full single-player loop — build, grow, get promoted or fail the tribute. **Met**, from a save: a new game's start screen is Phase 8.
 
-- [x] **The original maps screen** (2026-09-16, findings section 39) -- the whole-city map with urbanization, water, administration, roads, land value and trouble areas, pixel-exact around the map against the capture; `ui::compose_maps_screen`.
+- [x] **The original maps screen** (2026-09-16, findings section 39) — the whole-city map with urbanization, water, administration, roads, land value and trouble areas, pixel-exact around the map against the capture; `ui::compose_maps_screen`.
 
-- [x] **The Forum's screens in the original's art** (2026-09-16, findings section 41) -- the histories, Treasurer, Legion, Tribune, industry report, ratings, governor and the funds warning (`ui/forum_screens.hpp`); the four with captures match them on every pixel the capture's own city doesn't decide.
+- [x] **The Forum's screens in the original's art** (2026-09-16, findings section 41) — the histories, Treasurer, Legion, Tribune, industry report, ratings, governor and the funds warning (`ui/forum_screens.hpp`); the four with captures match them on every pixel the capture's own city doesn't decide.
 
-- [x] **The governor's three dialogs** (2026-09-16, findings section 41.4) -- the promotion requirements, the salary and the donation, drawn over the governor's screen with their arrows; the donation pays when its dialog ends.
+- [x] **The governor's three dialogs** (2026-09-16, findings section 41.4) — the promotion requirements, the salary and the donation, drawn over the governor's screen with their arrows; the donation pays when its dialog ends.
 
-- [x] **The Options screen** (2026-09-17, findings section 42) -- the game and scroll speeds, sound, display options (including the messages option), pause, restart and exit, in the original's art (`ui/options_screen.hpp`); the settings are `CAESAR.INF`'s 28 bytes, kept in Gaius's own copy. The game speed is set here again.
-- [x] **The buttons** (2026-09-17, findings section 42.1) -- `0x0D41D` / `0x0D521` transcribed (`ui/buttons.hpp`): pressed frames, held arrows repeating, toggles, radio buttons and act-on-release.
-- [x] **The statue's key gate** (2026-09-17, findings section 42.4) -- "c" then "B"; `2EF9:0031` is the key before the last.
+- [x] **The Options screen** (2026-09-17, findings section 42) — the game and scroll speeds, sound, display options (including the messages option), pause, restart and exit, in the original's art (`ui/options_screen.hpp`); the settings are `CAESAR.INF`'s 28 bytes, kept in Gaius's own copy. The game speed is set here again.
+- [x] **The buttons** (2026-09-17, findings section 42.1) — `0x0D41D` / `0x0D521` transcribed (`ui/buttons.hpp`): pressed frames, held arrows repeating, toggles, radio buttons and act-on-release.
+- [x] **The statue's key gate** (2026-09-17, findings section 42.4) — "c" then "B"; `2EF9:0031` is the key before the last.
 
-Every Phase 7 item is done. Without effect until later phases: the scroll speed, and the position indicator and icon name options (the original control panel, Phase 8). The sound switches work since Phase 9's sound (2026-09-17).
+Every Phase 7 item is done. The scroll speed drives the map's key and edge scrolling since 2026-10-02 and the sound switches work since Phase 9's sound (2026-09-17); the position indicator and icon name options (the original control panel's) still have no effect.
 
 ---
 
 ## Phase 8 — Format completeness & save write-back
 
-**Status: Done** (2026-09-15). The city renderer, city terrain, saving, the loader, a new game, and every remaining file format -- animations, screen data, sound effects and music -- are done. Left open, not blocking: the province view has no capture to check against. The empire map and battle screens have their original art since 2026-09-16 (findings sections 37-38).
+**Status: Done** (2026-09-15). The city renderer, city terrain, saving, the loader, a new game, and every remaining file format — animations, screen data, sound effects and music — are done. Left open, not blocking: the province view has no capture to check against. The empire map and battle screens have their original art since 2026-09-16 (findings sections 37-38).
 
 **Goal:** write valid EMPIRE2 and `.SAV` files the original engine could read, close the remaining format gaps, and support "New Game".
 
@@ -308,7 +294,7 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 - [x] **City terrain generation** (2026-09-15, findings section 31.2) — `campaign::generate_city`.
 - [ ] **Bindiff the two `CSR.EXE` builds** whenever an item here stalls; differences are often faster to read than one disassembly.
 
-**Deliverable:** format parity, "New Game", pixel-accurate rendering.
+**Deliverable:** format parity, "New Game", pixel-accurate rendering. **Met**, apart from the province view's check against a capture (open above).
 
 ---
 
@@ -339,11 +325,11 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 
 **Status: Done** (2026-10-02). Left, in the IGA's own repository: format pages for Caesar.
 
-**Goal:** simple tooling for players and modders: a collection of scripts over the command-line tools `tools/` already builds, not an editor or an embedding API.
+**Goal:** simple tooling for players and modders: a collection of scripts over the command-line tools `tools/` already builds, not an editor.
 
 **Done**
 - [x] **A `scripts/` folder** (2026-10-02) — Python 3.8+, standard library only, each script doing one job; `scripts/README.md`. Tools are found in `build/`, `$GAIUS_TOOLS` or `PATH`; the game folder is `--game`, `$GAIUS_GAME`, `$GAIUS_TEST_ASSETS` or Gaius's own. `scripts/test_scripts.py` tests them (14 checks, run in CI): their logic, the tools on synthetic saves and a synthetic `.VOC`, and with a game folder the whole export.
-- [x] **Asset export** — `export_assets.py`: the 20 pictures, 15 sprite sheets (a contact sheet each and every frame as a PNG), the two battle animations, the 23 effects (`dump_voc`, lossless), the 28 tunes as MIDI and with `--wav-music` the 14 `.XMI` as the game plays them, and the 50 provinces' maps, with a `MANIFEST.txt`. It refuses to write game art inside the repository unless git ignores the folder (`export/`). Which palette each picture is shown in is a table (`PICTURES`) with its confidence: `LOGO`, `ROME`, `IMPRSEN` and `ROME2` are inference, and `PANEL1A`-`D` are unresolved (their colours are a guess).
+- [x] **Asset export** — `export_assets.py`: the 20 pictures, 15 sprite sheets (a contact sheet each and every frame as a PNG), the two battle animations, the 23 effects (`dump_voc`, lossless), the 28 tunes as MIDI and with `--wav-music` the 14 `.XMI` as the game plays them, and the 50 provinces' maps, with a `MANIFEST.txt`. It refuses to write game art inside the repository unless git ignores the folder (`export/`). Which palette each picture is shown in is a table (`PICTURES`) with its confidence: `LOGO`, `ROME`, `IMPRSEN` and `ROME2` are inference, and `PANEL1B` and `PANEL1C` are unresolved (the executable never loads them; `PANEL1A` and `PANEL1D`, which it does, are in the city palette and match the captures).
 - [x] **Saves** — `list_saves.py` (`save_inspect --summary`), `render_saves.py` (`render_city`), `compare_saves.py` (a short table, or `save_diff`: bytes per block, each named global word, cells per city layer, walkers).
 - [x] **Checks** — `check_saves.py` runs `sim_check` on every save and `month_check` on every pair up to two months apart (both ways round within a month): all 17 real saves rebuild exactly but `CAESARXS` and `CAESARXW`, which were written between a month's steps; the six `UX` saves chain. `sim_check` and `month_check` now exit 0 on a match, 1 on a difference; `sim_check`'s verdict doesn't include the population count, which a mid-month save legitimately differs on.
 - [x] **Tools** — new: `dump_voc`, `save_diff`, `save_inspect --summary` (and the global words are named in its full dump); `dump_pl8` reads `.PL1` and has `--cols` and `--frames`.
@@ -355,7 +341,33 @@ Every Phase 7 item is done. Without effect until later phases: the scroll speed,
 
 **Deliverable:** the game's files and saves inspectable and exportable from a few scripts.
 
-**Out of scope for 1.0:** IGDK integration -- an embedding API, editors, a live preview hook.
+
+---
+
+## Phase 11 — Play-testing and fidelity to the original's screens
+
+**Status: In progress** (2026-10-02 onwards). Not a phase of the original plan: it is what hands-on play found once the ten phases were done, each point checked against the executable and, where it could be, against the real game running in DOSBox (driven by a script that moves, clicks and photographs the window).
+
+**Goal:** the screens and the feel a player of the original knows, drawn the way the original draws them, with Gaius's own pointer and pace settings beside them.
+
+**Done**
+- [x] **The playtest bot** (2026-10-02) — `tools/playtest` plays a whole career through the real game logic. Its first career to Caesar rested on a wrong water rule; with the corrected reservoir rule (wells instead) it plays 13 promotions and stalls at rank 14 (`CLAUDE.md` items 30 and 33).
+- [x] **First play on a Windows PC** (2026-10-02) — no console window, a dark title bar, Gaius's own title screen, edge and key scrolling, the game folder found without being told, a setup screen with a folder picker. The toolbar icons were one button off since Phase 5 and are corrected (renderer findings section 7).
+- [x] **The original's paged control bar and Gaius's icon** (2026-10-02) — three pages of up to 11 buttons from the executable's own tables; a gold laurel G on crimson, drawn by `packaging/icon/make_icon.py` from a few shapes.
+- [x] **Reservoir/pipe and the Forum and Industry menus** (2026-10-02, dispatch findings section 46) — command 5 is a drag command with its own handler (`construction::place_pipe`), checked on every plain pipe piece of all 17 saves; every building's footprint, seed and cost read again and agreeing.
+- [x] **The city screen as the original draws it** (2026-10-02, section 47, from thirteen captures) — the panel, the title plaque, the minimap, the pointer, the cost ghost, the type menus and the yearly notice (`ROME1`/`ROME2.VPX`).
+- [x] **The message box, the province view's bar and a new pointer** (2026-10-03, section 48) — a 16 x 3 stone panel at (0, 0), the province view's bar from `DS:0x123E`, `PANEL1D` for the building pages (`PANEL1B` and `C` are never loaded), and Gaius's own gold pointer as the default with the original's as an option.
+- [x] **The right button, the opening, the pace and the preview** (2026-10-03, section 49) — the right button is the original's scroll-mode / command-mode toggle (the data layers moved to F9); the original's opening (Impressions logo, "presents", the Caesar picture, 25 s of credits) follows Gaius's title; the simulation's clock matches the original's ~66 ms frame (a "Fast" pace is the choice); the build preview draws the pointer routine's one picture or dashed frame, with the cost.
+
+**Open**
+- [ ] **A water plan the real game allows for the bot** — a reservoir on the nearest lake, pipe to fountains — to restore a full career to Caesar.
+- [ ] **The Tower command** (`0x9A`-`0x9F`, one of six pieces by the walls around it; section 46) — on the toolbar but dimmed.
+- [ ] **The original's start screen** — a panel with "Initial funding / Skill level", "Choose name", "Load a game" and "OK"; Gaius's "A new career" page is its own layout.
+- [ ] **The opening's last pieces** — the Golden Sector logo (`LOGO.VPX`) is left out, and the three pictures' times are estimates from a CPU-bound wait loop.
+- [ ] **The scroll-mode pointer frames `0x2E` and `0x2F`** — what selects them (`DS:0x6CA8`) is not read.
+- [ ] **Captures of the message box and the province view** — their geometry is read from the code only; whether the province view has a plaque or a minimap is unknown; the hover marks of the original's menus are unknown.
+
+**Deliverable:** the original's screens as the original draws them, each point confirmed by a capture or by the executable. Partly met; the list above is what is left.
 
 ---
 
@@ -377,6 +389,7 @@ Phase 7  Forum / ratings / win-loss               done
 Phase 8  Format completeness + save loader        done
 Phase 9  Platform packaging + polish              done (not yet run on a phone or a Steam Deck)
 Phase 10 Tooling scripts                          done
+Phase 11 Play-testing + fidelity to the original  in progress
 ```
 
 Cross-platform work (masterplan 5a) is spread across Phase 1 (foundations), Phase 5 (input parity in build mode) and Phase 9 (packaging), not saved for the end — by Phase 9, every platform should already have run real, if incomplete, gameplay many times.

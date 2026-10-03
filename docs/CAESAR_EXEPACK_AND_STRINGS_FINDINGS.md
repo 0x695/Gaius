@@ -77,18 +77,18 @@ Magistrate, Logistas, Praefectus, Magister, Cubicularius, Legate, Quaestor,
 Senator, Praetor, Consul, Proconsul, Princeps, Imperator, Caesar
 ```
 
-21 ranks total. The manual only mentions the starting rank (Decurian) and the final rank (Caesar) — this is the complete promotion ladder, directly relevant to `GAIUS_ROADMAP.md` Phase 7 (promotion/politics system).
+21 ranks total. The manual only mentions the starting rank (Decurian) and the final rank (Caesar) — this is the complete promotion ladder, directly relevant to `GAIUS_ROADMAP.md` Phase 7 (promotion/politics system; done, dispatch findings section 30). The titles are spelled as the executable spells them: "Plebian", "Taberllarius" and, in the province list below, "Caeariensis" look like slips for Plebeian, Tabellarius and Caesariensis, and Gaius keeps them as found.
 
 ### Full province name list (US build)
 
-A list of ~60 real Roman provinces embedded as a single string (Sicilia, Campania, Latium, Cisalpine Gaul, Corsica, Sardinia, Alpes Maritimae, Narbonensis, Hispania Inf./Sup., Baetica, Lusitania Inf./Sup., Tarraconensis, Aquitania Inf./Sup., Hispania Sup., Lugdunensis, Belgica, Gallia Sup./Inf., W./E. Britannia, Britannia Sup., Caledonia, Germania Inf./Sup., Pannonia, Dacia, Illyricum, Dalmatia, Macedonia, Achaea, Creta, Thracia, Asia, Pamphylia, Cappadocia, Assyria, Syria, Mesopotamia, Judea, Arabia, Aegyptus, Cyrenaica, Africa, Numidia, Mauretania, Caeariensis, Tingitania, Moesia — see raw tool output for the exact full string). This is the complete set of governable provinces referenced in "Map of the Empire."
+A list of ~60 real Roman provinces embedded as a single string (Sicilia, Campania, Latium, Cisalpine Gaul, Corsica, Sardinia, Alpes Maritimae, Narbonensis, Hispania Inf./Sup., Baetica, Lusitania Inf./Sup., Tarraconensis, Aquitania Inf./Sup., Hispania Sup., Lugdunensis, Belgica, Gallia Sup./Inf., W./E. Britannia, Britannia Sup., Caledonia, Germania Inf./Sup., Pannonia, Dacia, Illyricum, Dalmatia, Macedonia, Achaea, Creta, Thracia, Asia, Pamphylia, Cappadocia, Assyria, Syria, Mesopotamia, Judea, Arabia, Aegyptus, Cyrenaica, Africa, Numidia, Mauretania, Caeariensis, Tingitania, Moesia — see raw tool output for the exact full string). This is the complete set of governable provinces referenced in "Map of the Empire." (Dispatch findings section 32.2 reads the table, `DS:0x2CAE`, as 50 fields of 16, one per `EMPIRE2.0NN` scenario.)
 
 ### Other confirmed UI/game text (US build)
 
 - Full credits block matching the manual exactly: Chris Denman, Erik Casey, Jon Baker, David Lester, Simon Bradbury, Chris Bamford.
-- Cohort status words: `nothing, waiting, patrolling, attacking, retiring, demobilized` — the actual state-machine labels for a Cohort, directly useful for `systems::military`.
+- Cohort status words: `nothing, waiting, patrolling, attacking, retiring, demobilized` — the actual state-machine labels for a Cohort, directly useful for `systems::military`. (Traced since: they are `DS:0x4772`, indexed by a Cohort's state; dispatch findings section 32.2.)
 - Warning/advisory message text (tribute warnings, tax/spending warnings, forum advisor prompts) in full, previously only summarized.
-- `Eagle, Rabbit, Snake, Fish, Horse, Pig, Wolf, Hero, Explorer, Protector` — ten totem/symbol names, likely battle-standard or barbarian-race identifiers (the manual mentions sixteen barbarian races; only ten names surfaced here — the remaining six may be encoded elsewhere or this list may serve a different purpose. Flagged as **STRONG INFERENCE, not definitive** — needs a consumer trace before assuming it's the barbarian race list).
+- `Eagle, Rabbit, Snake, Fish, Horse, Pig, Wolf, Hero, Explorer, Protector` — ten totem/symbol names, likely battle-standard or barbarian-race identifiers (the manual mentions sixteen barbarian races; only ten names surfaced here — the remaining six may be encoded elsewhere or this list may serve a different purpose. Flagged as **STRONG INFERENCE, not definitive** — needs a consumer trace before assuming it's the barbarian race list). **Resolved (dispatch findings section 32.2):** they are the Cohort emblems, `DS:0x45BE`, 10 fields of 12 indexed by a Cohort's number (the Military Advisor's capture shows the Prima Cohors as "EAGLE"); the 16 barbarian races have their own table (section 27).
 
 ### International build (German/French) confirms manual-documented systems independently
 
@@ -110,6 +110,6 @@ This is a genuinely useful primary source for Phase 5 (construction UI text) and
 | EXEPACK record format and FILL/COPY/last-record semantics | Definitive (validated against 2 independent real builds) |
 | Political rank ladder (21 ranks) | Definitive (extracted string, not inferred) |
 | Province name list | Definitive (extracted string, not inferred) |
-| Cohort status words | High confidence (plausible state-machine labels; consumer not yet traced) |
-| Ten totem names = barbarian races | Strong inference, not definitive — do not treat as final |
+| Cohort status words | Strong inference, traced (`DS:0x4772`, indexed by the Cohort's state; a capture shows "WAITING"; dispatch findings section 32.2) |
+| Ten totem names = barbarian races | Refuted: they are the Cohort emblems (dispatch findings section 32.2) |
 | Workshop goods (cross-confirmed via French/German) | Definitive |

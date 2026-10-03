@@ -1,52 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Gaius Phase 1 deliverable: gaius_viewer
+// Gaius -- gaius_viewer, the game.
 //
-// "Look at your data" tool per GAIUS_ROADMAP.md Phase 1 -- proves the
-// resolution-independence and input-abstraction architecture
-// (GAIUS_MASTERPLAN.md section 5a) end-to-end with a real SDL2 window,
-// not just static PNG dumps like Phase 0's tools produced.
+// It began as Phase 1's "look at your data" tool (GAIUS_ROADMAP.md) and proved the resolution-independence and
+// input-abstraction architecture (GAIUS_MASTERPLAN.md section 5a) with a real SDL2 window; it is now the whole game
+// (Phases 5-9, and Phase 11's fidelity work). Given a Caesar folder it opens the start screen; given a CAESARxx.SAV
+// or an EMPIRE2.0xx scenario it opens that. Which of the last two is decided by the file's exact size, not its
+// extension -- the same "sniff structure, don't trust extensions" lesson as docs/CAESAR_GOG_BUILD_FINDINGS.md's
+// MINIFONT.PL1 finding. With no argument it finds the game folder (platform/game_detect.cpp) or shows a setup screen.
 //
-// Accepts either an EMPIRE2.0xx scenario (rendered with the same
-// terrain-family color classification as Phase 0's empire_view tool) or a
-// CAESARxx.SAV save file (rendered as the 100x100 city tile grid or one of
-// the four service-layer heatmaps -- see apps/viewer/save_view.hpp). Which
-// one is picked is decided by the file's exact size, not its extension --
-// same "sniff structure, don't trust extensions" lesson as
-// docs/CAESAR_GOG_BUILD_FINDINGS.md's MINIFONT.PL1 finding.
+// Controls (Settings > Keys rebinds them; platform/input.hpp has the gamepad and touch forms):
+//   middle-mouse drag / single-finger touch drag / left gamepad stick  -> pan
+//   arrow keys / WASD / the mouse resting at the window's edge         -> scroll the map (the original's scroll speed)
+//   scroll wheel / gamepad triggers                                    -> zoom
+//   right button / Enter / two-finger tap / gamepad B                  -> the original's right button: toggles scroll
+//     mode (a command chosen, the map builds) and command mode (the toolbar answers); leaves the Maps panel, the save
+//     page and the funds warning; during a drag-built command it cancels the drag and refunds it
+//   F9                                                                 -> cycle the developer data layers
+//   Tab / gamepad X (left shoulder: previous)                          -> cycle build tool
+//   V / gamepad right shoulder / tap the selected button               -> next Forum grade or Workshop goods
+//   Space / gamepad Y                                                  -> pause / resume time
+//   left-click / tap / gamepad A                                       -> choose, or place the current tool at the cell
+//   M / gamepad Back / the City, Province, Forum buttons               -> switch screen
+//   on the province: the command bar, then click the map               -> build, place a fort, or order a Cohort
+//                                                                         (click the Cohort, then a point or an army)
+//   F11                                                                -> cycle window mode
+//   Escape / gamepad Start / Android's Back                            -> Settings (closing the window quits)
 //
-// Controls:
-//   left-drag with middle mouse / single-finger touch drag / left gamepad
-//     stick  -> pan
-//   arrow keys / WASD / the mouse resting at the window's edge -> scroll the map (the original's scroll speed)
-//   scroll wheel / gamepad triggers                        -> zoom
-//   right-click / two-finger tap / gamepad B                -> cycle save
-//     layer (save-file mode only; no-op for an EMPIRE2 scenario)
-//   Tab / gamepad X                                         -> cycle build tool
-//   V / gamepad right shoulder / tap the selected button    -> next Forum grade or Workshop goods
-//   Space / gamepad Y                                       -> pause / resume time (a month about every 2 s;
-//                                                              save-file mode)
-//   left-click / tap / gamepad A                            -> place current
-//     build tool at the clicked cell (save-file mode only)
-//   M / gamepad Back / the City, Province, Forum buttons    -> switch screen
-//   on the province: the command bar, then click the map    -> build, place a fort, or order a Cohort
-//                                                              (click the Cohort, then a point or an army)
-//   F11                                                     -> cycle window mode
-//   Escape / window close                                   -> quit
-//
-// Build mode (Phase 5) places through systems::construction, which carries
-// the real seed tiles, footprints and drag auto-tiling recovered from the
-// executable; a mouse left-drag lays roads and walls cell by cell. Time runs
-// through systems::month (walkers, fire and all), and the city view animates
-// on the engine's frame counters. See systems/construction.hpp.
+// Build mode places through systems::construction, which carries the real seed tiles, footprints and drag
+// auto-tiling recovered from the executable; a mouse left-drag lays roads and walls cell by cell. Time runs through
+// systems::month at the original's pace (Settings > Game pace; a month takes about 7 s, or 2 s on "Fast"), walkers,
+// fire and all, and the city view animates on the engine's frame counters. See systems/construction.hpp.
 //
 // Usage:
-//   gaius_viewer <EMPIRE2.0xx | CAESARxx.SAV>
+//   gaius_viewer [<game folder> | <EMPIRE2.0xx | CAESARxx.SAV>]
 //   gaius_viewer <path> --screenshot out.png --frames N   (headless smoke test)
 //   gaius_viewer <CAESARxx.SAV> --assets <game dir>       (draw the city with the game's sprites; by default
 //                                                          they're looked for beside the save and one folder up)
-//   gaius_viewer <CAESARxx.SAV> --test-layer 0..4         (headless: pick a data layer directly)
 //   gaius_viewer <CAESARxx.SAV> --months N [--paused]     (run N months before the first frame; start paused)
 //   gaius_viewer <CAESARxx.SAV> --test-build T X Y        (headless: place tool T at cell X,Y)
+//   --no-intro  --cursor original|gaius  --mute  --ui-scale N  --speed N  --save-dir DIR  (see the README; the
+//   other --test-* and --screen options are headless hooks for the tests and for screenshots)
 
 #include <SDL.h>
 

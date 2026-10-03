@@ -44,9 +44,11 @@ Everything lands in one folder, with a `MANIFEST.txt` saying what each file is:
 A picture carries no palette of its own; the game loads one before it shows
 each. The manifest says which was used and how sure that is. Most are
 **definitive** (the engine's own load, or a capture of the real screen). A few
-are **inference** (`LOGO`, `ROME`, `IMPRSEN`, `ROME2`) and the four `PANEL1A`-`D`
-panel variants are **unresolved**: they decode either way, but their colours are
-a best guess. The palette table is `PICTURES` in `export_assets.py`.
+are **inference** (`LOGO`, `ROME`, `IMPRSEN`, `ROME2`) and two panel variants,
+`PANEL1B` and `PANEL1C`, are **unresolved** (the executable never loads them):
+they decode either way, but their colours are a best guess. `PANEL1A` and
+`PANEL1D`, which the control bar uses, are in the city palette and match the
+captures. The palette table is `PICTURES` in `export_assets.py`.
 
 **The output is the original game's property.** The script refuses a folder
 inside the Gaius repository unless git ignores it (`export/` is ignored), so it
