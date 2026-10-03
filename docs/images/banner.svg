@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 300" role="img" aria-label="Gaius, an open-source engine for Caesar (1992)">
+  <title>Gaius</title>
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9E261E"/>
+      <stop offset="1" stop-color="#54100F"/>
+    </linearGradient>
+    <linearGradient id="goldUnit" gradientUnits="userSpaceOnUse" x1="0" y1="0.1" x2="0" y2="0.9">
+      <stop offset="0" stop-color="#FFE28A"/>
+      <stop offset="1" stop-color="#CD9432"/>
+    </linearGradient>
+    <linearGradient id="goldText" gradientUnits="userSpaceOnUse" x1="0" y1="70" x2="0" y2="190">
+      <stop offset="0" stop-color="#FFE28A"/>
+      <stop offset="1" stop-color="#CD9432"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="300" rx="26" fill="url(#ground)"/>
+  <rect x="10" y="10" width="1260" height="280" rx="18" fill="none" stroke="#E8B854" stroke-width="2" opacity="0.85"/>
+  <g transform="translate(56 28) scale(244)">
+    <g fill="url(#goldUnit)">
+      <ellipse cx="0.4468" cy="0.8783" rx="0.0520" ry="0.0218" transform="rotate(-206.00 0.4468 0.8783)"/>
+      <ellipse cx="0.4541" cy="0.8268" rx="0.0520" ry="0.0218" transform="rotate(-138.00 0.4541 0.8268)"/>
+      <ellipse cx="0.3123" cy="0.8327" rx="0.0503" ry="0.0211" transform="rotate(-184.57 0.3123 0.8327)"/>
+      <ellipse cx="0.3379" cy="0.7874" rx="0.0503" ry="0.0211" transform="rotate(-116.57 0.3379 0.7874)"/>
+      <ellipse cx="0.2037" cy="0.7411" rx="0.0486" ry="0.0204" transform="rotate(-163.14 0.2037 0.7411)"/>
+      <ellipse cx="0.2441" cy="0.7083" rx="0.0486" ry="0.0204" transform="rotate(-95.14 0.2441 0.7083)"/>
+      <ellipse cx="0.1361" cy="0.6162" rx="0.0469" ry="0.0197" transform="rotate(-141.71 0.1361 0.6162)"/>
+      <ellipse cx="0.1856" cy="0.6004" rx="0.0469" ry="0.0197" transform="rotate(-73.71 0.1856 0.6004)"/>
+      <ellipse cx="0.1188" cy="0.4753" rx="0.0451" ry="0.0190" transform="rotate(-120.29 0.1188 0.4753)"/>
+      <ellipse cx="0.1707" cy="0.4786" rx="0.0451" ry="0.0190" transform="rotate(-52.29 0.1707 0.4786)"/>
+      <ellipse cx="0.1542" cy="0.3377" rx="0.0434" ry="0.0182" transform="rotate(-98.86 0.1542 0.3377)"/>
+      <ellipse cx="0.2013" cy="0.3598" rx="0.0434" ry="0.0182" transform="rotate(-30.86 0.2013 0.3598)"/>
+      <ellipse cx="0.2374" cy="0.2226" rx="0.0417" ry="0.0175" transform="rotate(-77.43 0.2374 0.2226)"/>
+      <ellipse cx="0.2731" cy="0.2603" rx="0.0417" ry="0.0175" transform="rotate(-9.43 0.2731 0.2603)"/>
+      <ellipse cx="0.3569" cy="0.1458" rx="0.0400" ry="0.0168" transform="rotate(-56.00 0.3569 0.1458)"/>
+      <ellipse cx="0.3764" cy="0.1940" rx="0.0400" ry="0.0168" transform="rotate(12.00 0.3764 0.1940)"/>
+      <ellipse cx="0.5532" cy="0.8783" rx="0.0520" ry="0.0218" transform="rotate(26.00 0.5532 0.8783)"/>
+      <ellipse cx="0.5459" cy="0.8268" rx="0.0520" ry="0.0218" transform="rotate(-42.00 0.5459 0.8268)"/>
+      <ellipse cx="0.6877" cy="0.8327" rx="0.0503" ry="0.0211" transform="rotate(4.57 0.6877 0.8327)"/>
+      <ellipse cx="0.6621" cy="0.7874" rx="0.0503" ry="0.0211" transform="rotate(-63.43 0.6621 0.7874)"/>
+      <ellipse cx="0.7963" cy="0.7411" rx="0.0486" ry="0.0204" transform="rotate(-16.86 0.7963 0.7411)"/>
+      <ellipse cx="0.7559" cy="0.7083" rx="0.0486" ry="0.0204" transform="rotate(-84.86 0.7559 0.7083)"/>
+      <ellipse cx="0.8639" cy="0.6162" rx="0.0469" ry="0.0197" transform="rotate(-38.29 0.8639 0.6162)"/>
+      <ellipse cx="0.8144" cy="0.6004" rx="0.0469" ry="0.0197" transform="rotate(-106.29 0.8144 0.6004)"/>
+      <ellipse cx="0.8812" cy="0.4753" rx="0.0451" ry="0.0190" transform="rotate(-59.71 0.8812 0.4753)"/>
+      <ellipse cx="0.8293" cy="0.4786" rx="0.0451" ry="0.0190" transform="rotate(-127.71 0.8293 0.4786)"/>
+      <ellipse cx="0.8458" cy="0.3377" rx="0.0434" ry="0.0182" transform="rotate(-81.14 0.8458 0.3377)"/>
+      <ellipse cx="0.7987" cy="0.3598" rx="0.0434" ry="0.0182" transform="rotate(-149.14 0.7987 0.3598)"/>
+      <ellipse cx="0.7626" cy="0.2226" rx="0.0417" ry="0.0175" transform="rotate(-102.57 0.7626 0.2226)"/>
+      <ellipse cx="0.7269" cy="0.2603" rx="0.0417" ry="0.0175" transform="rotate(-170.57 0.7269 0.2603)"/>
+      <ellipse cx="0.6431" cy="0.1458" rx="0.0400" ry="0.0168" transform="rotate(-124.00 0.6431 0.1458)"/>
+      <ellipse cx="0.6236" cy="0.1940" rx="0.0400" ry="0.0168" transform="rotate(-192.00 0.6236 0.1940)"/>
+    </g>
+    <g transform="translate(0.012 0.012)" opacity="0.55">
+      <path d="M 0.6372 0.3477 A 0.2050 0.2050 0 1 0 0.7050 0.5000" fill="none" stroke="#260606" stroke-width="0.1250" stroke-linecap="round"/>
+      <rect x="0.5120" y="0.4612" width="0.2492" height="0.0775" fill="#260606" stroke="none"/>
+    </g>
+    <g>
+      <path d="M 0.6372 0.3477 A 0.2050 0.2050 0 1 0 0.7050 0.5000" fill="none" stroke="url(#goldUnit)" stroke-width="0.1250" stroke-linecap="round"/>
+      <rect x="0.5120" y="0.4612" width="0.2492" height="0.0775" fill="url(#goldUnit)" stroke="none"/>
+    </g>
+  </g>
+  <g font-family="'Trajan Pro','Cinzel','Palatino Linotype','Book Antiqua',Palatino,Georgia,'Times New Roman',serif" font-weight="700">
+    <text x="403" y="193" font-size="136" textLength="580" lengthAdjust="spacing" fill="#260606" opacity="0.55">GAIUS</text>
+    <text x="400" y="190" font-size="136" textLength="580" lengthAdjust="spacing" fill="url(#goldText)">GAIUS</text>
+  </g>
+  <line x1="404" y1="212" x2="1224" y2="212" stroke="#E8B854" stroke-width="1.5" opacity="0.6"/>
+  <text x="404" y="252" font-family="'Palatino Linotype','Book Antiqua',Palatino,Georgia,'Times New Roman',serif" font-size="23" textLength="820" lengthAdjust="spacing" fill="#EBD9A9" opacity="0.92">AN OPEN-SOURCE ENGINE FOR CAESAR (1992)</text>
+</svg>

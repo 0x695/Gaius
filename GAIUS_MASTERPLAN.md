@@ -49,6 +49,7 @@ Same rule as the rest of the project family: Activision holds the IP (Caesar 199
 - Ships **no** original assets, code, or extracted resource files in its repo.
 - Requires the user to point it at their own legally obtained copy of the game.
 - Only distributes: the engine source code, format specifications (data *about* the format, not the data itself), and tooling to convert *the user's own* files into open formats (PNG, JSON, etc.) at runtime/install time, never redistributed further.
+- Shows the original's art in one place only, by decision (2026-10-03): a handful of gameplay screenshots in `docs/images/` for the README, captured from Gaius running the author's own copy. No extracted file is ever committed.
 
 ---
 

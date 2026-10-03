@@ -1,23 +1,192 @@
-# Gaius
+<p align="center">
+  <img src="docs/images/banner.svg" alt="Gaius: an open-source engine for Caesar (1992)" width="820">
+</p>
 
-An open-source reimplementation of *Caesar* (Impressions Games, 1992/93 DOS), in the spirit of Julius/Augustus for Caesar III. Sibling project to the **IGA**.
+<p align="center">
+  <b>The 1992 city-builder <i>Caesar</i>, rebuilt from the executable up: every rule transcribed, every screen redrawn.<br>
+  Windows, Linux, Steam Deck and Android.</b>
+</p>
 
-See `GAIUS_MASTERPLAN.md` and `GAIUS_ROADMAP.md` for scope, architecture, and the phased plan. **All ten phases are done**: every format the game ships is decoded; the simulation reproduces real saves; `gaius_viewer` plays a whole career (build, govern, fight, save, get promoted) with the original's art and sound on Windows, Linux, the Steam Deck and Android; and scripts export the game's files and check saves. Play-testing against the real game continues in Phase 11 (the original's control bar, city screen, opening, pace and build preview). Left: running it on a physical Android phone and a Steam Deck, and Phase 11's open items. See `docs/FORMATS.md` for per-format status and `docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md` for the reverse engineering behind the construction system.
+<p align="center">
+  <a href="https://github.com/0x695/Gaius/actions/workflows/build.yml"><img src="https://github.com/0x695/Gaius/actions/workflows/build.yml/badge.svg" alt="build status"></a>
+  <img src="https://img.shields.io/badge/status-playable-d4a537?style=flat-square" alt="status: playable">
+  <img src="https://img.shields.io/badge/checked_against-17_real_saves-8b1a1a?style=flat-square" alt="checked against 17 real saves">
+  <img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20Linux%20%C2%B7%20Steam%20Deck%20%C2%B7%20Android-8b1a1a?style=flat-square" alt="platforms: Windows, Linux, Steam Deck, Android">
+  <img src="https://img.shields.io/badge/code-GPL--3.0--or--later-d4a537?style=flat-square" alt="code: GPL-3.0-or-later">
+  <img src="https://img.shields.io/badge/docs-CC%20BY--SA%204.0-d4a537?style=flat-square" alt="docs: CC BY-SA 4.0">
+</p>
 
-## IP posture — read before doing anything else
+<p align="center">
+  <a href="#what-is-gaius">What is it</a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#controls">Controls</a> ·
+  <a href="#how-it-was-built">How it was built</a> ·
+  <a href="#contributing">Contributing</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="#documentation">Docs</a>
+</p>
 
-This repo ships **no original game assets**, ever. Every decoder and every test that needs a real Caesar file reads it from a directory you point at via the `GAIUS_TEST_ASSETS` environment variable — supply your own legally-obtained copy of the game (e.g. from GOG). See `GAIUS_MASTERPLAN.md` section 3.
+<p align="center">
+  <img src="docs/images/city.png" alt="Gaius running a city from a real save: houses, a coliseum, a hospital and the aqueduct's reservoirs" width="800"><br>
+  <sub>A city from a real play session, drawn by Gaius from the game's own files. The simulation behind it reproduces the original's saves cell for cell.</sub>
+</p>
 
-## Building
+## What is Gaius?
 
-Requires CMake 3.16+, a C++17 compiler, and SDL2 development libraries (`libsdl2-dev` on Debian/Ubuntu, `sdl2` via vcpkg on Windows, etc. — needed for `gaius_viewer` and the `platform/` layer; the CLI tools and format library have no SDL2 dependency).
+Gaius is an open-source engine for **Caesar** (Impressions Games, 1992/93, DOS), in the spirit of Julius and Augustus for Caesar III. Point it at your own copy of the game and play a whole career: start as a Citizen, build a province's city, keep the Forum's books, fight off the barbarians, and be promoted until you are Caesar.
+
+It is not an emulator. Gaius **reimplements** the game: the simulation is transcribed from the original executable and checked against real saves, the screens are drawn from your game files the way the original draws them, and the music plays through a transcription of the original's own sound driver. Then it adds what a 2020s port should have: any window size, gamepad and touch, remappable keys, and saving that the original can still read.
+
+> **You need your own copy of Caesar.** Gaius ships none of the game's files. See the [FAQ](#faq) and [IP posture](#ip-posture).
+
+## Highlights
+
+| | |
+|---|---|
+| **A whole career** | A new game from the start screen; the city, the province with its Cohorts and battles, the Forum and its advisors, the map of the Empire, saving and loading, promotion through the Empire's ranks to Caesar, or dismissal if you stop paying tribute. |
+| **Exact where it can be** | A month is the original's 106 steps with its random numbers. One pass of the transcribed rules reproduces the land value and service layers of all 17 real saves on every one of their 10,000 cells; a month of steps reproduces six consecutive saves; the yearly accounts match every save's last year. |
+| **The original's look and sound** | Housing, workshops and walkers drawn from your `.PL8` sheets, the control bar, message box, Forum screens and battle screen as the original draws them (several checked pixel for pixel against DOSBox captures), the original opening, and the music and effects through a transcribed AIL driver on an emulated YM3812. |
+| **Runs everywhere** | Windows, Linux, the Steam Deck and Android (arm64 and x86_64) from one code base, with a resolution-independent UI, gamepad and touch controls, and a paged toolbar that grows with the screen. |
+| **Modern comforts** | Fullscreen, borderless or windowed; UI scale 1 to 4; edge, key and middle-drag scrolling; every key and button rebindable; a German translation of Gaius's own texts; your choice of Gaius's gold pointer or the original's arrow; and the original's game pace or a faster one. |
+| **Compatible saves** | Reads and writes the original's `.SAV` files; all 17 real saves round-trip byte for byte. Gaius saves to its own folder, never over your DOS game's. |
+| **Tools for modders and tinkerers** | Python scripts to export every picture, sprite, sound, tune and map to PNG, WAV and MIDI; list, render, compare and check saves; command-line tools for every file format. |
+| **A bot that plays it** | `tools/playtest` plays a career through the real game logic, a regression test with a sense of humour. |
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/forum.png" alt="The Forum: choose an advisor"><br><sub><b>The Forum.</b> Click a figure to open the Treasurer, Tribune, Legion, ratings, histories or the governor's page.</sub></td>
+    <td width="50%"><img src="docs/images/battle.png" alt="The battle screen"><br><sub><b>The battle screen.</b> Four tactics against the province's barbarians, with strength bars and morale.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/empire.png" alt="The map of the Empire"><br><sub><b>The map of the Empire.</b> Fifty provinces to be promoted through.</sub></td>
+    <td width="50%"><img src="docs/images/treasurer.png" alt="The Treasurer's report"><br><sub><b>The Treasurer.</b> Taxes, costs and the tribute to Rome, year by year.</sub></td>
+  </tr>
+</table>
+
+<sub>These are captures of Gaius running with the author's own copy of the game, so they show the original's art, whose rights stay with their holders. Make your own with `gaius_viewer --screenshot out.png` (see the quick start).</sub>
+
+## Quick start
+
+**1. Get the game.** Buy or find your own legal copy of *Caesar* (the GOG release works). Gaius reads the US build's files, the folder that holds `CSR.EXE`; the GOG release keeps them in a `US` folder.
+
+**2. Build Gaius.** You need CMake 3.16+, a C++17 compiler and SDL2.
 
 ```sh
+# Linux (Debian/Ubuntu); on the Steam Deck see packaging/linux/STEAM_DECK.md
+sudo apt install cmake g++ libsdl2-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -j
+./build/gaius_viewer
 ```
 
-## Running the tests
+```powershell
+# Windows (Visual Studio 2022 Build Tools, SDL2 from vcpkg)
+vcpkg install sdl2:x64-windows
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+cmake --build build --config RelWithDebInfo -j
+.\build\RelWithDebInfo\gaius_viewer.exe
+```
+
+Android: see [`android/README.md`](android/README.md). The CLI tools and format library need no SDL2.
+
+**3. Play.** Run `gaius_viewer`. It looks for your Caesar folder (GOG's and Steam's usual places, then the usual games folders) or asks where it is, and remembers the answer.
+
+```sh
+./build/gaius_viewer                      # finds your Caesar folder, or asks where it is
+./build/gaius_viewer "/path/to/Caesar"    # the start screen: a new career
+./build/gaius_viewer CAESARxx.SAV         # a save (the game's files are looked for beside it, or --assets FOLDER)
+./build/gaius_viewer EMPIRE2.0xx          # a province's map
+```
+
+Options for one run: `--no-intro` (skips Gaius's title and the original's opening), `--cursor original|gaius`, `--mute`, `--ui-scale N`, `--speed N`, `--save-dir DIR`. The settings (pointer, game pace, window, sound, language) are kept in `gaius.cfg` in the per-user folder (`%APPDATA%\Gaius` on Windows, `~/.config/gaius` on Linux); the game pace is the original's by default, with a faster one as a choice. Saves written by Gaius go to the per-user `saves` folder.
+
+For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/gaius_viewer <file> --screenshot out.png --frames 3`, optionally with `--test-pan X Y`, `--test-zoom Z`, `--test-build T X Y`, `--test-hover X Y` or `--screen province|maps|forum`.
+
+## Controls
+
+The right button works as in the original: with a building chosen the map builds; a right click returns to the toolbar, and another takes the last building up again.
+
+| | Mouse and keyboard | Gamepad | Touch |
+|---|---|---|---|
+| Choose, build | Left click (drag to lay roads and walls) | A | Tap (drag with a road tool) |
+| Toolbar / placing; cancel a drag | Right click, Enter | B | Two-finger tap, Undo button |
+| Scroll | Arrow keys, WASD, mouse at the edge, middle-drag | Right stick, d-pad | One-finger drag |
+| Zoom | Wheel | Triggers | Pinch |
+| Next building, its variant | Tab, V | X (LB previous), RB | Toolbar |
+| Pause time | Space | Y | — |
+| Change screen | M, the toolbar | View | Toolbar |
+| Settings | Esc | Menu | Back |
+| Window mode, data layers | F11, F9 | — | — |
+
+Every key and button can be rebound in Settings > Keys. Gamepad play on the Steam Deck is described in [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md); touch in [`android/README.md`](android/README.md).
+
+## How it was built
+
+Nobody handed over the source. Gaius was built by reading the game: the US build's `CSR.EXE` is unpacked and disassembled, each system is transcribed from the instructions that run it, and every claim is checked against something the real game did: real save files, and DOSBox captures of the running game.
+
+- **Real saves are the test suite.** 17 saves from three play sessions. The service propagators, the housing pass, a whole month, the economy's yearly accounts, the Legion and the plebs each reproduce what the engine saved.
+- **Every finding is confidence-labelled** (DEFINITIVE, HIGH CONFIDENCE, STRONG INFERENCE, UNRESOLVED), and the dead ends are kept, because why they failed is the lesson. The write-up is [49 sections](docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md) long.
+- **4,537 checks** run in `gaius_tests` (2,772 without a game folder, which is what CI runs on Linux and Windows).
+
+A few things that turned up on the way:
+
+- The original's pipe command is spelled "Resevoir\pipe" in the executable, and its rank ladder holds "Plebian" and "Taberllarius". Gaius keeps them as found.
+- The reservoir command is a *drag* command with its own 528-instruction handler; reservoirs can only be built on water.
+- A game year takes about 85 seconds at the original's pace. Gaius first stepped 3.5 times faster, which is why its barbarians seemed too many; the simulation matched, the clock didn't.
+- The construction dispatcher only turned up once the search stopped looking for plain offsets: the executable's tables hold far pointers (offset and segment), and a scan for runs of them found it on the sixth pass.
+- The Forum's statue has a cheat, opened by typing "c" and then "B".
+
+## Contributing
+
+The cheapest way to help is a **save file**. Play the US build, send a `CAESAR??.SAV`, and `python scripts/check_saves.py` shows whether Gaius's simulation reproduces it cell for cell. Every new save widens the net that caught every wrong parameter in the first version of the service layer.
+
+Phase 11 of the [roadmap](GAIUS_ROADMAP.md#phase-11--play-testing-and-fidelity-to-the-originals-screens) lists what is open: the Tower command, the original's start screen, captures of the province view and the message box to check against, and a water plan so the playtest bot can reach Caesar again. Nothing has run on a physical Android phone or a Steam Deck yet; reports from either are welcome.
+
+House rules: new source files start with an `SPDX-License-Identifier` line; findings carry their confidence label; tests that need game files skip rather than fail when `GAIUS_TEST_ASSETS` is not set; and no original game file goes into this repository, ever.
+
+## FAQ
+
+**Do I need the original game?** Yes. Gaius ships no game files and never will. It needs the files of your own legal copy.
+
+**Which version of the game?** The US build, the one whose `CSR.EXE` Gaius was checked against (GOG's `US` folder). The international build is a different executable and has not been analyzed.
+
+**Can I carry on a game I started in the original?** Yes. Gaius reads the original's saves, and what it writes the original can read. It keeps its own saves in its own folder so it never overwrites yours.
+
+**Is this Caesar II or Caesar III?** No, only the first game. Caesar III has [Julius](https://github.com/bvschaik/julius) and [Augustus](https://github.com/Keriew/augustus).
+
+**Does it run on the Steam Deck?** It is built for it, with gamepad-only play and fullscreen on first start ([notes](packaging/linux/STEAM_DECK.md)), but nobody has tried it on the real hardware yet. The same goes for a physical Android phone; the emulator, Windows and CI's Linux build are checked.
+
+**Is it finished?** The whole game plays from start to Caesar; what is left is polish and checking more screens against the real game (see the roadmap).
+
+**Why "Gaius"?** A Roman first name, like Julius and Augustus before it.
+
+**Is it affiliated with the makers of Caesar?** No. Gaius is an independent project, and *Caesar*, its art and its names belong to their rights holders.
+
+## IP posture
+
+This repo ships **no original game files**, ever. Every decoder and every test that needs a real Caesar file reads it from a directory you point at via the `GAIUS_TEST_ASSETS` environment variable, or from the game folder Gaius is given: your own legally obtained copy (e.g. from GOG). The screenshots in `docs/images` are captures of the game running and are the only images here that show the original's art. See `GAIUS_MASTERPLAN.md` section 3.
+
+## Documentation
+
+| | |
+|---|---|
+| [`GAIUS_MASTERPLAN.md`](GAIUS_MASTERPLAN.md) | scope, IP posture and architecture |
+| [`GAIUS_ROADMAP.md`](GAIUS_ROADMAP.md) | the phases, what is done and what is open |
+| [`docs/FORMATS.md`](docs/FORMATS.md) | every file format, with its status |
+| [`docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md`](docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md) | the reverse engineering behind every system, 49 sections |
+| [`docs/CAESAR_CITY_RENDERER_FINDINGS.md`](docs/CAESAR_CITY_RENDERER_FINDINGS.md) | how the city view is drawn |
+| [`docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md`](docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md) | unpacking `CSR.EXE`, and the game's text |
+| [`docs/CAESAR_GOG_BUILD_FINDINGS.md`](docs/CAESAR_GOG_BUILD_FINDINGS.md) | what the GOG package holds |
+| [`scripts/README.md`](scripts/README.md) | the scripts, in full |
+| [`android/README.md`](android/README.md), [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md) | Android and the Steam Deck |
+| [`docs/TRAILER_PROMPT.md`](docs/TRAILER_PROMPT.md) | a prompt pack for a teaser trailer |
+
+## Reference
+
+### Running the tests
 
 ```sh
 GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
@@ -25,7 +194,7 @@ GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./build/gaius_tests
 
 Pure/synthetic tests always run. Corpus tests (round-tripping all 50 `EMPIRE2.0xx` files, the VPX golden-image pixel-diff against a reference render, the PL8 worked-example check, the EXEPACK golden decode) skip cleanly — not fail — if `GAIUS_TEST_ASSETS` isn't set or doesn't contain the relevant files.
 
-## CLI tools
+### CLI tools
 
 Built alongside the library in `build/`:
 
@@ -46,7 +215,7 @@ Built alongside the library in `build/`:
 ./build/playtest   <game dir> play 0 0 3000   # a bot plays a whole career through the real game logic (PT_* knobs in tools/playtest.cpp)
 ```
 
-## Scripts
+### Scripts
 
 `scripts/` has small Python scripts over those tools (Python 3.8+, standard library only), each doing one job on your own copy of the game; `scripts/README.md` describes them.
 
@@ -61,24 +230,7 @@ python scripts/test_scripts.py                                           # the s
 
 What `export_assets.py` writes is the original game's property: it refuses to write inside this repository except under `export/`, which git ignores.
 
-## Playing
-
-`gaius_viewer` is the game. It needs your own copy of Caesar (the folder that holds `CSR.EXE`; see the IP posture above).
-
-```sh
-./build/gaius_viewer                      # finds your Caesar folder, or asks where it is
-./build/gaius_viewer "/path/to/Caesar"    # the start screen: a new career
-./build/gaius_viewer CAESARxx.SAV         # a save (the game's files are looked for beside it, or --assets FOLDER)
-./build/gaius_viewer EMPIRE2.0xx          # a province's map
-```
-
-At a glance: the left button chooses and builds; the right button switches between placing a building and the toolbar, as in the original; the middle button drags the map, which also scrolls with the arrow keys, WASD and the mouse at the window's edge; the wheel zooms. Tab picks the next building and V its variant, Space pauses, M changes screen, F9 cycles the developer data layers, F11 the window mode, and Escape opens Settings. Gamepads and touch work too (`packaging/linux/STEAM_DECK.md`, `android/README.md`), and every key and button can be rebound in Settings > Keys.
-
-Options for one run: `--no-intro` (skips Gaius's title and the original's opening), `--cursor original|gaius`, `--mute`, `--ui-scale N`, `--speed N`, `--save-dir DIR`. The settings (pointer, game pace, window, sound, language) are kept in `gaius.cfg` in the per-user folder (`%APPDATA%\Gaius` on Windows, `~/.config/gaius` on Linux); the game pace is the original's by default, with a faster one as a choice.
-
-For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/gaius_viewer <file> --screenshot out.png --frames 3`, optionally with `--test-pan X Y`, `--test-zoom Z`, `--test-build T X Y`, `--test-hover X Y` or `--screen province|maps|forum`.
-
-## Repo layout
+### Repo layout
 
 ```text
 formats/    Layer 1 — exact import and write-back (VPX, P32, .256, PL8/PL1, EMPIRE2, SAV, VAS, VOC, XMI, GTL, screen data, EXEPACK)
