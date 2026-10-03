@@ -15,15 +15,17 @@ $ErrorActionPreference = "Stop"
 $version = "2.32.10"
 $url = "https://github.com/libsdl-org/SDL/releases/download/release-$version/SDL2-$version.zip"
 $androidRoot = $PSScriptRoot
-$destJniSdl = Join-Path $androidRoot "app\jni\SDL"
+$destJniSdl = Join-Path (Join-Path (Join-Path $androidRoot "app") "jni") "SDL"
 
 if (Test-Path (Join-Path $destJniSdl "CMakeLists.txt")) {
     Write-Output "SDL2 source already present at $destJniSdl -- skipping. Delete that directory to re-fetch."
     exit 0
 }
 
-$tmpZip = Join-Path $env:TEMP "sdl2-android-src-$version.zip"
-$tmpExtract = Join-Path $env:TEMP "sdl2-android-src-$version"
+# The temp folder, on Windows and (for the release workflow's Linux runner) elsewhere: $env:TEMP is Windows-only.
+$tmp = [IO.Path]::GetTempPath()
+$tmpZip = Join-Path $tmp "sdl2-android-src-$version.zip"
+$tmpExtract = Join-Path $tmp "sdl2-android-src-$version"
 
 Write-Output "Downloading SDL2 $version source..."
 Invoke-WebRequest -Uri $url -OutFile $tmpZip -UserAgent "Mozilla/5.0"
