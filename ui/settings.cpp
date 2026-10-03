@@ -38,6 +38,8 @@ std::string settings_text(const Settings& s) {
     o << "effects_volume = " << s.effects_volume << "\n";
     o << "language = " << s.language << "\n";
     o << "game_dir = " << s.game_dir << "\n";
+    o << "cursor = " << static_cast<int>(s.cursor) << "\n";
+    o << "pace = " << static_cast<int>(s.pace) << "\n";
     o << "gamepad_cursor = " << (s.gamepad_cursor ? 1 : 0) << "\n";
     o << "edge_scroll = " << (s.edge_scroll ? 1 : 0) << "\n";
     o << "touch_hints_seen = " << (s.touch_hints_seen ? 1 : 0) << "\n";
@@ -73,6 +75,10 @@ Settings parse_settings(const std::string& text) {
             s.language = value;
         } else if (key == "game_dir") {
             s.game_dir = value;
+        } else if (key == "cursor" && to_int(value, n) && n >= 0 && n <= 1) {
+            s.cursor = static_cast<CursorStyle>(n);
+        } else if (key == "pace" && to_int(value, n) && n >= 0 && n <= 1) {
+            s.pace = static_cast<GamePace>(n);
         } else if (key == "gamepad_cursor" && to_int(value, n)) {
             s.gamepad_cursor = n != 0;
         } else if (key == "edge_scroll" && to_int(value, n)) {

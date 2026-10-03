@@ -62,6 +62,8 @@
 #include <string>
 #include <vector>
 
+#include "apps/viewer/cursor.hpp"
+#include "apps/viewer/original_intro_run.hpp"
 #include "apps/viewer/save_view.hpp"
 #include "audio/game_audio.hpp"
 #include "apps/viewer/screens.hpp"
@@ -239,6 +241,54 @@ namespace {
 
 // The languages lang/languages.txt lists, read through SDL so Android finds
 // them among the APK's assets: English first.
+// Gaius pointer as a system cursor (apps/viewer/cursor.hpp): 32 pixels, or larger on a display that scales, so it
+// stays the size of the system own. Null when the platform has no cursors (a phone).
+SDL_Cursor* make_gaius_cursor() {
+    float dpi = 96.0f;
+    if (SDL_GetDisplayDPI(0, &dpi, nullptr, nullptr) != 0 || dpi < 96.0f) dpi = 96.0f;
+    const int size = std::clamp(static_cast<int>(std::lround(32.0 * dpi / 96.0)), 32, 64);
+    viewer::CursorImage img = viewer::render_cursor(size);
+    SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormatFrom(img.rgba.data(), img.size, img.size, 32, img.size * 4,
+                                                              SDL_PIXELFORMAT_RGBA32);
+    if (!surface) return nullptr;
+    SDL_Cursor* cursor = SDL_CreateColorCursor(surface, img.hot_x, img.hot_y);  // copies the pixels
+    SDL_FreeSurface(surface);
+    return cursor;
+}
+
+// --cursor-sheet: the pointer at the sizes it is used, on the two grounds it is seen on, for a look at it headless.
+void write_cursor_sheet(const char* path) {
+    constexpr int W = 440, H = 300;
+    std::vector<uint8_t> rgb(static_cast<size_t>(W) * H * 3);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            const bool grass = x < W / 2;
+            const bool speck = ((x * 7 + y * 13) % 11) == 0;
+            const uint8_t c[3] = {static_cast<uint8_t>(grass ? (speck ? 70 : 92) : 128), static_cast<uint8_t>(grass ? (speck ? 82 : 100) : 128),
+                                  static_cast<uint8_t>(grass ? 24 : 128)};
+            for (int k = 0; k < 3; ++k) rgb[(static_cast<size_t>(y) * W + x) * 3 + k] = c[k];
+        }
+    const auto put = [&](const viewer::CursorImage& img, int ox, int oy, int zoom) {
+        for (int y = 0; y < img.size * zoom; ++y)
+            for (int x = 0; x < img.size * zoom; ++x) {
+                const uint8_t* p = &img.rgba[(static_cast<size_t>(y / zoom) * img.size + x / zoom) * 4];
+                const int X = ox + x, Y = oy + y;
+                if (X < 0 || Y < 0 || X >= W || Y >= H || p[3] == 0) continue;
+                uint8_t* d = &rgb[(static_cast<size_t>(Y) * W + X) * 3];
+                for (int k = 0; k < 3; ++k) d[k] = static_cast<uint8_t>((p[k] * p[3] + d[k] * (255 - p[3])) / 255);
+            }
+    };
+    for (int half = 0; half < 2; ++half) {
+        const int x0 = half * (W / 2);
+        put(viewer::render_cursor(32), x0 + 20, 10, 5);
+        put(viewer::render_cursor(32), x0 + 20, 190, 1);
+        put(viewer::render_cursor(48), x0 + 70, 190, 1);
+        put(viewer::render_cursor(64), x0 + 140, 190, 1);
+        put(viewer::render_cursor(16), x0 + 20, 250, 1);
+    }
+    stbi_write_png(path, W, H, 3, rgb.data(), W * 3);
+}
+
 std::vector<ui::Catalog> load_languages() {
     std::vector<ui::Catalog> out{ui::Catalog{"en", "English", {}}};
     std::string base;
@@ -314,6 +364,7 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
                 return 3;
             }
+            if (SDL_Cursor* cursor = make_gaius_cursor()) SDL_SetCursor(cursor);
             try {
                 in_path = viewer::run_setup_screen(settings, settings_path, kLogicalW, kLogicalH);
             } catch (const std::exception& e) {
@@ -330,6 +381,9 @@ int main(int argc, char** argv) {
         viewer::remember_game_folder(settings, settings_path, in_path);
     bool no_intro = false;  // --no-intro: straight to the start screen
     std::string intro_shot_path;  // --intro-screenshot out.png: the opening's frame, headless
+    std::string cursor_sheet_path;  // --cursor-sheet out.png: Gaius pointer, headless
+    std::string orig_intro_shot_path;  // --original-intro-screenshot STAGE out.png: a picture of the original's opening
+    int orig_intro_stage = 0;
     std::string screenshot_path;
     int screenshot_frames = 0;
     double test_pan_x = 0, test_pan_y = 0, test_zoom = 1.0;
@@ -362,6 +416,14 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--mute") == 0) mute = true;
         if (std::strcmp(argv[i], "--no-intro") == 0) no_intro = true;
         if (std::strcmp(argv[i], "--intro-screenshot") == 0 && i + 1 < argc) intro_shot_path = argv[++i];
+        if (std::strcmp(argv[i], "--cursor-sheet") == 0 && i + 1 < argc) cursor_sheet_path = argv[++i];
+        if (std::strcmp(argv[i], "--original-intro-screenshot") == 0 && i + 2 < argc) {
+            orig_intro_stage = std::atoi(argv[++i]);
+            orig_intro_shot_path = argv[++i];
+        }
+        // --cursor original|gaius: the pointer for this run, whatever the settings say (headless captures).
+        if (std::strcmp(argv[i], "--cursor") == 0 && i + 1 < argc)
+            settings.cursor = std::strcmp(argv[++i], "original") == 0 ? ui::CursorStyle::Original : ui::CursorStyle::Gaius;
         if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) start_screen = argv[++i];
         if (std::strcmp(argv[i], "--forum-tab") == 0 && i + 1 < argc) start_forum_tab = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-action") == 0 && i + 1 < argc) test_actions.push_back(std::atoi(argv[++i]));
@@ -422,6 +484,12 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (!cursor_sheet_path.empty()) {
+        write_cursor_sheet(cursor_sheet_path.c_str());
+        std::printf("wrote cursor sheet to %s\n", cursor_sheet_path.c_str());
+        return 0;
+    }
+
     // Dispatch by exact file size, not extension -- EMPIRE2.0xx is always
     // exactly 1602 bytes, CAESARxx.SAV is always exactly 57126
     // (formats::save::kSaveSize); no other size is valid input here. Same
@@ -447,6 +515,8 @@ int main(int argc, char** argv) {
     // The original's bar has no tool selected until a button is pressed (the main bar and the arrow back to it mean
     // "no command"), so a click on the map does nothing then. The flat list always has one.
     bool tool_armed = true;
+    bool tool_remembered = true;  // a command has been chosen, so the right button can take it up again
+    bool province_armed = true;   // the province view's twin of tool_armed: the map acts only while a command is up
 
     try {
         if (new_career) {
@@ -491,7 +561,7 @@ int main(int argc, char** argv) {
     bool have_name_art = false;
     ui::InterfaceArt interface_art;  // the original's advisor screens
     bool have_interface_art = false;
-    ui::BarArt bar_art;  // PANEL1A.VPX and PANEL1B.VPX: the city bar's panel
+    ui::BarArt bar_art;  // PANEL1A.VPX and PANEL1D.VPX: the bar's panel (main and province; building pages)
     bool have_bar_art = false;
     formats::IndexedImage rome_news, rome_advice;  // ROME1.VPX and ROME2.VPX: the yearly notice's pictures
     formats::Palette rome_palette;                 // ROME1.256
@@ -578,7 +648,7 @@ int main(int argc, char** argv) {
                 }
                 try {
                     bar_art.main = formats::vpx::decode(asset("PANEL1A.VPX")).image;
-                    bar_art.build = formats::vpx::decode(asset("PANEL1B.VPX")).image;
+                    bar_art.build = formats::vpx::decode(asset("PANEL1D.VPX")).image;
                     have_bar_art = true;
                 } catch (const formats::FormatError&) {
                 }
@@ -651,9 +721,12 @@ int main(int argc, char** argv) {
     if (start_speed >= 0) game_options.set(ui::kOptSpeed, std::clamp(start_speed / 10 * 10, 0, 100));
     sim.speed = std::clamp(game_options.speed() / 10 * 10, 0, 100);
     bool time_running = save_mode && !start_paused;
-    // One step every 19 ms: a month (106 steps) in about 2 s, and the walkers
-    // move a pixel each step.
-    constexpr Uint32 kStepMs = 19;
+    // One frame every 66 ms ("Original" pace, measured on the GOG release: a game year in about 85 s at the top speed,
+    // so a month of 106 steps in about 7 s) or every 19 ms ("Fast": a month in about 2 s); the walkers move a pixel
+    // each step. The Settings screen's Game pace row chooses.
+    const auto step_ms = [&]() -> Uint32 {
+        return static_cast<Uint32>(settings.pace == ui::GamePace::Fast ? ui::kFrameMsFast : ui::kFrameMsOriginal);
+    };
     auto report_month = [&]() {
         std::printf("month %d, year %d: population %d, funds %d Dn\n", sim.month + 1, sim.year,
                     4 * sim.population_units, model::global_word(state, systems::economy::kFunds));
@@ -812,6 +885,7 @@ int main(int argc, char** argv) {
     bool news_alternate = false, news_time = false;
     Screen news_return = Screen::City;
     int pointer_lx = -1, pointer_ly = -1;  // the pointer in logical coordinates, -1 outside the window
+    bool system_cursor_hidden = false;     // the system's pointer is hidden (the original's is drawn, or the ghost's)
     viewer::SettingsView settings_view;
     settings_view.languages = languages;
     settings_view.game_dir = game_dir;
@@ -1316,6 +1390,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return 3;
     }
+    // Gaius's own pointer, a system cursor (apps/viewer/cursor.hpp); the Settings screen can switch to the original's.
+    SDL_Cursor* gaius_cursor = make_gaius_cursor();
+    if (gaius_cursor) SDL_SetCursor(gaius_cursor);
+    std::printf("pointer: %s%s\n", settings.cursor == ui::CursorStyle::Original ? "the original's" : "Gaius's",
+                gaius_cursor ? "" : " (this platform has no cursors; the system's shows)");
 
     try {
         const platform::GaiusPaths& gaius_paths = platform::paths();
@@ -1341,7 +1420,9 @@ int main(int argc, char** argv) {
                         ok ? "OK" : "rejected");
         }
         for (int m = 0; m < run_months; ++m) advance_month();
-        std::printf("time: %s (Space / gamepad Y)\n", time_running ? "running, about 2 s a month" : "paused");
+        std::printf("time: %s (Space / gamepad Y)\n",
+                    time_running ? (settings.pace == ui::GamePace::Fast ? "running, about 2 s a month" : "running, about 7 s a month")
+                                 : "paused");
     }
 
     try {
@@ -1360,6 +1441,17 @@ int main(int argc, char** argv) {
             viewer::run_intro(window, kLogicalW, kLogicalH, have_font ? &game_font : nullptr, 0, &shot);
             stbi_write_png(intro_shot_path.c_str(), kLogicalW, kLogicalH, 3, shot.data(), kLogicalW * 3);
             std::printf("wrote intro screenshot to %s\n", intro_shot_path.c_str());
+            return 0;
+        }
+        if (!orig_intro_shot_path.empty()) {
+            viewer::OriginalIntroArt intro_art;
+            if (!viewer::load_original_intro(game_dir, intro_art)) {
+                std::fprintf(stderr, "the original's opening needs IMPRLOGO, IMPRSEN, TITLE3, SHADE and ROMFONT in %s\n", game_dir.c_str());
+                return 5;
+            }
+            const std::vector<uint8_t> shot = viewer::original_intro_frame(intro_art, orig_intro_stage);
+            stbi_write_png(orig_intro_shot_path.c_str(), 320, 200, 3, shot.data(), 320 * 3);
+            std::printf("wrote the opening's stage %d to %s\n", orig_intro_stage, orig_intro_shot_path.c_str());
             return 0;
         }
         // The title, for a couple of seconds, before the start screen.
@@ -1388,7 +1480,7 @@ int main(int argc, char** argv) {
         };
         ui::Metrics metrics = toolbar_metrics();
         ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
-        if (toolbar.original_bar()) tool_armed = false;
+        if (toolbar.original_bar()) tool_armed = tool_remembered = false;
         int hovered = -1;
         if (save_mode) {
             std::printf("toolbar: %s scale=%dx  %d buttons (%dx%d px) in %d row(s), panel %d px tall\n",
@@ -1421,8 +1513,25 @@ int main(int argc, char** argv) {
         std::vector<ui::PanelButton> province_buttons;
         for (int i = 0; i < kProvinceCommandCount; ++i) province_buttons.push_back({ui::tr(kProvinceCommands[i].label), 1000 + i});
         const ui::PanelLayout province_bar = ui::bar_layout(province_buttons, page_metrics, kLogicalW, kLogicalH);
+        // The province view's own bar (DS:0x123E), the original's, when the game's icons and sprites are there.
+        ui::Toolbar province_toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
+        if (province_toolbar.original_bar()) province_toolbar.set_bar_page(ui::kBarProvincePage);
+        const auto province_orig = [&]() { return province_toolbar.original_bar() && have_province_sprites; };
+        // The panel: the original's bar, or Gaius's generic one.
+        const auto province_panel_contains = [&](int lx, int ly) {
+            return province_orig() ? province_toolbar.contains(lx, ly) : province_bar.frame.contains(lx, ly);
+        };
+        // The button showing the current command, or -1 (the Cohort's Halt has none).
+        const auto province_selected_button = [&]() {
+            const int id = kProvinceCommands[province_command].id;
+            for (int i = 0; i < province_toolbar.count(); ++i)
+                if (province_toolbar.entry(i).kind == ui::BarKind::Province && province_toolbar.entry(i).province == id)
+                    return i;
+            return -1;
+        };
+        int province_hover = -1;
         Camera pcam(40.0 * render::kProvincePx, 40.0 * render::kProvincePx);
-        pcam.visible_h = kLogicalH - province_bar.frame.h;
+        pcam.visible_h = kLogicalH - (province_orig() ? province_toolbar.panel().h : province_bar.frame.h);
         pcam.clamp();
         int page_hovered = -1;
         const auto strip_hit = [&](int lx, int ly) {
@@ -1432,7 +1541,11 @@ int main(int argc, char** argv) {
         };
         // The message box, and whether it shows on this screen (the city,
         // province and maps views; the messages option DS:0x6C78 on).
-        static constexpr ui::Rect kMessageBox{12, 16, 240, 28};
+        // With the game's art it is the original's: a stone panel at the top left corner (viewer/overlays.hpp); without
+        // it a plain box below the strip.
+        static constexpr ui::Rect kMessageBoxPlain{12, 16, 240, 28};
+        static constexpr ui::Rect kMessageBoxOriginal{0, 0, viewer::kMessageW, viewer::kMessageH};
+        const auto message_box = [&]() { return have_interface_art ? kMessageBoxOriginal : kMessageBoxPlain; };
         // Sound (Phase 9, findings section 45): the game's own driver and files
         // on an emulated Sound Blaster, mixed on SDL's audio thread. Without
         // the game's files, a device or with --mute / --screenshot, silence.
@@ -1496,6 +1609,13 @@ int main(int argc, char** argv) {
         Screen tune_screen = screen;
         viewer::ForumTab tune_tab = forum_tab;
         if (screen == Screen::Start) play_music("czartit.xmi");
+        // The original's own opening, over its title tune: the Impressions logo, "presents", the Caesar picture and the
+        // credits (viewer/original_intro.hpp).
+        if (screen == Screen::Start && screenshot_path.empty() && !no_intro && run_months == 0 && !game_dir.empty()) {
+            viewer::OriginalIntroArt intro_art;
+            if (viewer::load_original_intro(game_dir, intro_art) && !viewer::run_original_intro(window, intro_art))
+                running = false;
+        }
         const auto screen_tunes = [&]() {
             if (screen == tune_screen && forum_tab == tune_tab) return;
             const Screen from = tune_screen;
@@ -1559,7 +1679,7 @@ int main(int argc, char** argv) {
             (choice_forum ? forum_grade : workshop_goods) = option;
             for (int k = 0; k < kBuildToolCount; ++k)
                 if (kBuildTools[k] == command) tool_index = k;
-            tool_armed = true;
+            tool_armed = tool_remembered = true;
             toolbar.show_command(command);
             std::printf("tool: %s\n", tool_label().c_str());
             play_effect(0);
@@ -1614,6 +1734,10 @@ int main(int argc, char** argv) {
             if (!toolbar.original_bar()) tool_armed = true;
             cam.visible_h = kLogicalH - toolbar.panel().h;
             cam.clamp();
+            province_toolbar = ui::Toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
+            if (province_toolbar.original_bar()) province_toolbar.set_bar_page(ui::kBarProvincePage);
+            pcam.visible_h = kLogicalH - (province_orig() ? province_toolbar.panel().h : province_bar.frame.h);
+            pcam.clamp();
             for (const ui::Catalog& c : languages)
                 if (c.code == settings.language) ui::set_catalog(c);
             if (audio_device != 0) {
@@ -1786,7 +1910,7 @@ int main(int argc, char** argv) {
             const int id = kProvinceCommands[province_command].id;
             if (province_drag_x < 0 || !(id == 35 || id == 36 || id == 37 || id == 42)) return;
             int lx = 0, ly = 0;
-            if (!window.window_to_logical(px, py, &lx, &ly) || province_bar.frame.contains(lx, ly))
+            if (!window.window_to_logical(px, py, &lx, &ly) || province_panel_contains(lx, ly))
                 return;
             const int tx = static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx;
             const int ty = static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx;
@@ -1969,11 +2093,14 @@ int main(int argc, char** argv) {
                 city_image_dirty = province_image_dirty = true;
                 return;
             }
-            if (const int tab = (screen == Screen::City && toolbar.original_bar()) ? -1 : strip_hit(lx, ly); tab >= 0) {
+            if (const int tab = ((screen == Screen::City && toolbar.original_bar()) || (screen == Screen::Province && province_orig()))
+                                    ? -1
+                                    : strip_hit(lx, ly);
+                tab >= 0) {
                 switch_to(tab);
                 return;
             }
-            if (message_visible() && kMessageBox.contains(lx, ly)) {
+            if (message_visible() && message_box().contains(lx, ly)) {
                 // 0x0F982: a message with a place takes the view there (its
                 // cell less 10 and 5), and the message goes.
                 const systems::messages::Message m = sim.messages.current;
@@ -2041,16 +2168,40 @@ int main(int argc, char** argv) {
                 return;
             }
             if (screen == Screen::Province) {
-                for (size_t i = 0; i < province_bar.buttons.size(); ++i) {
-                    if (province_bar.buttons[i].contains(lx, ly)) {
-                        province_command = static_cast<int>(i);
-                        order_cohort = patrol_x = patrol_y = -1;
-                        std::printf("province command: %s\n", kProvinceCommands[i].label);
+                if (province_orig()) {
+                    // The original's bar: back to the city, the Forum, then the province commands.
+                    if (const int hit = province_toolbar.hit_test(lx, ly); hit >= 0) {
+                        const ui::BarButton button = province_toolbar.entry(hit);
                         play_effect(0);  // 0x0FFA5
+                        if (button.kind == ui::BarKind::Back) {
+                            switch_to(0);
+                            return;
+                        }
+                        if (button.kind == ui::BarKind::Go) {
+                            switch_to(3);
+                            return;
+                        }
+                        for (int i = 0; i < kProvinceCommandCount; ++i)
+                            if (kProvinceCommands[i].id == button.province) province_command = i;
+                        province_armed = true;
+                        order_cohort = patrol_x = patrol_y = -1;
+                        std::printf("province command: %s\n", kProvinceCommands[province_command].label);
                         return;
                     }
+                } else {
+                    for (size_t i = 0; i < province_bar.buttons.size(); ++i) {
+                        if (province_bar.buttons[i].contains(lx, ly)) {
+                            province_command = static_cast<int>(i);
+                            province_armed = true;
+                            order_cohort = patrol_x = patrol_y = -1;
+                            std::printf("province command: %s\n", kProvinceCommands[i].label);
+                            play_effect(0);  // 0x0FFA5
+                            return;
+                        }
+                    }
                 }
-                if (province_bar.frame.contains(lx, ly)) return;
+                if (province_panel_contains(lx, ly)) return;
+                if (!province_armed) return;  // command mode: the map does nothing until a command is chosen
                 province_click(static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx,
                                static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx);
                 return;
@@ -2083,7 +2234,8 @@ int main(int argc, char** argv) {
                         play_effect(0);
                         switch_to(4);
                         return;
-                    case ui::BarKind::Tool: break;
+                    case ui::BarKind::Tool:
+                    case ui::BarKind::Province: break;
                 }
                 if (!button.available) {
                     std::printf("tool: %s isn't in Gaius yet\n", systems::construction::command_name(button.command));
@@ -2111,7 +2263,7 @@ int main(int argc, char** argv) {
                 if (picked < 0) return;
                 if (tool_armed && picked == tool_index && cycle_variant()) return;  // tapping the selected button again
                 tool_index = picked;
-                tool_armed = true;
+                tool_armed = tool_remembered = true;
                 std::printf("tool: %s\n", systems::construction::command_name(kBuildTools[tool_index]));
                 play_effect(0);  // 0x0FFA5
                 return;
@@ -2168,6 +2320,7 @@ int main(int argc, char** argv) {
             pointer_lx = test_hover_x;
             pointer_ly = test_hover_y;
             hovered = screen == Screen::City ? toolbar.hit_test(pointer_lx, pointer_ly) : -1;
+            province_hover = screen == Screen::Province && province_orig() ? province_toolbar.hit_test(pointer_lx, pointer_ly) : -1;
         }
         if (save_mode && test_notice_kind > 0 && sim.on_notice) sim.on_notice(test_notice_kind, test_notice_topic, test_notice_alt != 0);
         for (int action : test_actions) {
@@ -2264,11 +2417,12 @@ int main(int argc, char** argv) {
                     case platform::CommandType::PreviousTool:
                         if (save_mode && screen == Screen::Province) {
                             province_command = (province_command + kProvinceCommandCount - 1) % kProvinceCommandCount;
+                            province_armed = true;
                             order_cohort = patrol_x = patrol_y = -1;
                             play_effect(0);
                         } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + kBuildToolCount - 1) % kBuildToolCount;
-                            tool_armed = true;
+                            tool_armed = tool_remembered = true;
                             toolbar.show_command(kBuildTools[tool_index]);
                             play_effect(0);
                         }
@@ -2314,14 +2468,26 @@ int main(int argc, char** argv) {
                             choose_type(viewer::kActionBack);  // no command chosen
                             break;
                         }
+                        if (save_mode && screen == Screen::Notice && have_interface_art && !notice_is_hints) {
+                            apply_page_action(viewer::kActionContinue);  // 0x084B1: a click of either button
+                            break;
+                        }
+                        if (save_mode && screen == Screen::Files) {
+                            apply_page_action(viewer::kActionBack);
+                            break;
+                        }
                         if (save_mode && message_visible()) {
                             // 0x0F93A: a right-click on the message dismisses it.
                             int mx = 0, my = 0;
-                            if (window.window_to_logical(cmd->x, cmd->y, &mx, &my) && kMessageBox.contains(mx, my)) {
+                            if (window.window_to_logical(cmd->x, cmd->y, &mx, &my) && message_box().contains(mx, my)) {
                                 sim.messages.timer = 1;
                                 sim.messages.current.place = systems::messages::Place::None;
                                 break;
                             }
+                        }
+                        if (save_mode && screen == Screen::Maps) {
+                            switch_to(0);  // the manual: right-click at any time exits the Maps panel
+                            break;
                         }
                         if (save_mode && screen == Screen::ForumHall) {
                             screen = Screen::City;  // right-click leaves the Forum
@@ -2358,12 +2524,32 @@ int main(int argc, char** argv) {
                             break;
                         }
                         if (save_mode && screen == Screen::Province) {
-                            // Right-click forgets an order being given.
-                            order_cohort = patrol_x = patrol_y = -1;
+                            // An order being given is forgotten first; otherwise the original's two modes (manual, "Scroll
+                            // mode"): with a command up the right button goes back to command mode, with none it takes
+                            // the last one up again.
+                            if (order_cohort >= 0 || patrol_x >= 0) {
+                                order_cohort = patrol_x = patrol_y = -1;
+                            } else {
+                                province_armed = !province_armed;
+                                province_drag_x = province_drag_y = -1;
+                            }
                             break;
                         }
                         if (save_mode && screen == Screen::City) {
-                            // With sprites: city view, then each data layer, then back.
+                            // The original's two modes (manual, "Scroll mode"): with a command chosen the right button
+                            // returns to command mode to pick a new icon; in command mode it takes the last command up again.
+                            if (tool_armed) {
+                                tool_armed = false;
+                            } else if (tool_remembered) {
+                                tool_armed = true;
+                                toolbar.show_command(kBuildTools[tool_index]);
+                            }
+                            break;
+                        }
+                        break;
+                    case platform::CommandType::CycleLayer:
+                        if (save_mode && screen == Screen::City) {
+                            // The developer view: the city picture, then each data layer, then back.
                             if (show_sprites) {
                                 show_sprites = false;
                                 layer = viewer::kSaveLayerOrder[0];
@@ -2388,12 +2574,13 @@ int main(int argc, char** argv) {
                     case platform::CommandType::CycleTool:
                         if (save_mode && screen == Screen::Province) {
                             province_command = (province_command + 1) % kProvinceCommandCount;
+                            province_armed = true;
                             order_cohort = patrol_x = patrol_y = -1;
                             std::printf("province command: %s\n", kProvinceCommands[province_command].label);
                             play_effect(0);
                         } else if (save_mode && screen == Screen::City) {
                             tool_index = (tool_index + 1) % kBuildToolCount;
-                            tool_armed = true;
+                            tool_armed = tool_remembered = true;
                             toolbar.show_command(kBuildTools[tool_index]);
                             std::printf("build tool: %s\n",
                                         systems::construction::command_name(kBuildTools[tool_index]));
@@ -2428,9 +2615,8 @@ int main(int argc, char** argv) {
                         const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
                         pointer_lx = inside ? lx : -1;
                         pointer_ly = inside ? ly : -1;
-                        // The game's own pointer is drawn over the picture; the system's goes while it is there.
-                        if (have_icons && have_sprites && !cmd->touch) SDL_ShowCursor(inside ? SDL_DISABLE : SDL_ENABLE);
                         hovered = inside && screen == Screen::City ? toolbar.hit_test(lx, ly) : -1;
+                        province_hover = inside && screen == Screen::Province && province_orig() ? province_toolbar.hit_test(lx, ly) : -1;
                         page_hovered = -1;
                         hall_hover = inside && screen == Screen::ForumHall ? forum_clicks.region_at(lx, ly) : 0;
                         if (inside && page_screen()) {
@@ -2617,9 +2803,9 @@ int main(int argc, char** argv) {
             if (time_running) {
                 const Uint32 now = SDL_GetTicks();
                 // A battle or a promotion offer stops time mid-step.
-                for (int budget = 8; budget > 0 && time_running && now - last_step_ms >= kStepMs; --budget) {
+                for (int budget = 8; budget > 0 && time_running && now - last_step_ms >= step_ms(); --budget) {
                     const bool stepped = advance_step();
-                    last_step_ms += kStepMs;
+                    last_step_ms += step_ms();
                     // 0x0FFD4: the city sounds, from what the city view drew.
                     if (stepped && screen == Screen::City && !game_options.city_sounds_off()) {
                         const int col0 = static_cast<int>(cam.x) / city_cell_px;
@@ -2645,7 +2831,7 @@ int main(int argc, char** argv) {
                         std::printf("dismissed: three tributes missed\n");
                     }
                 }
-                if (now - last_step_ms >= kStepMs) last_step_ms = now;  // behind: drop the backlog
+                if (now - last_step_ms >= step_ms()) last_step_ms = now;  // behind: drop the backlog
             }
             // The effects this frame asked for, in order: one sound at a time,
             // so the last is the one heard.
@@ -2749,10 +2935,21 @@ int main(int argc, char** argv) {
                 } else {
                     render_empire_frame(state.empire, pcam, frame);
                 }
-                const std::string label = province_label();
-                ui::render_bar(province_buttons, province_command, province_bar, frame, kLogicalW, kLogicalH,
-                               page_metrics, font, label.c_str());
-                ui::render_strip(screen_tabs, 1, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+                if (province_orig()) {
+                    // The original's bar and, with the pointer on a button, its name on the plaque (no minimap is known
+                    // for this view).
+                    ui::render_original_bar(province_toolbar, province_selected_button(), have_bar_art ? &bar_art : nullptr,
+                                            &toolbar_icons, &province_sprites.palette, have_font ? &game_font : nullptr,
+                                            model::global_word(state, systems::economy::kFunds), frame, kLogicalW,
+                                            kLogicalH);
+                    if (have_interface_art && province_hover >= 0)
+                        viewer::draw_title_plaque(frame, kLogicalW, kLogicalH, interface_art, province_toolbar.label(province_hover));
+                } else {
+                    const std::string label = province_label();
+                    ui::render_bar(province_buttons, province_command, province_bar, frame, kLogicalW, kLogicalH,
+                                   page_metrics, font, label.c_str());
+                    ui::render_strip(screen_tabs, 1, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
+                }
             } else if (save_mode && screen == Screen::Maps && have_maps_art) {
                 // 0x0B717: the original maps screen.
                 ui::compose_maps_screen(state.city, map_mode, map_shows_city, maps_art, frame);
@@ -2842,66 +3039,31 @@ int main(int argc, char** argv) {
                                have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
                 }
                 if (screen == Screen::City && tool_armed && pointer_lx >= 0 && !toolbar.contains(pointer_lx, pointer_ly)) {
-                    namespace construction = systems::construction;
+                    // What the original draws at the pointer (overlays.hpp, findings section 49): the dashed frame for a
+                    // command with no preview tile, else that tile's picture, and the cost at the cell.
                     const auto tool = kBuildTools[tool_index];
-                    const construction::PlacementSpec spec = construction::placement_spec(tool);
-                    int fw = 1, fh = 1;
-                    if (spec.kind == construction::PlacementKind::MultiCell) fw = spec.width, fh = spec.height;
-                    if (spec.kind == construction::PlacementKind::VariantSelected) fw = spec.width, fh = spec.height;
                     const int cell_x = static_cast<int>(cam.x + pointer_lx / cam.zoom) / city_cell_px;
                     const int cell_y = static_cast<int>(cam.y + pointer_ly / cam.zoom) / city_cell_px;
                     const int sx = static_cast<int>((cell_x * city_cell_px - cam.x) * cam.zoom);
                     const int sy = static_cast<int>((cell_y * city_cell_px - cam.y) * cam.zoom);
-                    bool drew_building = false;
-                    if (spec.kind != construction::PlacementKind::DragAutoTiled &&
-                        spec.kind != construction::PlacementKind::NonPlacing) {
-                        // The building itself: render a small window with and without it, and draw what differs.
-                        model::CityMap with = state.city;
-                        bool fits = cell_x >= 0 && cell_y >= 0 && cell_x + fw <= model::kCityW && cell_y + fh <= model::kCityH;
-                        if (fits && spec.kind == construction::PlacementKind::VariantSelected) {
-                            const uint8_t seed = tool == construction::CommandId::Forum
-                                                     ? static_cast<uint8_t>(0xE0 + forum_grade)
-                                                     : static_cast<uint8_t>(0xF5 + workshop_goods / 4);
-                            for (int dy = 0; dy < fh && fits; ++dy)
-                                for (int dx = 0; dx < fw && fits; ++dx)
-                                    fits = construction::is_buildable_terrain(with.tile[cell_y + dy][cell_x + dx]);
-                            if (fits)
-                                for (int dy = 0; dy < fh; ++dy)
-                                    for (int dx = 0; dx < fw; ++dx) {
-                                        with.tile[cell_y + dy][cell_x + dx] = seed;
-                                        with.operational_state[cell_y + dy][cell_x + dx] = static_cast<uint8_t>(4 * dy + dx);
-                                    }
-                        } else if (fits) {
-                            fits = construction::place(with, tool, cell_x, cell_y);
-                        }
-                        if (fits) {
-                            const int c0 = std::max(0, cell_x - 1), r0 = std::max(0, cell_y - 4);
-                            const int c1 = std::min(model::kCityW, cell_x + fw + 1), r1 = std::min(model::kCityH, cell_y + fh + 1);
-                            formats::IndexedImage before, after;
-                            render::render_city(state.city, sprites, c0, r0, c1 - c0, r1 - r0, before, render_phase, nullptr);
-                            render::render_city(with, sprites, c0, r0, c1 - c0, r1 - r0, after, render_phase, nullptr);
-                            for (int vy = 0; vy < kLogicalH; ++vy)
-                                for (int vx = 0; vx < kLogicalW; ++vx) {
-                                    const int wx = static_cast<int>(cam.x + vx / cam.zoom) - c0 * city_cell_px;
-                                    const int wy = static_cast<int>(cam.y + vy / cam.zoom) - r0 * city_cell_px;
-                                    if (wx < 0 || wy < 0 || wx >= after.width || wy >= after.height) continue;
-                                    const size_t k = static_cast<size_t>(wy) * after.width + wx;
-                                    if (after.pixels[k] == before.pixels[k]) continue;
-                                    const formats::RGB c = sprites.palette.colors[after.pixels[k]];
-                                    const size_t i = (static_cast<size_t>(vy) * kLogicalW + vx) * 3;
-                                    frame[i] = c.r;
-                                    frame[i + 1] = c.g;
-                                    frame[i + 2] = c.b;
-                                    drew_building = true;
-                                }
-                        }
+                    const viewer::GhostSeed seed = viewer::ghost_seed(tool, forum_grade, workshop_goods);
+                    const formats::PL8Frame* picture = nullptr;
+                    if (seed.tile == 0) {
+                        if (have_icons && toolbar_icons.frames.size() > 1) picture = &toolbar_icons.frames[1];
+                    } else {
+                        const formats::PL8Sheet& sheet = seed.tile >= 0xC8 ? sprites.buildings : sprites.variants;
+                        const size_t index = static_cast<size_t>(seed.tile >= 0xC8 ? seed.tile - 0xC8 : seed.tile);
+                        if (index < sheet.frames.size()) picture = &sheet.frames[index];
                     }
-                    if (!drew_building)
-                        viewer::draw_dashed_frame(frame, kLogicalW, kLogicalH, sx, sy,
-                                                  static_cast<int>(fw * city_cell_px * cam.zoom),
-                                                  static_cast<int>(fh * city_cell_px * cam.zoom));
+                    if (picture)
+                        viewer::draw_ghost_frame(frame, kLogicalW, kLogicalH, *picture, sprites.palette, sx,
+                                                 std::max(0, sy - static_cast<int>(seed.rise * cam.zoom)), cam.zoom);
+                    else if (seed.tile == 0)
+                        viewer::draw_dashed_frame(frame, kLogicalW, kLogicalH, sx, sy, static_cast<int>(city_cell_px * cam.zoom),
+                                                  static_cast<int>(city_cell_px * cam.zoom));
+                    // 0x2141D: the cost, 1 to 3 digits, at the cell's left two rows down (not for a Fort at the far right).
                     const std::string cost = std::to_string(systems::economy::construction_cost(tool, forum_grade));
-                    if (have_font) ui::draw_game_text(frame, kLogicalW, kLogicalH, sx + 1, sy + 3, cost.c_str(), 1, game_font);
+                    if (have_font) ui::draw_game_text(frame, kLogicalW, kLogicalH, sx, sy + 2, cost.c_str(), 1, game_font);
                 }
                 if (screen == Screen::Choice && choice_overlay()) {
                     const int hover_item =
@@ -2929,34 +3091,57 @@ int main(int argc, char** argv) {
                 ui::render_strip({{ui::tr("Undo"), 950}}, -1, undo_strip, frame, kLogicalW, kLogicalH, page_metrics,
                                  font);
             if (save_mode && message_visible()) {
-                // 0x279AC: the message's two 28-character lines. The original
-                // draws them at (16, 14) and (16, 30); here they sit below the
-                // screen strip.
+                // 0x279AC: the message's two 28-character lines.
                 const std::string& t = sim.messages.current.text;
-                const std::string line1 = t.substr(0, std::min<size_t>(28, t.size()));
-                const std::string line2 = t.size() > 28 ? t.substr(28) : std::string();
-                for (int y = kMessageBox.y; y < kMessageBox.y + kMessageBox.h; ++y) {
-                    for (int x = kMessageBox.x; x < kMessageBox.x + kMessageBox.w; ++x) {
-                        const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
-                        const bool edge = y == kMessageBox.y || x == kMessageBox.x ||
-                                          y == kMessageBox.y + kMessageBox.h - 1 || x == kMessageBox.x + kMessageBox.w - 1;
-                        frame[i] = edge ? 140 : 58;
-                        frame[i + 1] = edge ? 132 : 55;
-                        frame[i + 2] = edge ? 100 : 40;
+                if (have_interface_art) {
+                    viewer::draw_message_box(frame, kLogicalW, kLogicalH, interface_art, t);
+                } else {
+                    const ui::Rect box = kMessageBoxPlain;
+                    for (int y = box.y; y < box.y + box.h; ++y) {
+                        for (int x = box.x; x < box.x + box.w; ++x) {
+                            const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
+                            const bool edge = y == box.y || x == box.x || y == box.y + box.h - 1 || x == box.x + box.w - 1;
+                            frame[i] = edge ? 140 : 58;
+                            frame[i + 1] = edge ? 132 : 55;
+                            frame[i + 2] = edge ? 100 : 40;
+                        }
+                    }
+                    const std::string line1 = viewer::message_line(t, 0), line2 = viewer::message_line(t, 1);
+                    for (const auto& [line, y] : {std::pair<const std::string&, int>{line1, box.y + 3},
+                                                  std::pair<const std::string&, int>{line2, box.y + 15}}) {
+                        if (font)
+                            ui::draw_game_text(frame, kLogicalW, kLogicalH, box.x + 4, y, line.c_str(), 1, *font);
+                        else
+                            ui::draw_text(frame, kLogicalW, kLogicalH, box.x + 4, y, line.c_str(), 1,
+                                          formats::RGB{232, 226, 200});
                     }
                 }
-                for (const auto& [line, y] : {std::pair<const std::string&, int>{line1, kMessageBox.y + 3},
-                                              std::pair<const std::string&, int>{line2, kMessageBox.y + 15}}) {
-                    if (font)
-                        ui::draw_game_text(frame, kLogicalW, kLogicalH, kMessageBox.x + 4, y, line.c_str(), 1, *font);
-                    else
-                        ui::draw_text(frame, kLogicalW, kLogicalH, kMessageBox.x + 4, y, line.c_str(), 1,
-                                      formats::RGB{232, 226, 200});
-                }
             }
-            // The original's pointer, an orange arrow (POINTERS frame 0), over everything; with a command chosen the cost
-            // ghost takes its place on the map (where the captures show no arrow).
-            if (save_mode && have_icons && have_sprites && pointer_lx >= 0 && (screenshot_path.empty() || test_hover_x >= 0) &&
+            // The pointer. Gaius's is the system's (cursor.hpp). The original's, an orange arrow (POINTERS frame 0), is
+            // drawn into the picture over everything, and the system's goes while it is there; with a command chosen the
+            // cost ghost takes its place on the map (where the captures show no arrow).
+            const bool original_cursor = settings.cursor == ui::CursorStyle::Original && have_icons && have_sprites;
+            const bool ghost_cursor = save_mode && have_sprites && screen == Screen::City && tool_armed && pointer_lx >= 0 &&
+                                      !toolbar.contains(pointer_lx, pointer_ly);
+            const bool hide_system_cursor = pointer_lx >= 0 && (original_cursor || ghost_cursor);
+            if (hide_system_cursor != system_cursor_hidden) {
+                SDL_ShowCursor(hide_system_cursor ? SDL_DISABLE : SDL_ENABLE);
+                system_cursor_hidden = hide_system_cursor;
+            }
+            if (save_mode && !original_cursor && !ghost_cursor && !screenshot_path.empty() && test_hover_x >= 0 &&
+                pointer_lx >= 0) {
+                // A headless capture has no system pointer: draw Gaius's at 16 pixels, to see where it is.
+                const viewer::CursorImage c = viewer::render_cursor(16);
+                for (int iy = 0; iy < c.size; ++iy)
+                    for (int ix = 0; ix < c.size; ++ix) {
+                        const uint8_t* p = &c.rgba[(static_cast<size_t>(iy) * c.size + ix) * 4];
+                        const int x = pointer_lx - c.hot_x + ix, y = pointer_ly - c.hot_y + iy;
+                        if (p[3] == 0 || x < 0 || y < 0 || x >= kLogicalW || y >= kLogicalH) continue;
+                        uint8_t* d = &frame[(static_cast<size_t>(y) * kLogicalW + x) * 3];
+                        for (int k = 0; k < 3; ++k) d[k] = static_cast<uint8_t>((p[k] * p[3] + d[k] * (255 - p[3])) / 255);
+                    }
+            }
+            if (save_mode && original_cursor && pointer_lx >= 0 && (screenshot_path.empty() || test_hover_x >= 0) &&
                 !toolbar_icons.frames.empty() && !toolbar_icons.frames[0].pixels.empty() &&
                 !(screen == Screen::City && tool_armed && !toolbar.contains(pointer_lx, pointer_ly))) {
                 const formats::PL8Frame& arrow = toolbar_icons.frames[0];
@@ -2997,6 +3182,7 @@ int main(int argc, char** argv) {
         return 4;
     }
 
+    if (gaius_cursor) SDL_FreeCursor(gaius_cursor);
     SDL_Quit();
     return 0;
 }

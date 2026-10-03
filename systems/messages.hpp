@@ -13,7 +13,7 @@
 // map, and keep the cell less 10 in x and 5 in y in DS:0x6C6E/0x6C6C, where a
 // click on the message moves the view (0x0F982). The display routine (0x279AC)
 // runs each frame while the messages option DS:0x6C78 is on: a sound on the
-// first frame, the text's two 28-character lines at (16, 14) and (16, 30), and
+// first frame, the text's two 28-character lines at (16, 14) and (16, 28), and
 // the timer counts down.
 //
 // The texts are the executable's (the pointers 0x277xx store in DS:0x6E2A-

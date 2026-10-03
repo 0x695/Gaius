@@ -128,6 +128,9 @@ const std::vector<BarButton>& original_bar_page(int page) {
     const auto go = [](C c, int frame) { return BarButton{BarKind::Go, c, frame, 0, true}; };
     const auto turn = [](int frame, int to) { return BarButton{BarKind::Page, C::NoAction, frame, to, true}; };
     const BarButton back{BarKind::Back, C::MainToolbar, 28, 0, true};
+    const auto province = [](int id, int frame, C c = C::NoAction) {
+        return BarButton{BarKind::Province, c, frame, 0, true, id};
+    };
     // Frames from command_icon_frame's table; see there for how the executable's records pair up.
     static const std::vector<BarButton> pages[kBarPages] = {
         // DS:0x1178 -- 0x28, Gaius's file screen, is the save and load button
@@ -140,6 +143,12 @@ const std::vector<BarButton>& original_bar_page(int page) {
         {back, tool(C::Temple, 23), tool(C::Hospital, 30), tool(C::School, 32), tool(C::Oracle, 31),
          tool(C::HeavyIndustry, 20), tool(C::Market, 34), tool(C::Workshop, 27), tool(C::Theater, 24),
          tool(C::Coliseum, 25), tool(C::Hippodrome, 26)},
+        // DS:0x123E -- the province view: back to the city, the Forum, then the executable's command ids 35, 36, 42, 29,
+        // 37, 41, 31, 32 and 33 (the table's records, read with the same off-by-one pairing as the city's pages; the
+        // Cohort's Halt, id 30, has no button)
+        {BarButton{BarKind::Back, C::MainToolbar, 13, 0, true}, go(C::GoToForum, 35), province(35, 40),
+         province(36, 41), province(42, 42), province(29, 15, C::Fort), province(37, 43), province(41, 39),
+         province(31, 36, C::CohortPatrol), province(32, 37, C::CohortAttack), province(33, 38, C::CohortGoHome)},
     };
     return pages[std::clamp(page, 0, kBarPages - 1)];
 }
@@ -201,10 +210,29 @@ BarButton Toolbar::entry(int i) const {
     return BarButton{BarKind::Tool, command, command_icon_frame(command), 0, true};
 }
 
+// The province commands' names: the executable has strings only for the Fort and the Cohort orders (ids below 34);
+// the others are the manual's, kept to 15 characters so they fit the plaque.
+static const char* province_command_label(int id) {
+    switch (id) {
+        case 29: return "Fort";
+        case 31: return "Cohort Patrol";
+        case 32: return "Cohort Attack";
+        case 33: return "Cohort Go Home";
+        case 35: return "Clear Area";
+        case 36: return "Road";
+        case 37: return "Great Wall";
+        case 41: return "Great Tower";
+        case 42: return "Highway";
+        default: return "";
+    }
+}
+
 const char* Toolbar::label(int i) const {
     if (i < 0 || i >= count()) return "";
     const BarButton b = entry(i);
+    if (bar_ && bar_page_ == kBarProvincePage && b.kind == BarKind::Back) return tr("Go to City");
     switch (b.kind) {
+        case BarKind::Province: return province_command_label(b.province);
         case BarKind::Page: return b.page == 1 ? tr("Infrastructure") : tr("Construction");
         case BarKind::Files: return tr("Save and load");
         default: return systems::construction::command_name(b.command);
@@ -409,9 +437,10 @@ void render_original_bar(const Toolbar& bar, int selected, const BarArt* art, co
                          int h) {
     if (!bar.original_bar() || w <= 0 || h <= 0 || rgb.size() < static_cast<size_t>(w) * h * 3) return;
     const Rect p = bar.panel();
-    // The panel: the game's own picture of it (PANEL1A for the main bar, PANEL1B for the building pages), else a flat one.
+    // The panel: the game's own picture of it (PANEL1A for the main bar and the province view, PANEL1D for the building
+    // pages -- 0x0FDED), else a flat one.
     const formats::IndexedImage* image = nullptr;
-    if (art && palette) image = bar.bar_page() == 0 ? &art->main : &art->build;
+    if (art && palette) image = (bar.bar_page() == 0 || bar.bar_page() == kBarProvincePage) ? &art->main : &art->build;
     if (image && image->width == w && image->height == h && !image->pixels.empty()) {
         for (int y = p.y; y < p.y + p.h; ++y)
             for (int x = 0; x < w; ++x) put(rgb, w, h, x, y, palette->colors[image->pixels[static_cast<size_t>(y) * w + x]]);

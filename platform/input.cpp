@@ -296,6 +296,13 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
                 }
             }
             if (sym == SDLK_AC_BACK) return Command{CommandType::Menu};  // Android's Back
+            if (sym == SDLK_F9) return Command{CommandType::CycleLayer};
+            if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) {
+                // The manual: the Enter key acts as the right button.
+                Command c{CommandType::Secondary};
+                SDL_GetMouseState(&c.x, &c.y);
+                return c;
+            }
             const std::optional<CommandType> bound = command_for_key(static_cast<int>(sym));
             if (!bound) return std::nullopt;
             if (*bound == CommandType::CycleTool && (event.key.keysym.mod & KMOD_SHIFT))

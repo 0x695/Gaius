@@ -92,11 +92,14 @@ enum class BarKind {
     Page,   // turns to another page of the bar
     Go,     // leaves the city: the province, the Forum or the maps
     Files,  // the save and load screen
-    Back,   // to the main bar
+    Back,   // to the main bar (on the province page: back to the city)
+    Province,  // a command of the province view (BarButton::province)
 };
 
 inline constexpr int kBarSlots = 11;
-inline constexpr int kBarPages = 3;
+// Pages 0-2 are the city's; page 3 is the province view's bar (DS:0x123E).
+inline constexpr int kBarPages = 4;
+inline constexpr int kBarProvincePage = 3;
 // The bar's own geometry (0x211CB, findings section 46): the panel is the bottom 24 rows of the screen, a button's
 // 16 x 16 icon is drawn at x = 8 + 24 * slot, 4 rows into it, and the funds are a five-digit number at (268, 184).
 inline constexpr int kBarPanelH = 24, kBarPitch = 24, kBarX0 = 8, kBarIconPx = 16, kBarIconY = 4;
@@ -108,9 +111,11 @@ struct BarButton {
     int frame = -1;       // POINTERS.PL8
     int page = 0;         // Page: where it turns to
     bool available = true;  // false: drawn dimmed, and does nothing (a command Gaius has not transcribed)
+    int province = 0;     // Province: the executable's command id (29 Fort, 31-33 the Cohort orders, 35 clear, 36 road,
+                          // 37 Great Wall, 41 Great Tower, 42 Imperial Highway)
 };
 
-// The buttons of page `page` (0-2) in slot order.
+// The buttons of page `page` (0-3) in slot order.
 const std::vector<BarButton>& original_bar_page(int page);
 
 class Toolbar {
@@ -206,8 +211,10 @@ void render(const Toolbar& bar, int selected, int hovered, TileColorFn tile_colo
 // silently otherwise, so a very long tool name never doubles up with a
 // clipped, unreadable funds figure.
 
-// The game's own pictures of the bar's panel, drawn under the buttons: PANEL1A.VPX (the main bar) and PANEL1B.VPX
-// (the infrastructure and construction pages), both 320 x 200 in the city palette, of which the bottom 24 rows show.
+// The game's own pictures of the bar's panel, drawn under the buttons: PANEL1A.VPX (the main bar and the province
+// view's) and PANEL1D.VPX (the infrastructure and construction pages), both 320 x 200 in the city palette, of which
+// the bottom 24 rows show. The executable picks them at 0x0FDED: `DS:0x6CAE` = 1 or page 0 the first, pages 1 and 2
+// the second (it names no other panel picture).
 struct BarArt {
     formats::IndexedImage main;
     formats::IndexedImage build;

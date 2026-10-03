@@ -40,10 +40,10 @@ enum SettingsTab { kSettingsGame, kSettingsSound, kSettingsVideo, kSettingsKeys,
 
 // The rows whose arrows change a value.
 enum class SettingRow {
-    GameSpeed, ScrollSpeed, Messages,
+    GameSpeed, ScrollSpeed, Messages, Pace,
     Tunes, Effects, CitySounds, MusicVolume, EffectsVolume,
     WindowMode, UiScale, FrameRate, PositionIndicator, IconNames,
-    GamepadPointer, EdgeScroll, Language,
+    GamepadPointer, EdgeScroll, Cursor, Language,
     Binding,  // + the index into platform::kBindable
 };
 
@@ -128,6 +128,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.rows.push_back(
                 row(ui::tr("Scroll speed"), std::to_string(o.scroll_speed()), row_id(SettingRow::ScrollSpeed)));
             page.rows.push_back(row(ui::tr("Messages"), on_off(v.messages_on), row_id(SettingRow::Messages)));
+            page.rows.push_back(row(ui::tr("Game pace"), ui::tr(s.pace == ui::GamePace::Fast ? "Fast" : "Original"),
+                                    row_id(SettingRow::Pace)));
             page.buttons.push_back({ui::tr("Resume"), kActionResume, v.in_game});
             page.buttons.push_back({ui::tr("Pause"), kActionPause, v.in_game});
             page.buttons.push_back({ui::tr("Load"), kActionSettingsLoad, v.game_found});
@@ -160,6 +162,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
                                     row_id(SettingRow::PositionIndicator)));
             page.rows.push_back(row(ui::tr("Icon names"), on_off(!o.icon_name_off()), row_id(SettingRow::IconNames)));
             page.rows.push_back(row(ui::tr("Edge scrolling"), on_off(s.edge_scroll), row_id(SettingRow::EdgeScroll)));
+            page.rows.push_back(row(ui::tr("Cursor"), ui::tr(s.cursor == ui::CursorStyle::Original ? "Original" : "Gaius"),
+                                    row_id(SettingRow::Cursor)));
             break;
         case kSettingsKeys: {
             page.title = ui::tr("Arrows - left key, right button");
@@ -233,6 +237,9 @@ inline bool adjust_setting(int action, ui::Settings& s, ui::GameOptions& o, bool
         case SettingRow::GameSpeed: o.set(ui::kOptSpeed, step(o.speed() / 10 * 10, delta, 0, 100, 10)); break;
         case SettingRow::ScrollSpeed: o.set(ui::kOptScroll, step(o.scroll_speed() / 10 * 10, delta, 0, 100, 10)); break;
         case SettingRow::Messages: messages_on = !messages_on; break;
+        case SettingRow::Pace:
+            s.pace = s.pace == ui::GamePace::Original ? ui::GamePace::Fast : ui::GamePace::Original;
+            break;
         case SettingRow::Tunes: flip(ui::kOptTunes); break;
         case SettingRow::Effects: flip(ui::kOptEffects); break;
         case SettingRow::CitySounds: flip(ui::kOptCitySoundsOff); break;
@@ -254,6 +261,9 @@ inline bool adjust_setting(int action, ui::Settings& s, ui::GameOptions& o, bool
         case SettingRow::IconNames: flip(ui::kOptIconNameOff); break;
         case SettingRow::GamepadPointer: s.gamepad_cursor = !s.gamepad_cursor; break;
         case SettingRow::EdgeScroll: s.edge_scroll = !s.edge_scroll; break;
+        case SettingRow::Cursor:
+            s.cursor = s.cursor == ui::CursorStyle::Gaius ? ui::CursorStyle::Original : ui::CursorStyle::Gaius;
+            break;
         case SettingRow::Language: {
             if (languages.empty()) return false;
             const int n = static_cast<int>(languages.size());

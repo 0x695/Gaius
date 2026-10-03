@@ -41,10 +41,10 @@ PICTURES = {
     "ROME1.VPX": ("ROME1.256", "same name; the natural-looking match"),
     "ROME2.VPX": ("ROME1.256", "INFERENCE: the same scene as ROME1"),
     "ROME.VPX": ("SHADE.256", "INFERENCE: only colours 0-15, which SHADE, PANEL1 and TEMPLE share"),
-    "PANEL1A.VPX": ("SHADE.256", "UNRESOLVED: high colours PANEL1.256 doesn't hold; the city palette is a guess"),
-    "PANEL1B.VPX": ("SHADE.256", "UNRESOLVED: as PANEL1A"),
-    "PANEL1C.VPX": ("SHADE.256", "UNRESOLVED: as PANEL1A"),
-    "PANEL1D.VPX": ("SHADE.256", "UNRESOLVED: as PANEL1A"),
+    "PANEL1A.VPX": ("SHADE.256", "the city bar's panel (the main bar and the province view); the colours match the DOSBox captures"),
+    "PANEL1B.VPX": ("SHADE.256", "UNRESOLVED: the executable never names it"),
+    "PANEL1C.VPX": ("SHADE.256", "UNRESOLVED: the executable never names it"),
+    "PANEL1D.VPX": ("SHADE.256", "the city bar's panel for the infrastructure and construction pages (0x0FDED)"),
 }
 
 # Sprite sheets use the city palette. The battle banners belong to the battle

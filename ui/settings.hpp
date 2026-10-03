@@ -20,6 +20,17 @@ namespace gaius::ui {
 
 enum class WindowModeSetting { Windowed = 0, Borderless = 1, Fullscreen = 2 };
 
+// The mouse pointer: Gaius's own (a gold arrow the system draws, sharp at any window size) or the original's
+// (POINTERS.PL8 frame 0, drawn into the picture; needs the game's files, and Gaius's shows without them).
+enum class CursorStyle { Gaius = 0, Original = 1 };
+
+// How fast the simulation's frames run. The original's main loop is bound by its CPU: measured on the GOG release's
+// DOSBox (3000 cycles, the setting its window title shows) a game year takes about 85 s at the top game speed, a
+// frame every 66 ms (every frame steps at speed 100, and a month is 106 steps). "Original" keeps that pace -- the same barbarians, fires and taxes per minute of play; "Fast" is
+// Gaius's earlier pace of a frame every 19 ms, three and a half times quicker.
+enum class GamePace { Original = 0, Fast = 1 };
+inline constexpr int kFrameMsOriginal = 66, kFrameMsFast = 19;
+
 struct Settings {
     WindowModeSetting window_mode = WindowModeSetting::Windowed;
     int ui_scale = 0;      // 0 automatic, 1-4 the toolbar and page scale
@@ -28,6 +39,8 @@ struct Settings {
     int effects_volume = 100;  // 0-100, in tens
     std::string language = "en";
     std::string game_dir;  // empty: look in the usual places
+    CursorStyle cursor = CursorStyle::Gaius;
+    GamePace pace = GamePace::Original;
     bool gamepad_cursor = true;  // a pointer moved by the left stick on screens without a map
     bool edge_scroll = true;     // the map scrolls when the mouse rests at the window's edge (arrow keys and WASD always do)
     bool touch_hints_seen = false;  // the touch controls page has been shown once

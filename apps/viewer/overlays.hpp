@@ -6,6 +6,7 @@
 //   - the "Select Forum Type" and "Select Industry Type" menus, a stone panel over the map;
 //   - the minimap in the top left corner: the terrain's land and water in a 25 x 25 square, and a red frame for the
 //     part of the city on screen;
+//   - the message box, a 16 x 3 stone panel at the top left corner with the message's two lines;
 //   - the cost ghost at the pointer: a dashed frame the size of the command's footprint with its cost in it, and for a
 //     building the building itself.
 // Positions are in the original's 320 x 200 screen. The panels are the game's own P_BLOCKS stone (ui/interface.hpp).
@@ -51,6 +52,28 @@ inline void draw_title_plaque(std::vector<uint8_t>& rgb, int w, int h, const ui:
     ui::draw_panel(canvas, art, 176, 0, 9, 2);
     ui::draw_text(canvas, art, ui::Font::Font1, 196, 12, text);
     blit_canvas_rect(rgb, w, h, canvas, art.palette, 176, 0, 144, 32);
+}
+
+// --- The message box ----------------------------------------------------------------
+
+// 0x279AC: `1F6F:1EC1` draws a 16 x 3 panel at (0, 0) -- 256 x 48 pixels, which is also the click area of 0x0F982 and
+// 0x0F93A -- and `100F:142C` writes the text's two lines in the large font at x = 16, y = 14 and y = 28. A line is 28
+// characters, and the second starts 30 characters into the record (the two between are blank).
+inline constexpr int kMessageW = 256, kMessageH = 48, kMessageTextX = 16, kMessageLine1Y = 14, kMessageLine2Y = 28;
+inline constexpr int kMessageChars = 28, kMessageLine2At = 30;
+
+inline std::string message_line(const std::string& text, int line) {
+    const size_t at = line == 0 ? 0 : static_cast<size_t>(kMessageLine2At);
+    if (text.size() <= at) return std::string();
+    return text.substr(at, kMessageChars);
+}
+
+inline void draw_message_box(std::vector<uint8_t>& rgb, int w, int h, const ui::InterfaceArt& art, const std::string& text) {
+    formats::IndexedImage canvas = ui::blank_canvas();
+    ui::draw_panel(canvas, art, 0, 0, kMessageW / 16, kMessageH / 16);
+    ui::draw_text(canvas, art, ui::Font::Font1, kMessageTextX, kMessageLine1Y, message_line(text, 0));
+    ui::draw_text(canvas, art, ui::Font::Font1, kMessageTextX, kMessageLine2Y, message_line(text, 1));
+    blit_canvas_rect(rgb, w, h, canvas, art.palette, 0, 0, kMessageW, kMessageH);
 }
 
 // --- The Forum and Industry type menus -----------------------------------------
@@ -153,6 +176,64 @@ inline void draw_minimap(std::vector<uint8_t>& rgb, int w, int h, const model::C
 }
 
 // --- The cost ghost ------------------------------------------------------------------
+
+// What the original draws at the pointer while a command is chosen (the pointer routine 1F6F:159F, findings section
+// 49). Each toolbar handler sets DS:0x6D12, the command's preview tile, and DS:0x6D10, how far the picture rises above
+// the cell; the Forum's handler takes its tile from the type menu (0xDF + the choice) and the Workshop's from the
+// goods (0x18, or 0x28 past the fourth). A command with no preview tile (Clear Area, Road, Plaza, Reservoir, Well,
+// Fountain, Wall, Tower) shows POINTERS frame 1, the dashed frame; any other shows that tile's one picture -- a frame
+// of HOUSES.PL8 (tile - 0xC8) from 0xC8 up, of HOUSES2.PL8 below -- with its top left `rise` pixels above the cell.
+// The cost is written at the cell's left, two rows down, in the large font.
+struct GhostSeed {
+    int tile = 0;  // 0: the dashed frame
+    int rise = 0;
+};
+
+inline GhostSeed ghost_seed(systems::construction::CommandId command, int forum_grade, int workshop_goods) {
+    using C = systems::construction::CommandId;
+    switch (command) {
+        case C::Housing: return {0xC8, 0};
+        case C::BathHouses: return {0xE8, 12};
+        case C::Barracks: return {0xEF, 4};
+        case C::Prefecture: return {0xEE, 3};
+        case C::Temple: return {0xD8, 2};
+        case C::Hospital: return {0xED, 0};
+        case C::School: return {0xEC, 0};
+        case C::Oracle: return {0xEB, 16};
+        case C::HeavyIndustry: return {4, 0};
+        case C::Market: return {5, 0};
+        case C::Theater: return {0xF0, 16};
+        case C::Coliseum: return {0xF1, 16};
+        case C::Hippodrome: return {0xF2, 6};
+        case C::Forum: return {0xE0 + std::clamp(forum_grade, 0, 7), 0};
+        case C::Workshop: return {workshop_goods > 3 ? 0x28 : 0x18, 2};
+        default: return {0, 0};
+    }
+}
+
+// Draws a sprite frame with its top left at screen (x, y), each pixel `zoom` times as large, index 0 transparent.
+inline void draw_ghost_frame(std::vector<uint8_t>& rgb, int w, int h, const formats::PL8Frame& frame,
+                             const formats::Palette& palette, int x, int y, double zoom) {
+    if (frame.pixels.empty() || frame.width <= 0 || frame.height <= 0) return;
+    const int dw = std::max(1, static_cast<int>(frame.width * zoom)), dh = std::max(1, static_cast<int>(frame.height * zoom));
+    for (int dy = 0; dy < dh; ++dy) {
+        const int py = y + dy;
+        if (py < 0 || py >= h) continue;
+        for (int dx = 0; dx < dw; ++dx) {
+            const int px = x + dx;
+            if (px < 0 || px >= w) continue;
+            const int sx = std::min(frame.width - 1, static_cast<int>(dx / zoom));
+            const int sy = std::min(frame.height - 1, static_cast<int>(dy / zoom));
+            const uint8_t index = frame.pixels[static_cast<size_t>(sy) * frame.width + sx];
+            if (index == 0) continue;
+            const formats::RGB c = palette.colors[index];
+            const size_t i = (static_cast<size_t>(py) * w + px) * 3;
+            rgb[i] = c.r;
+            rgb[i + 1] = c.g;
+            rgb[i + 2] = c.b;
+        }
+    }
+}
 
 // A dashed frame (red and yellow dashes, as the captures show) around `w` x `h` cells with their top left at screen
 // (sx, sy), `cell` pixels to a cell.

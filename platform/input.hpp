@@ -72,6 +72,9 @@ enum class CommandType {
                   // depends on it; with text entry on, keys lose their other meanings.
     Rebound,      // a key or button was captured for a binding (capture_binding): the
                   // command it was bound to is in `rebound`.
+    CycleLayer,   // the viewer's developer view of the city: the picture, then each data
+                  // layer. F9, not rebindable; it used to be the right button's meaning,
+                  // which is the original's mode switch now.
 };
 
 // What a TextKey command carries.

@@ -41,6 +41,8 @@
 #include "model/city_state.hpp"
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
+#include "apps/viewer/cursor.hpp"
+#include "apps/viewer/original_intro.hpp"
 #include "apps/viewer/overlays.hpp"
 #include "platform/game_import.hpp"
 #include "platform/paths.hpp"
@@ -2990,12 +2992,13 @@ void test_ui_settings_file() {
     s.game_dir = "D:\\Games\\Caesar";
     s.gamepad_cursor = false;
     s.edge_scroll = false;
+    s.cursor = CursorStyle::Original;
     s.keys["cycle_tool"] = "Q";
     s.buttons["menu"] = "guide";
     const Settings r = parse_settings(settings_text(s));
     CHECK(r.window_mode == s.window_mode && r.ui_scale == 3 && r.frame_cap == 60 && r.music_volume == 40 &&
           r.effects_volume == 70 && r.language == "de" && r.game_dir == s.game_dir && !r.gamepad_cursor && !r.edge_scroll &&
-          r.keys == s.keys && r.buttons == s.buttons);
+          r.cursor == CursorStyle::Original && r.keys == s.keys && r.buttons == s.buttons);
     const Settings d = parse_settings("# nothing\nui_scale = 9\nframe_cap = 75\nmusic_volume = -3\nwindow_mode = x\n"
                                       "unknown = 1\nnot a line\n");
     const Settings defaults;
@@ -6653,6 +6656,317 @@ void test_viewer_overlays() {
     CHECK(std::string(gaius::systems::administration::kNewsText[1]).find("Emperor is dangerously ill") != std::string::npos);
 }
 
+// The province view's own bar (DS:0x123E), the panel pictures the executable picks, the message box and Gaius's pointer.
+void test_ui_province_bar() {
+    std::printf("test_ui_province_bar (DS:0x123E: back to the city, the Forum, the province commands)\n");
+    using namespace gaius::ui;
+    using C = gaius::systems::construction::CommandId;
+    const std::vector<BarButton>& page = original_bar_page(kBarProvincePage);
+    CHECK(kBarPages == 4 && kBarProvincePage == 3 && page.size() == 11);
+    // Slot by slot: back to the city 13, Forum 35, clear 40, road 41, Imperial Highway 42, Fort 15, Great Wall 43, Great
+    // Tower 39, Patrol 36, Attack 37, Go Home 38 -- and the command ids the handlers before them set (35, 36, 42, 29,
+    // 37, 41, 31, 32, 33; Halt, 30, has no button).
+    const int frames[] = {13, 35, 40, 41, 42, 15, 43, 39, 36, 37, 38};
+    const int ids[] = {0, 0, 35, 36, 42, 29, 37, 41, 31, 32, 33};
+    for (size_t i = 0; i < 11; ++i) CHECK(page[i].frame == frames[i] && page[i].province == ids[i]);
+    CHECK(page[0].kind == BarKind::Back && page[1].kind == BarKind::Go && page[1].command == C::GoToForum);
+    for (size_t i = 2; i < 11; ++i) CHECK(page[i].kind == BarKind::Province);
+    CHECK(page[5].command == C::Fort && page[8].command == C::CohortPatrol && page[9].command == C::CohortAttack &&
+          page[10].command == C::CohortGoHome);
+    // The three city pages list none of them, and the province page lists no city tool.
+    for (int p = 0; p < 3; ++p)
+        for (const BarButton& b : original_bar_page(p)) CHECK(b.kind != BarKind::Province);
+    for (const BarButton& b : page) CHECK(b.kind != BarKind::Tool && b.kind != BarKind::Page);
+
+    const C ring[] = {C::Road};
+    Toolbar bar(ring, 1, metrics_for_scale(1), 320, 200, true);
+    bar.set_bar_page(kBarProvincePage);
+    CHECK(bar.original_bar() && bar.bar_page() == kBarProvincePage && bar.count() == 11);
+    CHECK(std::string(bar.label(0)) == "Go to City" && std::string(bar.label(1)) == "Go to Forum" &&
+          std::string(bar.label(2)) == "Clear Area" && std::string(bar.label(4)) == "Highway" &&
+          std::string(bar.label(6)) == "Great Wall" && std::string(bar.label(7)) == "Great Tower" &&
+          std::string(bar.label(8)) == "Cohort Patrol");
+    // Every name fits the plaque (15 characters of the large font from x = 196), and every slot has an icon.
+    for (int i = 0; i < bar.count(); ++i) {
+        CHECK(std::strlen(bar.label(i)) <= 15 && bar.entry(i).frame >= 0);
+        const Rect r = bar.button(i);
+        CHECK(r.x == 8 + 24 * i && r.w == 16 && bar.hit_test(r.x + 1, r.y + 1) == i);
+    }
+    // The panel picture: the main one for page 0 and the province page, the second for the building pages.
+    BarArt art;
+    art.main.width = art.build.width = 320;
+    art.main.height = art.build.height = 200;
+    art.main.pixels.assign(320 * 200, 1);
+    art.build.pixels.assign(320 * 200, 2);
+    gaius::formats::Palette pal;
+    pal.colors[1] = {10, 20, 30};
+    pal.colors[2] = {200, 100, 50};
+    const auto corner = [&](int page) {
+        bar.set_bar_page(page);
+        std::vector<uint8_t> rgb(320 * 200 * 3, 0);
+        render_original_bar(bar, -1, &art, nullptr, &pal, nullptr, 0, rgb, 320, 200);
+        return std::array<int, 3>{rgb[(180 * 320 + 3) * 3], rgb[(180 * 320 + 3) * 3 + 1], rgb[(180 * 320 + 3) * 3 + 2]};
+    };
+    CHECK(corner(0) == (std::array<int, 3>{10, 20, 30}) && corner(kBarProvincePage) == (std::array<int, 3>{10, 20, 30}));
+    CHECK(corner(1) == (std::array<int, 3>{200, 100, 50}) && corner(2) == (std::array<int, 3>{200, 100, 50}));
+
+    const std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    // The executable (0x0FDED) loads PANEL1A for page 0 and the province view and PANEL1D for pages 1 and 2; both are
+    // full screens of the city palette and differ where the bar is.
+    try {
+        const auto a = gaius::formats::vpx::decode((fs::path(dir) / "PANEL1A.VPX").string()).image;
+        const auto d = gaius::formats::vpx::decode((fs::path(dir) / "PANEL1D.VPX").string()).image;
+        CHECK(a.width == 320 && a.height == 200 && d.width == 320 && d.height == 200);
+        int differing = 0;
+        for (int y = 176; y < 200; ++y)
+            for (int x = 0; x < 320; ++x)
+                if (a.pixels[static_cast<size_t>(y) * 320 + x] != d.pixels[static_cast<size_t>(y) * 320 + x]) ++differing;
+        CHECK(differing > 24 * 320 / 2);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("panel pictures: ") + e.what());
+    }
+}
+
+// 0x279AC: the message box is a 16 x 3 stone panel at the corner, the text's lines at (16, 14) and (16, 28).
+void test_viewer_message_box() {
+    std::printf("test_viewer_message_box (0x279AC: panel at (0, 0), two 28-character lines 30 apart)\n");
+    namespace vw = gaius::viewer;
+    namespace msg = gaius::systems::messages;
+    CHECK(vw::kMessageW == 256 && vw::kMessageH == 48 && vw::kMessageTextX == 16 && vw::kMessageLine1Y == 14 &&
+          vw::kMessageLine2Y == 28);
+    const std::string arrest = msg::text(msg::Id::ArrestOrdered);
+    CHECK(vw::message_line(arrest, 0) == "Furious over lack of payment" && vw::message_line(arrest, 1) == "Rome has ordered your arrest");
+    // Every message: line 1 is characters 0-27, the two between are blank, line 2 follows -- and it never needs more.
+    int count = 0;
+    for (int id = static_cast<int>(msg::Id::None) + 1; id <= static_cast<int>(msg::Id::NoCity); ++id) {
+        const std::string t = msg::text(static_cast<msg::Id>(id));
+        if (t.empty()) continue;
+        ++count;
+        CHECK(t.size() >= 30 && t[28] == ' ' && t[29] == ' ');
+        CHECK(!vw::message_line(t, 0).empty() && !vw::message_line(t, 1).empty());
+        CHECK(vw::message_line(t, 0).size() <= 28 && vw::message_line(t, 1).size() <= 28 && t.size() <= 58);
+    }
+    CHECK(count >= 25);
+    CHECK(vw::message_line("short", 1).empty());
+
+    const std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    gaius::ui::InterfaceArt art;
+    try {
+        art = gaius::ui::load_interface_art(dir);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("interface files: ") + e.what());
+        return;
+    }
+    std::vector<uint8_t> rgb(320 * 200 * 3, 0);
+    vw::draw_message_box(rgb, 320, 200, art, arrest);
+    const auto lit = [&](int x, int y) {
+        const size_t i = (static_cast<size_t>(y) * 320 + x) * 3;
+        return rgb[i] != 0 || rgb[i + 1] != 0 || rgb[i + 2] != 0;
+    };
+    int inside = 0;
+    bool clean = true;
+    for (int y = 0; y < 200; ++y)
+        for (int x = 0; x < 320; ++x) {
+            if (x < 256 && y < 48) inside += lit(x, y) ? 1 : 0;
+            else clean = clean && !lit(x, y);  // nothing outside the 256 x 48 panel
+        }
+    CHECK(clean && inside > 256 * 48 * 9 / 10);
+}
+
+// Gaius's own mouse pointer (apps/viewer/cursor.hpp): a gold arrow, rasterised at any size.
+void test_viewer_cursor() {
+    std::printf("test_viewer_cursor (Gaius's gold arrow; the setting that chooses it or the original's)\n");
+    namespace vw = gaius::viewer;
+    const vw::CursorImage img = vw::render_cursor(32);
+    CHECK(img.size == 32 && img.rgba.size() == 32u * 32u * 4u && img.hot_x == 5 && img.hot_y == 3);
+    const auto at = [&](const vw::CursorImage& c, int x, int y) { return &c.rgba[(static_cast<size_t>(y) * c.size + x) * 4]; };
+    CHECK(at(img, 0, 0)[3] == 0 && at(img, 31, 0)[3] == 0 && at(img, 0, 31)[3] == 0 && at(img, 31, 31)[3] == 0);  // corners clear
+    CHECK(at(img, img.hot_x + 2, img.hot_y + 6)[3] == 255);  // inside the arrow, just under the tip
+    // The edge is dark brown, the body gold.
+    const uint8_t* edge = at(img, 5, 12);
+    CHECK(edge[3] == 255 && edge[0] < 90 && edge[1] < 60 && edge[2] < 40);
+    const uint8_t* body = at(img, 9, 14);
+    CHECK(body[3] == 255 && body[0] > 200 && body[1] > 130 && body[2] < 140);
+    int opaque = 0, shadow = 0;
+    for (int y = 0; y < img.size; ++y)
+        for (int x = 0; x < img.size; ++x) {
+            const uint8_t a = at(img, x, y)[3];
+            opaque += a == 255 ? 1 : 0;
+            shadow += a > 0 && a < 255 ? 1 : 0;
+        }
+    CHECK(opaque > 150 && opaque < 450 && shadow > 20);  // the arrow, and its soft shadow and anti-aliased rim
+    // Any size: the hot spot scales with it, the picture stays the same shape, and it is deterministic.
+    const vw::CursorImage big = vw::render_cursor(64);
+    CHECK(big.size == 64 && big.hot_x == 10 && big.hot_y == 6 && at(big, 12, 18)[3] == 255);
+    CHECK(vw::render_cursor(32).rgba == img.rgba);
+    CHECK(vw::render_cursor(1).size >= 8);
+
+    // The setting: Gaius's pointer by default, the original's when chosen, kept in gaius.cfg.
+    using gaius::ui::CursorStyle;
+    gaius::ui::Settings s;
+    CHECK(s.cursor == CursorStyle::Gaius);
+    s.cursor = CursorStyle::Original;
+    CHECK(gaius::ui::parse_settings(gaius::ui::settings_text(s)).cursor == CursorStyle::Original);
+    CHECK(gaius::ui::parse_settings("cursor = 7\n").cursor == CursorStyle::Gaius);  // a bad value keeps the default
+    CHECK(gaius::ui::parse_settings("window_mode = 1\n").cursor == CursorStyle::Gaius);
+    // The Settings screen's Cursor row flips it either way.
+    gaius::ui::Settings t;
+    gaius::ui::GameOptions o = gaius::ui::default_options();
+    bool messages = true;
+    const std::vector<gaius::ui::Catalog> langs = {{"en", "English", {}}};
+    const int action = vw::kActionSettingDown + 2 * vw::row_id(vw::SettingRow::Cursor);
+    CHECK(vw::adjust_setting(action, t, o, messages, langs) && t.cursor == CursorStyle::Original);
+    CHECK(vw::adjust_setting(action + 1, t, o, messages, langs) && t.cursor == CursorStyle::Gaius);
+}
+
+// 1F6F:159F: what the pointer draws while a command is chosen -- the command's preview tile (DS:0x6D12) and its rise
+// (DS:0x6D10), or the dashed frame when it has none.
+void test_viewer_ghost() {
+    std::printf("test_viewer_ghost (the preview tiles the toolbar handlers set; the dashed frame for the rest)\n");
+    namespace vw = gaius::viewer;
+    using C = gaius::systems::construction::CommandId;
+    struct Row {
+        C command;
+        int tile, rise;
+    };
+    const Row rows[] = {{C::Housing, 0xC8, 0},   {C::BathHouses, 0xE8, 12},  {C::Barracks, 0xEF, 4},
+                        {C::Prefecture, 0xEE, 3}, {C::Temple, 0xD8, 2},       {C::Hospital, 0xED, 0},
+                        {C::School, 0xEC, 0},     {C::Oracle, 0xEB, 16},      {C::HeavyIndustry, 4, 0},
+                        {C::Market, 5, 0},        {C::Theater, 0xF0, 16},     {C::Coliseum, 0xF1, 16},
+                        {C::Hippodrome, 0xF2, 6}};
+    for (const Row& r : rows) {
+        const vw::GhostSeed s = vw::ghost_seed(r.command, 0, 0);
+        CHECK(s.tile == r.tile && s.rise == r.rise);
+    }
+    // No preview tile: Clear Area, Road, Plaza, Reservoir, Well, Fountain, Wall, Tower show the dashed frame.
+    for (C c : {C::ClearArea, C::Road, C::Plaza, C::ReservoirPipe, C::Well, C::Fountain, C::Wall, C::Tower})
+        CHECK(vw::ghost_seed(c, 0, 0).tile == 0);
+    // The Forum's tile follows the chosen grade (0xDF + the menu's 1-8); the Workshop's the goods (0x18, 0x28 past the fourth).
+    CHECK(vw::ghost_seed(C::Forum, 0, 0).tile == 0xE0 && vw::ghost_seed(C::Forum, 7, 0).tile == 0xE7 &&
+          vw::ghost_seed(C::Forum, 3, 0).rise == 0);
+    CHECK(vw::ghost_seed(C::Workshop, 0, 0).tile == 0x18 && vw::ghost_seed(C::Workshop, 0, 3).tile == 0x18 &&
+          vw::ghost_seed(C::Workshop, 0, 4).tile == 0x28 && vw::ghost_seed(C::Workshop, 0, 7).rise == 2);
+
+    // A frame is drawn with its top left at the point, index 0 clear, each pixel `zoom` times as large.
+    gaius::formats::PL8Frame frame;
+    frame.width = 2;
+    frame.height = 2;
+    frame.pixels = {1, 0, 0, 2};
+    gaius::formats::Palette pal;
+    pal.colors[1] = {10, 20, 30};
+    pal.colors[2] = {200, 100, 50};
+    std::vector<uint8_t> rgb(8 * 8 * 3, 7);
+    vw::draw_ghost_frame(rgb, 8, 8, frame, pal, 3, 2, 2.0);
+    const auto at = [&](int x, int y) { return std::array<int, 3>{rgb[(y * 8 + x) * 3], rgb[(y * 8 + x) * 3 + 1], rgb[(y * 8 + x) * 3 + 2]}; };
+    CHECK(at(3, 2) == (std::array<int, 3>{10, 20, 30}) && at(4, 3) == (std::array<int, 3>{10, 20, 30}));  // frame pixel 1, doubled
+    CHECK(at(5, 2) == (std::array<int, 3>{7, 7, 7}) && at(3, 4) == (std::array<int, 3>{7, 7, 7}));       // index 0 left alone
+    CHECK(at(5, 4) == (std::array<int, 3>{200, 100, 50}) && at(6, 5) == (std::array<int, 3>{200, 100, 50}));
+    CHECK(at(2, 2) == (std::array<int, 3>{7, 7, 7}) && at(7, 7) == (std::array<int, 3>{7, 7, 7}));       // outside it
+    vw::draw_ghost_frame(rgb, 8, 8, frame, pal, 7, 7, 1.0);  // clipped at the edge, no overrun
+    CHECK(at(7, 7) == (std::array<int, 3>{10, 20, 30}));
+
+    const std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    try {
+        const auto sprites = gaius::render::load_city_sprites(dir);
+        // Every preview tile has its picture: HOUSES frame tile - 0xC8, or HOUSES2 frame tile, and the dashed frame is POINTERS 1.
+        for (const Row& r : rows) {
+            const vw::GhostSeed s = vw::ghost_seed(r.command, 0, 0);
+            const auto& sheet = s.tile >= 0xC8 ? sprites.buildings : sprites.variants;
+            const size_t index = static_cast<size_t>(s.tile >= 0xC8 ? s.tile - 0xC8 : s.tile);
+            CHECK(index < sheet.frames.size() && !sheet.frames[index].pixels.empty());
+        }
+        for (int goods = 0; goods < 8; ++goods) {
+            const size_t index = static_cast<size_t>(vw::ghost_seed(C::Workshop, 0, goods).tile);
+            CHECK(index < sprites.variants.frames.size());
+        }
+        for (int grade = 0; grade < 8; ++grade)
+            CHECK(static_cast<size_t>(vw::ghost_seed(C::Forum, grade, 0).tile - 0xC8) < sprites.buildings.frames.size());
+        const auto pointers = gaius::formats::pl8::load((fs::path(dir) / "POINTERS.PL8").string());
+        CHECK(pointers.frames.size() > 1 && pointers.frames[1].width == 16 && pointers.frames[1].height == 16);
+    } catch (const gaius::formats::FormatError& e) {
+        skip(std::string("city sprites: ") + e.what());
+    }
+}
+
+// 2700:0DA7 and 0x28055: the original's opening -- three pictures and the credits' scroll.
+void test_viewer_original_intro() {
+    std::printf("test_viewer_original_intro (the credits' lines and scroll; the opening's pictures)\n");
+    namespace vw = gaius::viewer;
+    const auto& lines = vw::credit_lines();
+    CHECK(lines.size() == 13);
+    for (const auto& line : lines) CHECK(std::strlen(line.text) == 20);
+    // Two lines of a block 20 apart, the blocks 100 or 120 apart (the pushes at 0x28055), the first below the screen.
+    CHECK(lines[0].y == 220 && lines[1].y == 240 && lines[2].y == 340 && lines[12].y == 840);
+    CHECK(std::string(lines[0].text).find("Programming") != std::string::npos &&
+          std::string(lines[12].text).find("Chris Denman") != std::string::npos && lines[0].x == 4 && lines[7].x == 8);
+    CHECK(vw::kCreditsFrames == 890 && lines[12].y - (vw::kCreditsFrames - 1) < -17);  // the last line has left the screen
+    CHECK(vw::romfont_frame('A') == 0 && vw::romfont_frame('z') == 25 && vw::romfont_frame(' ') == 26 &&
+          vw::romfont_frame('1') == 26);
+
+    // draw_credits with a plain font: every letter 16 x 17 of colour 5, the I's 8 wide.
+    gaius::formats::PL8Sheet font;
+    for (int i = 0; i < 27; ++i) {
+        gaius::formats::PL8Frame f;
+        f.width = i == 8 ? 8 : 16;
+        f.height = i == 26 ? 2 : 17;
+        f.pixels.assign(static_cast<size_t>(f.width) * f.height, 5);
+        font.frames.push_back(f);
+    }
+    gaius::formats::IndexedImage image;
+    vw::draw_credits(image, font, 0);
+    CHECK(image.width == 320 && image.height == 200 && std::all_of(image.pixels.begin(), image.pixels.end(), [](uint8_t p) { return p == 0; }));
+    vw::draw_credits(image, font, 60);  // the first line at y = 160, x = 4 + four blanks of 16
+    const auto px = [&](int x, int y) { return image.pixels[static_cast<size_t>(y) * 320 + x]; };
+    CHECK(px(68, 160) == 5 && px(68, 176) == 5 && px(68, 177) == 0 && px(67, 160) == 0 && px(10, 160) == 0);
+    // "PROGRAMMING": P R O G R A M M I N G -- the I (frame 8) advances by 8, so the N after it starts 8 px later.
+    int covered = 0;
+    for (int x = 68; x < 320; ++x) covered += px(x, 165) == 5 ? 1 : 0;
+    CHECK(covered == 10 * 16 + 8);
+    vw::draw_credits(image, font, 889);  // everything has scrolled off
+    CHECK(std::all_of(image.pixels.begin(), image.pixels.end(), [](uint8_t p) { return p == 0; }));
+
+    const std::string dir = test_assets_dir();
+    if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
+    vw::OriginalIntroArt art;
+    if (!vw::load_original_intro(dir, art)) { skip("the opening's files"); return; }
+    CHECK(art.logo.width == 320 && art.presents.height == 200 && art.title.width == 320 && art.romfont.frames.size() >= 27);
+    for (int stage = 0; stage <= 5; ++stage) CHECK(vw::original_intro_frame(art, stage).size() == 320u * 200u * 3u);
+    // The pictures differ, and the credits are gold on black.
+    CHECK(vw::original_intro_frame(art, 0) != vw::original_intro_frame(art, 1) &&
+          vw::original_intro_frame(art, 1) != vw::original_intro_frame(art, 2));
+    const auto credits = vw::original_intro_frame(art, 4);  // scroll 50: the first line is at y = 170
+    int gold = 0, black = 0;
+    for (size_t i = 0; i < credits.size(); i += 3) {
+        if (credits[i] == 0 && credits[i + 1] == 0 && credits[i + 2] == 0) ++black;
+        else if (credits[i] > credits[i + 2]) ++gold;
+    }
+    CHECK(black > 60000 && gold > 100);
+}
+
+// How fast the simulation's frames run: the setting, measured on the GOG release.
+void test_settings_pace() {
+    std::printf("test_settings_pace (the original's pace by default, the earlier fast pace as a choice)\n");
+    using namespace gaius::ui;
+    Settings s;
+    CHECK(s.pace == GamePace::Original && kFrameMsOriginal == 66 && kFrameMsFast == 19);
+    // A month is 106 steps and every frame steps at the top speed: about 7 s at the original's pace, about 2 s fast.
+    CHECK(106 * kFrameMsOriginal > 6500 && 106 * kFrameMsOriginal < 7500 && 106 * kFrameMsFast > 1900 && 106 * kFrameMsFast < 2100);
+    s.pace = GamePace::Fast;
+    CHECK(parse_settings(settings_text(s)).pace == GamePace::Fast);
+    CHECK(parse_settings("pace = 5\n").pace == GamePace::Original && parse_settings("").pace == GamePace::Original);
+    namespace vw = gaius::viewer;
+    Settings t;
+    GameOptions o = default_options();
+    bool messages = true;
+    const std::vector<Catalog> langs = {{"en", "English", {}}};
+    const int action = vw::kActionSettingDown + 2 * vw::row_id(vw::SettingRow::Pace);
+    CHECK(vw::adjust_setting(action, t, o, messages, langs) && t.pace == GamePace::Fast);
+    CHECK(vw::adjust_setting(action + 1, t, o, messages, langs) && t.pace == GamePace::Original);
+}
+
 void test_ui_toolbar_paging() {
     std::printf("test_ui_toolbar_paging (past 2x: at most half the screen, page arrows)\n");
     using namespace gaius::ui;
@@ -6849,6 +7163,12 @@ int main() {
     test_ui_toolbar_paging();
     test_ui_original_bar();
     test_viewer_overlays();
+    test_ui_province_bar();
+    test_viewer_message_box();
+    test_viewer_cursor();
+    test_viewer_ghost();
+    test_viewer_original_intro();
+    test_settings_pace();
     test_ui_font_rendering();
     test_ui_toolbar_render();
     test_ui_toolbar_variant_label();
