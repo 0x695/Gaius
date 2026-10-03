@@ -252,3 +252,7 @@ Pause when away = Pause bei Abwesenheit
 Quick save = Schnellspeichern
 Quick load = Schnellladen
 Away = Abwesend
+That is the international release of Caesar. Gaius plays the US release: GOG keeps it in a folder called US. = Das ist die internationale Fassung von Caesar. Gaius spielt die US-Fassung: GOG legt sie in einen Ordner namens US.
+Some of Caesar's files are missing: = Einige Dateien von Caesar fehlen:
+and = und
+more = weitere

@@ -20,11 +20,13 @@
 #include <string>
 #include <vector>
 
+#include "apps/viewer/game_folder_note.hpp"
 #include "platform/game_import.hpp"
 #include "platform/input.hpp"
 #include "platform/paths.hpp"
 #include "apps/viewer/window_icon.hpp"
 #include "platform/window.hpp"
+#include "stb_image_write.h"
 #include "ui/panel.hpp"
 #include "ui/settings.hpp"
 #include "ui/strings.hpp"
@@ -57,6 +59,34 @@ inline std::string find_game_folder(const ui::Settings& settings) {
     return installed.empty() ? std::string() : installed.front();
 }
 
+// Why a folder that looks like Caesar's cannot be played from, for the places Gaius looks first: the settings' folder
+// and Gaius's own. Empty when neither holds a Caesar folder that is unusable (the usual case: nothing is there).
+inline std::string unusable_game_folder_note(const ui::Settings& settings) {
+    std::vector<std::string> candidates;
+    if (!settings.game_dir.empty()) candidates.push_back(settings.game_dir);
+    try {
+        candidates.push_back(platform::paths().game);
+    } catch (const std::exception&) {
+    }
+    for (const std::string& dir : candidates) {
+        const platform::GameFolderReport report = platform::inspect_game_folder(dir);
+        if (report.status == platform::GameFolderStatus::International || report.status == platform::GameFolderStatus::Incomplete)
+            return game_folder_note(report);
+    }
+    return std::string();
+}
+
+// What a folder the player chose or dropped holds: the usable game folder in or below it (GOG's top folder holds a US
+// folder), else a note saying why not. `chosen` is set when there is one.
+inline std::string choose_game_folder(const std::string& picked, std::string& chosen) {
+    const std::vector<std::string> inside = platform::game_folders_under(picked, 3);
+    if (!inside.empty()) {
+        chosen = inside.front();
+        return std::string();
+    }
+    return game_folder_note(platform::inspect_game_folder(picked));
+}
+
 // Remembers a game folder found outside Gaius's own places, so the next start
 // doesn't have to look for it.
 inline void remember_game_folder(ui::Settings& settings, const std::string& settings_path, const std::string& dir) {
@@ -72,20 +102,25 @@ inline void remember_game_folder(ui::Settings& settings, const std::string& sett
 // The setup screen. Returns the game folder once there is one, or an empty
 // string if the player quits.
 inline std::string run_setup_screen(ui::Settings& settings, const std::string& settings_path, int logical_w,
-                                    int logical_h) {
+                                    int logical_h, const std::string& first_note = std::string(),
+                                    const std::string& screenshot_path = std::string()) {
     constexpr int kImport = 1, kLookAgain = 2, kQuit = 3, kBrowse = 4;
     platform::Window window("Gaius", logical_w, logical_h, 960, 600);
     window.set_icon(kWindowIcon, kWindowIconSize);
     platform::open_gamepads();
     const ui::Metrics m = ui::metrics_for(ui::Breakpoint::Desktop);
-    std::string game_dir = find_game_folder(settings);
+    // A folder the player named that cannot be played from comes with a note (first_note): the screen then waits for
+    // them instead of quietly using some other game folder it finds.
+    const bool named_by_player = !first_note.empty();
+    std::string game_dir = named_by_player ? std::string() : find_game_folder(settings);
     std::string gaius_game;
     try {
         gaius_game = platform::paths().game;
     } catch (const std::exception&) {
     }
     std::vector<uint8_t> frame;
-    std::string note;
+    std::string note = first_note;
+    if (note.empty()) note = unusable_game_folder_note(settings);
     int hovered = -1;
     Uint32 last_look = SDL_GetTicks();
     while (game_dir.empty()) {
@@ -94,17 +129,18 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
         page.title = ui::tr("Gaius needs Caesar's files");
         page.rows.push_back({ui::tr("Gaius plays your own copy of Caesar"), ""});
         page.rows.push_back({ui::tr("(1992, DOS - the GOG version works)"), ""});
+        // Why the folder the player named (or the one Gaius found) can't be played from, ahead of the instructions.
+        for (const std::string& line : wrap_note(note)) page.rows.push_back({line, ""});
         if (platform::can_import_game_folder()) {
             page.rows.push_back({ui::tr("Import copies its folder into Gaius"), ""});
             page.buttons.push_back({ui::tr(importing ? "Importing..." : "Import"), kImport, !importing});
         } else {
-            page.rows.push_back({ui::tr("Gaius looked in the usual places and found none."), ""});
+            if (note.empty()) page.rows.push_back({ui::tr("Gaius looked in the usual places and found none."), ""});
             page.rows.push_back({platform::can_pick_folder() ? ui::tr("Choose the Caesar folder,") : ui::tr("Drop the Caesar folder on this window,"), ""});
             page.rows.push_back({ui::tr("drop it on this window, or copy the files into"), ""});
             page.rows.push_back({gaius_game.size() > 38 ? "..." + gaius_game.substr(gaius_game.size() - 35) : gaius_game,
                                  ""});
         }
-        if (!note.empty()) page.rows.push_back({note, ""});
         if (platform::can_pick_folder()) page.buttons.push_back({ui::tr("Choose folder"), kBrowse});
         page.buttons.push_back({ui::tr("Look again"), kLookAgain});
         page.buttons.push_back({ui::tr("Quit"), kQuit});
@@ -115,12 +151,7 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
             if (event.type == SDL_DROPFILE) {
                 const std::string dropped = event.drop.file;
                 SDL_free(event.drop.file);
-                const std::vector<std::string> inside = platform::game_folders_under(dropped, 3);
-                if (!inside.empty()) {
-                    game_dir = inside.front();
-                } else {
-                    note = ui::tr("That folder doesn't hold Caesar's files");
-                }
+                note = choose_game_folder(dropped, game_dir);
                 continue;
             }
             int pw = 0, ph = 0;
@@ -142,27 +173,32 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
                     const std::string picked = platform::pick_folder(ui::tr("Choose the folder with Caesar's files"));
                     if (picked.empty()) break;
                     // The folder itself, or the one inside it that holds the files (GOG's has a US build in a folder).
-                    const std::vector<std::string> inside = platform::game_folders_under(picked, 3);
-                    if (!inside.empty()) game_dir = inside.front();
-                    else note = ui::tr("That folder doesn't hold Caesar's files");
+                    note = choose_game_folder(picked, game_dir);
                     break;
                 }
                 case kLookAgain:
                     game_dir = find_game_folder(settings);
-                    if (game_dir.empty()) note = ui::tr("Still no Caesar files found");
+                    if (game_dir.empty()) {
+                        note = unusable_game_folder_note(settings);
+                        if (note.empty()) note = ui::tr("Still no Caesar files found");
+                    }
                     break;
                 case kQuit: return std::string();
                 default: break;
             }
         }
         // An import finishing, or files copied in by hand: look now and then.
-        if (game_dir.empty() && SDL_GetTicks() - last_look > 1000) {
+        if (game_dir.empty() && !named_by_player && SDL_GetTicks() - last_look > 1000) {
             last_look = SDL_GetTicks();
             if (!platform::import_in_progress()) game_dir = find_game_folder(settings);
         }
         frame.assign(static_cast<size_t>(logical_w) * logical_h * 3, 0);
         ui::render(page, lay, frame, logical_w, logical_h, m, nullptr, hovered);
         window.present_rgb24(frame);
+        if (!screenshot_path.empty()) {  // --setup-screenshot: one frame of the screen, for checking its wording
+            stbi_write_png(screenshot_path.c_str(), logical_w, logical_h, 3, frame.data(), logical_w * 3);
+            return std::string();
+        }
         SDL_Delay(16);
     }
     remember_game_folder(settings, settings_path, game_dir);

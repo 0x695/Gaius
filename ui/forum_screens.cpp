@@ -9,6 +9,7 @@
 
 #include "systems/administration.hpp"
 #include "systems/forum.hpp"
+#include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 #include "formats/vpx/vpx.hpp"
@@ -262,14 +263,9 @@ formats::IndexedImage compose_tribune_screen(const model::CityState& state, cons
 }
 
 RatingsArt load_ratings_art(const std::string& dir) {
-    namespace fs = std::filesystem;
-    const auto asset = [&](std::string name) {
-        fs::path p = fs::path(dir) / name;
-        if (fs::exists(p)) return p.string();
-        for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        p = fs::path(dir) / name;
-        if (fs::exists(p)) return p.string();
-        throw formats::FormatError("ratings screen: " + name + " not found in " + dir);
+    const auto asset = [&](const std::string& name) {
+        if (!formats::game_file_exists(dir, name)) throw formats::FormatError("ratings screen: " + name + " not found in " + dir);
+        return formats::game_file_path(dir, name);
     };
     RatingsArt art;
     art.picture = formats::vpx::decode(asset("TEMPLE.VPX")).image;
@@ -327,12 +323,8 @@ formats::IndexedImage compose_ratings_screen(const model::CityState& state, cons
 }
 
 formats::IndexedImage load_governor_picture(const std::string& dir) {
-    namespace fs = std::filesystem;
-    for (const char* name : {"C_VITAE.VPX", "c_vitae.vpx"}) {
-        const fs::path p = fs::path(dir) / name;
-        if (fs::exists(p)) return formats::vpx::decode(p.string()).image;
-    }
-    throw formats::FormatError("governor screen: C_VITAE.VPX not found in " + dir);
+    if (!formats::game_file_exists(dir, "C_VITAE.VPX")) throw formats::FormatError("governor screen: C_VITAE.VPX not found in " + dir);
+    return formats::vpx::decode(formats::game_file_path(dir, "C_VITAE.VPX")).image;
 }
 
 formats::IndexedImage compose_governor_screen(const model::CityState& state, const InterfaceArt& art,

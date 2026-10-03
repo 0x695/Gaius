@@ -17,23 +17,9 @@ uint16_t read_u16be(const uint8_t* p) {
 
 namespace {
 
-PL8Sheet load_impl(const std::string& path, bool one_bit) {
-    std::FILE* f = std::fopen(path.c_str(), "rb");
-    if (!f) throw FormatError("pl8: cannot open " + path);
-
-    std::fseek(f, 0, SEEK_END);
-    long size_l = std::ftell(f);
-    std::fseek(f, 0, SEEK_SET);
-    if (size_l < 4) {
-        std::fclose(f);
-        throw FormatError("pl8: file too small for header: " + path);
-    }
-    size_t size = static_cast<size_t>(size_l);
-
-    std::vector<uint8_t> data(size);
-    size_t n = std::fread(data.data(), 1, size, f);
-    std::fclose(f);
-    if (n != size) throw FormatError("pl8: short read on " + path);
+PL8Sheet parse_impl(const std::vector<uint8_t>& data, const std::string& path, bool one_bit) {
+    const size_t size = data.size();
+    if (size < 4) throw FormatError("pl8: file too small for header: " + path);
 
     // header[0] = unknown_a (meaning not yet established), header[1] = frame_count.
     uint16_t frame_count = read_u16le(&data[2]);
@@ -88,7 +74,7 @@ PL8Sheet load_impl(const std::string& path, bool one_bit) {
                                    ", only " + std::to_string(available) + " bytes available)");
             }
         } else if (one_bit) {
-            const uint8_t* stored = &data[pixel_offset];
+            const uint8_t* stored = data.data() + pixel_offset;  // (not &data[...]: an empty frame sits at the end)
             frame.pixels.resize(pixel_count);
             for (int y = 0; y < frame.height; ++y) {
                 for (int x = 0; x < frame.width; ++x) {
@@ -106,7 +92,7 @@ PL8Sheet load_impl(const std::string& path, bool one_bit) {
                                    " pixels wide, not a multiple of 4, so its four streams can't be split (" + path +
                                    ")");
             }
-            const uint8_t* stored = &data[pixel_offset];
+            const uint8_t* stored = data.data() + pixel_offset;  // (not &data[...]: an empty frame sits at the end)
             const size_t stream_len = pixel_count / 4;
             frame.pixels.resize(pixel_count);
             for (size_t p = 0; p < pixel_count; ++p) frame.pixels[p] = stored[(p % 4) * stream_len + p / 4];
@@ -118,10 +104,34 @@ PL8Sheet load_impl(const std::string& path, bool one_bit) {
     return sheet;
 }
 
+PL8Sheet load_impl(const std::string& path, bool one_bit) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) throw FormatError("pl8: cannot open " + path);
+
+    std::fseek(f, 0, SEEK_END);
+    long size_l = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    if (size_l < 4) {
+        std::fclose(f);
+        throw FormatError("pl8: file too small for header: " + path);
+    }
+    size_t size = static_cast<size_t>(size_l);
+
+    std::vector<uint8_t> data(size);
+    size_t n = std::fread(data.data(), 1, size, f);
+    std::fclose(f);
+    if (n != size) throw FormatError("pl8: short read on " + path);
+    return parse_impl(data, path, one_bit);
+}
+
 }  // namespace
 
 PL8Sheet load(const std::string& path) { return load_impl(path, false); }
 
 PL8Sheet load_pl1(const std::string& path) { return load_impl(path, true); }
+
+PL8Sheet parse(const std::vector<uint8_t>& data, const std::string& name) { return parse_impl(data, name, false); }
+
+PL8Sheet parse_pl1(const std::vector<uint8_t>& data, const std::string& name) { return parse_impl(data, name, true); }
 
 }  // namespace gaius::formats::pl8

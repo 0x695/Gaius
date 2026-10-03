@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <filesystem>
 
+#include "formats/common/game_files.hpp"
 #include "formats/gtl/gtl.hpp"
 #include "formats/voc/voc.hpp"
 #include "ymfm_opl.h"
@@ -25,18 +26,10 @@ std::vector<uint8_t> read_file(const std::filesystem::path& path) {
     return data;
 }
 
-// The game names its files in lower case; the folder may hold either.
+// The game names its files in lower case; the folder may hold any case (formats/common/game_files.hpp).
 std::filesystem::path find_file(const std::string& dir, const std::string& name) {
-    std::filesystem::path p = std::filesystem::path(dir) / name;
-    if (std::filesystem::exists(p)) return p;
-    std::string upper = name, lower = name;
-    for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    for (const std::string& n : {upper, lower}) {
-        p = std::filesystem::path(dir) / n;
-        if (std::filesystem::exists(p)) return p;
-    }
-    return {};
+    if (!formats::game_file_exists(dir, name)) return {};
+    return formats::game_file_path(dir, name);
 }
 
 }  // namespace

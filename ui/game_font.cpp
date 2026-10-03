@@ -5,32 +5,23 @@
 #include <cstring>
 #include <filesystem>
 
+#include "formats/common/game_files.hpp"
 #include "formats/pl8/pl8.hpp"
 
 namespace gaius::ui {
 
 GameFont load_game_font(const std::string& asset_dir, const formats::Palette& palette) {
-    namespace fs = std::filesystem;
-    for (const char* name : {"FONT1.PL8", "font1.pl8"}) {
-        fs::path p = fs::path(asset_dir) / name;
-        if (fs::exists(p)) return GameFont{formats::pl8::load(p.string()), palette};
-    }
-    throw formats::FormatError("ui: FONT1.PL8 not found in " + asset_dir);
+    if (!formats::game_file_exists(asset_dir, "FONT1.PL8")) throw formats::FormatError("ui: FONT1.PL8 not found in " + asset_dir);
+    return GameFont{formats::pl8::load(formats::game_file_path(asset_dir, "FONT1.PL8")), palette};
 }
 
 GameFont load_mini_font(const std::string& asset_dir, formats::RGB ink) {
-    namespace fs = std::filesystem;
-    for (const char* name : {"MINIFONT.PL1", "minifont.pl1"}) {
-        fs::path p = fs::path(asset_dir) / name;
-        if (fs::exists(p)) {
-            GameFont font{formats::pl8::load_pl1(p.string()), {}};
-            font.advance = 6;
-            font.use_ink = true;
-            font.ink = ink;
-            return font;
-        }
-    }
-    throw formats::FormatError("ui: MINIFONT.PL1 not found in " + asset_dir);
+    if (!formats::game_file_exists(asset_dir, "MINIFONT.PL1")) throw formats::FormatError("ui: MINIFONT.PL1 not found in " + asset_dir);
+    GameFont font{formats::pl8::load_pl1(formats::game_file_path(asset_dir, "MINIFONT.PL1")), {}};
+    font.advance = 6;
+    font.use_ink = true;
+    font.ink = ink;
+    return font;
 }
 
 int game_text_width(const char* text, int scale) {

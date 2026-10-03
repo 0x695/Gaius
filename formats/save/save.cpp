@@ -41,14 +41,17 @@ SaveFile load(const std::string& path) {
     size_t n = std::fread(buf.data(), 1, buf.size(), f);
     std::fclose(f);
 
-    if (n != kSaveSize) {
-        throw FormatError("save: expected exactly " + std::to_string(kSaveSize) +
-                           " bytes, got " + std::to_string(n) + " (" + path + ")");
-    }
-    buf.resize(kSaveSize);
+    buf.resize(n);
+    return parse(buf, path);
+}
 
+SaveFile parse(const std::vector<uint8_t>& bytes, const std::string& name) {
+    if (bytes.size() != kSaveSize) {
+        throw FormatError("save: expected exactly " + std::to_string(kSaveSize) +
+                           " bytes, got " + std::to_string(bytes.size()) + " (" + name + ")");
+    }
     SaveFile sf;
-    sf.raw = std::move(buf);
+    sf.raw = bytes;
     return sf;
 }
 

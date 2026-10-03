@@ -54,12 +54,15 @@ void set_gw(CityState& s, uint16_t ds, int v) {
     model::set_global_word(s, ds, v);
 }
 
-int table_word(std::vector<uint8_t>& t, size_t o) {
-    if (t.size() < o + 2) t.resize(o + 2, 0);
+// A record table's word. The tables have their block's size (model::load, blank_state); an offset past the end -- a
+// workshop number from a damaged save, say -- reads 0 and writes nothing, rather than growing a table that must stay
+// the size the save file has it.
+int table_word(const std::vector<uint8_t>& t, size_t o) {
+    if (o + 2 > t.size()) return 0;
     return static_cast<int16_t>(t[o] | (t[o + 1] << 8));
 }
 void set_table_word(std::vector<uint8_t>& t, size_t o, int v) {
-    if (t.size() < o + 2) t.resize(o + 2, 0);
+    if (o + 2 > t.size()) return;
     t[o] = static_cast<uint8_t>(v & 0xFF);
     t[o + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
 }
@@ -580,8 +583,8 @@ int spawn(CityState& state, int type, int x, int y) {
         a.setb(0x2C, 0);
         a.setb(0x2D, 0);
         a.setb(kActive, 1);
-        a.setw(kX, x << 4);
-        a.setw(kY, y << 4);
+        a.setw(kX, x * 16);
+        a.setw(kY, y * 16);
         a.setw(kIndex, slot);
         return slot;
     }

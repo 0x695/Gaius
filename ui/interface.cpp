@@ -6,6 +6,7 @@
 #include <cctype>
 #include <filesystem>
 
+#include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 #include "ui/game_font.hpp"
@@ -14,14 +15,9 @@ namespace gaius::ui {
 
 namespace {
 
-std::string asset(const std::string& dir, std::string name) {
-    namespace fs = std::filesystem;
-    fs::path p = fs::path(dir) / name;
-    if (fs::exists(p)) return p.string();
-    for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    p = fs::path(dir) / name;
-    if (fs::exists(p)) return p.string();
-    throw formats::FormatError("interface: " + name + " not found in " + dir);
+std::string asset(const std::string& dir, const std::string& name) {
+    if (!formats::game_file_exists(dir, name)) throw formats::FormatError("interface: " + name + " not found in " + dir);
+    return formats::game_file_path(dir, name);
 }
 
 const formats::PL8Frame* frame_at(const formats::PL8Sheet& sheet, int index) {

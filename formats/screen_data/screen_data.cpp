@@ -20,8 +20,9 @@ std::vector<uint8_t> read_all(const std::string& path) {
 
 }  // namespace
 
-ClickMap load_click_map(const std::string& path) {
-    const std::vector<uint8_t> d = read_all(path);
+ClickMap load_click_map(const std::string& path) { return parse_click_map(read_all(path)); }
+
+ClickMap parse_click_map(const std::vector<uint8_t>& d) {
     if (d.size() != kGridW * kGridH) throw FormatError("screen_data: CONTFRM.GD8 is 1000 bytes, not " + std::to_string(d.size()));
     ClickMap map;
     for (size_t i = 0; i < d.size(); ++i) {
@@ -32,7 +33,10 @@ ClickMap load_click_map(const std::string& path) {
 }
 
 std::array<Marker, 50> load_province_markers(const std::string& path) {
-    const std::vector<uint8_t> d = read_all(path);
+    return parse_province_markers(read_all(path));
+}
+
+std::array<Marker, 50> parse_province_markers(const std::vector<uint8_t>& d) {
     if (d.size() < 200) throw FormatError("screen_data: EDATA.CSR is shorter than 200 bytes");
     std::array<Marker, 50> markers{};
     for (size_t p = 0; p < 50; ++p) {

@@ -31,5 +31,7 @@ namespace gaius::formats::pal256 {
 // Throws FormatError if the file isn't exactly 768 bytes, or if any channel
 // byte is above 63 (the engine would pass it to the 6-bit DAC unchecked).
 Palette load(const std::string& path);
+// The same from the file's bytes; `name` is only for the error messages. FormatError is all it throws.
+Palette parse(const std::vector<uint8_t>& bytes, const std::string& name = "input");
 
 }  // namespace gaius::formats::pal256

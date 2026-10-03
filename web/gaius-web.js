@@ -17,6 +17,9 @@ var Module = (function () {
   const SAVES = '/persist/saves';
   const SAVE_SIZE = 57126;                                   // formats::save::kSaveSize
   const SKIP = new Set(['EXE', 'COM', 'DRV', 'BAT', 'DLL', 'SAV']);  // nothing Gaius reads
+  // The files Gaius cannot play without (platform::kEssentialGameFiles): the first province, the city and walker
+  // sprites, the city palette and the game's font. GOG's top folder is the international release and lacks some.
+  const ESSENTIAL = ['EMPIRE2.001', 'HOUSES.PL8', 'HOUSES2.PL8', 'FIXTS.PL8', 'MOREMEN.PL8', 'SHADE.256', 'FONT1.PL8'];
   const params = new URLSearchParams(location.search);
 
   let playing = false;
@@ -67,7 +70,21 @@ var Module = (function () {
 
   function hasGame() {
     const names = new Set(listDir(GAME).map((n) => n.toUpperCase()));
-    return names.has('HOUSES.PL8') && names.has('EMPIRE2.001');
+    return ESSENTIAL.every((n) => names.has(n));
+  }
+
+  // Why a folder of Caesar's files (upper-case names) can't be played from: the international release (its music is
+  // .MDI files) or just incomplete. Same wording as the desktop game's setup screen (apps/viewer/game_folder_note.hpp).
+  function folderProblem(names) {
+    const missing = ESSENTIAL.filter((n) => !names.has(n));
+    if (!missing.length) return '';
+    const intl = [...names].some((n) => n.endsWith('.MDI') || n === 'MUSIC.MOD');
+    if (intl) {
+      return 'That is the international release of Caesar. Gaius plays the US release: GOG keeps it in a folder called US. ' +
+        'Choose that folder, or a zip that holds it.';
+    }
+    return 'Some of Caesar\u2019s files are missing: ' + missing.slice(0, 3).join(', ') +
+      (missing.length > 3 ? ' and ' + (missing.length - 3) + ' more' : '') + '.';
   }
 
   function gameSummary() {
@@ -102,6 +119,11 @@ var Module = (function () {
     $('card').hidden = false;
     progress(null);
     for (const b of ['btn-saves', 'btn-data']) $(b).hidden = false;
+    const stored = new Set(listDir(GAME).map((n) => n.toUpperCase()));
+    if (!hasGame() && (stored.has('HOUSES.PL8') || stored.has('EMPIRE2.001'))) {
+      // Game files from an earlier visit that Gaius can't play from: say so, and ask for the US release.
+      problem(folderProblem(stored));
+    }
     if (hasGame()) {
       card('Ready', 'Your copy of Caesar is in this browser.');
       $('drop').hidden = true;
@@ -206,8 +228,12 @@ var Module = (function () {
       if (!dirs.has(dir)) dirs.set(dir, new Map());
       dirs.get(dir).set(name.toUpperCase(), { name: name, entry: e });
     }
-    const found = [...dirs.entries()].filter(([, m]) => m.has('HOUSES.PL8') && m.has('EMPIRE2.001'));
-    if (!found.length) return null;
+    const caesars = [...dirs.entries()].filter(([, m]) => m.has('HOUSES.PL8') || m.has('EMPIRE2.001') || m.has('CSR.EXE'));
+    const found = caesars.filter(([, m]) => ESSENTIAL.every((n) => m.has(n)));
+    if (!found.length) {
+      if (caesars.length) throw new Error(folderProblem(new Set(caesars[0][1].keys())));
+      return null;
+    }
     const score = ([dir]) => (/(^|\/)us$/i.test(dir) ? 0 : 1) * 100 + dir.split('/').length;
     found.sort((a, b) => score(a) - score(b));
     return found[0][1];

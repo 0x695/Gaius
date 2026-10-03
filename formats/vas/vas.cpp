@@ -7,8 +7,10 @@ namespace gaius::formats::vas {
 
 namespace {
 
+// (Bounds are checked as remainders: on a 32-bit size_t, the browser build's, `i + 2` with an offset read from the file
+// can wrap round and pass.)
 uint16_t u16(const std::vector<uint8_t>& d, size_t i) {
-    if (i + 2 > d.size()) throw FormatError("vas: read past the end");
+    if (i > d.size() || d.size() - i < 2) throw FormatError("vas: read past the end");
     return static_cast<uint16_t>(d[i] | (d[i + 1] << 8));
 }
 
@@ -21,7 +23,7 @@ uint32_t u32(const std::vector<uint8_t>& d, size_t i) {
 size_t walk_block(const std::vector<uint8_t>& d, size_t start, std::vector<uint8_t>* plane) {
     const size_t length = u16(d, start);
     if (u16(d, start + 2) != kPlaneSize) throw FormatError("vas: a plane block isn't 16000 bytes");
-    if (length < 8 || start + length > d.size()) throw FormatError("vas: a plane block runs past the file");
+    if (length < 8 || length > d.size() - start) throw FormatError("vas: a plane block runs past the file");
     size_t i = start + 8, count = 0;
     while (count < kPlaneSize) {
         const uint16_t w = u16(d, i);

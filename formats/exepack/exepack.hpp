@@ -107,5 +107,7 @@ struct DecodeResult {
 // unrecognized command byte or runs out of input before finding a
 // terminal ("last record") flag.
 DecodeResult decode(const std::string& path);
+// The same from the file's bytes; `name` is only for the error messages. FormatError is all it throws.
+DecodeResult parse(const std::vector<uint8_t>& bytes, const std::string& name = "input");
 
 }  // namespace gaius::formats::exepack

@@ -31,5 +31,7 @@ namespace gaius::formats::p32 {
 
 // Throws FormatError if the file isn't exactly 64 bytes.
 Palette load(const std::string& path);
+// The same from the file's bytes; `name` is only for the error messages. FormatError is all it throws.
+Palette parse(const std::vector<uint8_t>& bytes, const std::string& name = "input");
 
 }  // namespace gaius::formats::p32

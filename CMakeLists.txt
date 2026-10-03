@@ -22,6 +22,32 @@ endif()
 
 include_directories(${PROJECT_SOURCE_DIR})
 
+# GAIUS_SANITIZE: build everything under the sanitizers, to run the tests and tools/fuzz_formats on. A list: "address;undefined"
+# on GCC and Clang (the CI job does), "address" on MSVC, which has no undefined-behaviour sanitizer (and needs the Visual
+# Studio component "C++ AddressSanitizer", and its runtime DLL beside the executables or on the PATH).
+# Undefined behaviour is fatal (-fno-sanitize-recover) so that a test run stops on it.
+set(GAIUS_SANITIZE "" CACHE STRING "Sanitizers to build with: address, undefined")
+option(GAIUS_SANITIZE_RECOVER "With GAIUS_SANITIZE: report undefined behaviour and carry on, to list every site in one run" OFF)
+if(GAIUS_SANITIZE)
+  if(MSVC)
+    add_compile_options(/fsanitize=address /Zi)
+    add_link_options(/INCREMENTAL:NO)
+    message(STATUS "Gaius: AddressSanitizer on")
+  else()
+    string(REPLACE ";" "," GAIUS_SANITIZE_FLAGS "${GAIUS_SANITIZE}")
+    # The standard library's own checks too: vector[] and array[] out of range, which an index into a larger object
+    # would not trip the sanitizers on (libstdc++'s assertions, libc++'s hardening).
+    add_compile_definitions(_GLIBCXX_ASSERTIONS _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE)
+    if(GAIUS_SANITIZE_RECOVER)
+      add_compile_options(-fsanitize=${GAIUS_SANITIZE_FLAGS} -fno-omit-frame-pointer -fsanitize-recover=all -g)
+    else()
+      add_compile_options(-fsanitize=${GAIUS_SANITIZE_FLAGS} -fno-omit-frame-pointer -fno-sanitize-recover=all -g)
+    endif()
+    add_link_options(-fsanitize=${GAIUS_SANITIZE_FLAGS})
+    message(STATUS "Gaius: sanitizers on: ${GAIUS_SANITIZE_FLAGS}")
+  endif()
+endif()
+
 # A static vcpkg triplet (x64-windows-static: the Windows release package, packaging/windows) means the static C++
 # runtime too, so the program is one exe that needs nothing installed.
 if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-static$" AND NOT CMAKE_MSVC_RUNTIME_LIBRARY)
@@ -58,16 +84,26 @@ message(STATUS "Gaius ${GAIUS_VERSION_STRING}")
 # tools, no tests.
 option(GAIUS_GAME_LIBRARY "Build the game as libmain (Android) instead of executables" OFF)
 
+# GAIUS_NODE: with Emscripten, build gaius_tests and fuzz_formats (not the page) to run under Node. It is a way to run
+# the undefined-behaviour sanitizer (-DGAIUS_SANITIZE=undefined) on a machine that has no GCC or Clang, and what the
+# release checklist's robustness pass used here. The program runs on the host's files (-sNODERAWFS).
+option(GAIUS_NODE "Emscripten: build the tests and the fuzz tool for Node instead of the page" OFF)
+
 # GAIUS_WEB: the browser build (Emscripten). Its own SDL2 comes from Emscripten's port; the game is one page, web/.
 if(EMSCRIPTEN)
-  set(GAIUS_WEB ON)
+  if(NOT GAIUS_NODE)
+    set(GAIUS_WEB ON)
+  endif()
   # The code throws and catches FormatError and friends; Emscripten leaves exceptions off unless asked.
   add_compile_options(-fexceptions -sUSE_SDL=2)
   add_link_options(-fexceptions -sUSE_SDL=2)
+  if(GAIUS_NODE)
+    add_link_options(-sNODERAWFS=1 -sEXIT_RUNTIME=1 -sALLOW_MEMORY_GROWTH=1 -sSTACK_SIZE=4194304 -sENVIRONMENT=node)
+  endif()
 endif()
 
 # --- SDL2 (Phase 1+: platform layer and viewer app) -----------------------
-if(GAIUS_WEB)
+if(GAIUS_WEB OR GAIUS_NODE)
   set(SDL2_LIBRARIES "")
   set(SDL2_INCLUDE_DIRS "")
 elseif(TARGET SDL2::SDL2)
@@ -105,6 +141,7 @@ add_library(gaius_formats STATIC
   formats/xmi/xmi.cpp
   formats/gtl/gtl.cpp
   formats/screen_data/screen_data.cpp
+  formats/common/game_files.cpp
 )
 target_include_directories(gaius_formats PUBLIC ${PROJECT_SOURCE_DIR})
 
@@ -307,6 +344,12 @@ target_link_libraries(sim_check PRIVATE gaius_formats gaius_model gaius_systems)
 add_executable(month_check tools/month_check.cpp)
 target_link_libraries(month_check PRIVATE gaius_formats gaius_model gaius_systems)
 
+add_executable(fuzz_formats tools/fuzz_formats.cpp)
+target_link_libraries(fuzz_formats PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform_rules gaius_version)
+if(NOT EMSCRIPTEN)
+  find_package(Threads REQUIRED)
+  target_link_libraries(fuzz_formats PRIVATE Threads::Threads)
+endif()
 add_executable(playtest tools/playtest.cpp)
 target_link_libraries(playtest PRIVATE gaius_formats gaius_model gaius_systems)
 
@@ -321,3 +364,4 @@ enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
 target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform_rules gaius_version stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)
+add_test(NAME fuzz_formats COMMAND fuzz_formats --cases 300)  # synthetic seeds; tools/fuzz_formats.cpp has the real runs

@@ -26,26 +26,31 @@ std::vector<std::pair<size_t, size_t>> event_chunks(const std::vector<uint8_t>& 
     while (!stack.empty()) {
         auto [pos, end] = stack.back();
         stack.pop_back();
-        std::vector<std::pair<size_t, size_t>> children;
+        struct Child {
+            size_t begin, end;
+            bool events;  // an EVNT chunk: a sequence's events, not a container
+        };
+        std::vector<Child> children;
         while (pos + 8 <= end) {
             const size_t length = be32(d, pos + 4);
             const size_t body = pos + 8;
             // CZARTIT.XMI has 12 bytes of padding after its last chunk: a
-            // "chunk" that doesn't fit its container ends the walk.
-            if (body + length > end) break;
+            // "chunk" that doesn't fit its container ends the walk. (Compared as a remainder, so a length near
+            // 4 GB cannot wrap on a 32-bit size_t.)
+            if (length > end - body) break;
             if (tag(d, pos, "FORM") || tag(d, pos, "CAT ")) {
-                children.push_back({body + 4, body + length});
+                if (length >= 4) children.push_back({body + 4, body + length, false});
             } else if (tag(d, pos, "EVNT")) {
-                children.push_back({body, body + length | (size_t{1} << 62)});
+                children.push_back({body, body + length, true});
             }
             pos = body + length + (length & 1);
         }
         // Keep file order: push in reverse so the first child is handled first.
         for (auto it = children.rbegin(); it != children.rend(); ++it) {
-            if (it->second & (size_t{1} << 62)) {
-                out.push_back({it->first, it->second & ~(size_t{1} << 62)});
+            if (it->events) {
+                out.push_back({it->begin, it->end});
             } else {
-                stack.push_back(*it);
+                stack.push_back({it->begin, it->end});
             }
         }
     }

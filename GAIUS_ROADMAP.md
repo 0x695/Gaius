@@ -365,6 +365,8 @@ Every Phase 7 item is done. The scroll speed drives the map's key and edge scrol
 
 - [x] **Safety nets** (2026-10-03, release checklist step 2; `CLAUDE.md` item 40) — autosave each year (or 3 or 5, or never) and at a promotion offer into three rotating files apart from the eight slots; F5 / F9 quick save and load; the clock stops while the window is not in front; a changed city is saved as `AWAY.SAV` when the player leaves the window or the game; saves and settings written through a temporary file; `config_version` in `gaius.cfg`; in the browser, persistent storage requested, a backup nudge and restoring a backup zip. Checked natively and in Chromium.
 
+- [x] **Robustness** (2026-10-03, release checklist step 3; `docs/ROBUSTNESS.md`, `CLAUDE.md` item 41) — `tools/fuzz_formats` (every decoder, the text parsers, the sound driver, a mutated save through the simulation, the Forum's pages and the city view) under AddressSanitizer and UndefinedBehaviorSanitizer, in CI (`sanitize`) and locally (MSVC's ASan, and an Emscripten and Node route for UBSan on the 32-bit build the browser runs); the file decoders take bytes (`parse`); one case-insensitive file lookup for every loader; GOG's international release and incomplete folders are explained rather than played into a pictureless game.
+
 **Open**
 - [ ] **The first release** — Android signing secrets, whether to sign the Windows exe, then the `v0.9.0` tag (the first run of the publish job).
 - [ ] **The browser build on more browsers and phones** — Firefox, Safari and a real phone have not run it; sound has not been heard (the test browser had no audio device).

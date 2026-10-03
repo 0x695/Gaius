@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "formats/common/game_files.hpp"
 #include "formats/common/types.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
@@ -98,13 +99,7 @@ inline void draw_credits(formats::IndexedImage& image, const formats::PL8Sheet& 
 // Loads the pictures from the game's folder; false when any is missing (the opening is then left out).
 inline bool load_original_intro(const std::string& dir, OriginalIntroArt& art) {
     namespace fs = std::filesystem;
-    const auto path = [&](const char* name) {
-        const fs::path p = fs::path(dir) / name;
-        if (fs::exists(p)) return p.string();
-        std::string lower = name;
-        for (char& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-        return (fs::path(dir) / lower).string();
-    };
+    const auto path = [&](const char* name) { return formats::game_file_path(dir, name); };
     try {
         art.logo = formats::vpx::decode(path("IMPRLOGO.VPX")).image;
         art.presents = formats::vpx::decode(path("IMPRSEN.VPX")).image;

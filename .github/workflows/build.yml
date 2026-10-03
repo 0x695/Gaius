@@ -30,6 +30,32 @@ jobs:
           name: gaius-linux-x86_64
           path: gaius-linux-x86_64.tar.gz
 
+  # The tests and a fuzz pass over every decoder and the simulation, under AddressSanitizer and UndefinedBehaviorSanitizer
+  # (tools/fuzz_formats.cpp). No game files here, so the fuzzer starts from its synthetic seeds; with the real files, the
+  # same tool has been run locally for far more cases. Undefined behaviour is fatal.
+  sanitize:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libsdl2-dev
+      - name: Configure
+        run: cmake -S . -B build-san -DCMAKE_BUILD_TYPE=RelWithDebInfo "-DGAIUS_SANITIZE=address;undefined"
+      - name: Build
+        run: cmake --build build-san -j "$(nproc)" --target gaius_tests fuzz_formats
+      - name: Test
+        run: ./build-san/gaius_tests
+      - name: Fuzz
+        run: ./build-san/fuzz_formats --cases 4000 --out fuzz-failures
+      - name: Fuzz again, another seed
+        run: ./build-san/fuzz_formats --cases 4000 --seed 2 --out fuzz-failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-failures
+          path: fuzz-failures
+          if-no-files-found: ignore
+
   windows:
     runs-on: windows-2022
     steps:

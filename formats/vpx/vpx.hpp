@@ -49,4 +49,8 @@ struct DecodeResult {
 // rather than guessing — matches the Python prototype's strict checks.
 DecodeResult decode(const std::string& path);
 
+// The same from the file's bytes; `name` is only for the error messages. Throws FormatError on anything that is not a
+// whole, consistent VPX (the fuzz tool relies on that being all it ever throws).
+DecodeResult parse(const std::vector<uint8_t>& data, const std::string& name = "input");
+
 }  // namespace gaius::formats::vpx

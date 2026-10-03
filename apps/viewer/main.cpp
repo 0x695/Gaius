@@ -71,6 +71,7 @@
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
 #include "apps/viewer/setup_screen.hpp"
+#include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 #include "formats/p32/p32.hpp"
@@ -363,10 +364,25 @@ int main(int argc, char** argv) {
     viewer::apply_bindings(settings);
 
     std::string in_path = argc >= 2 ? argv[1] : std::string();
+    std::string setup_shot_path;  // --setup-screenshot out.png: one frame of the setup screen, headless
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::strcmp(argv[i], "--setup-screenshot") == 0) setup_shot_path = argv[i + 1];
+    // A folder named on the command line that Gaius cannot play from: the usable one inside it (GOG's top folder holds
+    // a US folder), else the setup screen, which says why.
+    std::string setup_note;
+    if (!in_path.empty() && fs::is_directory(in_path) && !platform::looks_like_game_folder(in_path)) {
+        const std::vector<std::string> inside = platform::game_folders_under(in_path, 3);
+        if (!inside.empty()) {
+            in_path = inside.front();
+        } else {
+            setup_note = viewer::game_folder_note(platform::inspect_game_folder(in_path));
+            in_path.clear();
+        }
+    }
     if (in_path.empty() || in_path.rfind("--", 0) == 0) {
         // No folder or file given: a career from the game's files, wherever
         // they are, or the setup screen that explains where they go.
-        in_path = viewer::find_game_folder(settings);
+        in_path = setup_note.empty() ? viewer::find_game_folder(settings) : std::string();
         viewer::remember_game_folder(settings, settings_path, in_path);
         if (in_path.empty()) {
             if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
@@ -375,7 +391,8 @@ int main(int argc, char** argv) {
             }
             if (SDL_Cursor* cursor = make_gaius_cursor()) SDL_SetCursor(cursor);
             try {
-                in_path = viewer::run_setup_screen(settings, settings_path, kLogicalW, kLogicalH);
+                in_path = viewer::run_setup_screen(settings, settings_path, kLogicalW, kLogicalH, setup_note,
+                                                   setup_shot_path);
             } catch (const std::exception& e) {
                 std::fprintf(stderr, "fatal: %s\n", e.what());
             }
@@ -612,12 +629,7 @@ int main(int argc, char** argv) {
                     have_province_sprites = true;
                 } catch (const formats::FormatError&) {
                 }
-                const auto asset = [&](std::string name) {
-                    fs::path p = fs::path(dir) / name;
-                    if (fs::exists(p)) return p.string();
-                    for (char& ch : name) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-                    return (fs::path(dir) / name).string();
-                };
+                const auto asset = [&](const std::string& name) { return formats::game_file_path(dir, name); };
                 try {
                     forum_picture = formats::vpx::decode(asset("NEWFORUM.VPX")).image;
                     forum_palette = formats::pal256::load(asset("NEWFORUM.256"));
@@ -686,15 +698,12 @@ int main(int argc, char** argv) {
                     have_font = true;
                 } catch (const formats::FormatError&) {
                 }
-                for (const char* name : {"POINTERS.PL8", "pointers.pl8"}) {
-                    const fs::path p = fs::path(dir) / name;
-                    if (!fs::exists(p)) continue;
+                if (formats::game_file_exists(dir, "POINTERS.PL8")) {
                     try {
-                        toolbar_icons = formats::pl8::load(p.string());
+                        toolbar_icons = formats::pl8::load(formats::game_file_path(dir, "POINTERS.PL8"));
                         have_icons = true;
                     } catch (const formats::FormatError&) {
                     }
-                    break;
                 }
                 break;
             } catch (const formats::FormatError&) {
@@ -724,8 +733,7 @@ int main(int argc, char** argv) {
     } catch (const std::exception&) {
     }
     if (options_path.empty() || !ui::load_options(options_path, game_options)) {
-        if (!ui::load_options((fs::path(game_dir) / "CAESAR.INF").string(), game_options))
-            ui::load_options((fs::path(game_dir) / "caesar.inf").string(), game_options);
+        ui::load_options(formats::game_file_path(game_dir, "CAESAR.INF"), game_options);
     }
     if (start_speed >= 0) game_options.set(ui::kOptSpeed, std::clamp(start_speed / 10 * 10, 0, 100));
     sim.speed = std::clamp(game_options.speed() / 10 * 10, 0, 100);
@@ -1015,12 +1023,7 @@ int main(int argc, char** argv) {
         const int province = model::global_word(state, 0x6CA6);
         char name[16];
         std::snprintf(name, sizeof name, "EMPIRE2.%03d", province);
-        fs::path path = fs::path(game_dir) / name;
-        if (!fs::exists(path)) {
-            std::string lower = name;
-            for (char& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            path = fs::path(game_dir) / lower;
-        }
+        const fs::path path = formats::game_file_path(game_dir, name);
         formats::empire2::EmpireMap province_map;
         try {
             province_map = formats::empire2::load(path.string());
@@ -1182,7 +1185,9 @@ int main(int argc, char** argv) {
                 viewer::SettingsView v = settings_view;
                 v.messages_on = model::global_word(state, 0x6C78) != 0;
                 v.in_game = settings_return != Screen::Start;
-                v.game_found = platform::looks_like_game_folder(game_dir);
+                const platform::GameFolderReport folder = platform::inspect_game_folder(game_dir);
+                v.game_found = folder.status == platform::GameFolderStatus::Usable;
+                v.game_note = viewer::game_folder_note(folder);
                 v.game_dir = viewer::tail(game_dir, 30);
                 return viewer::settings_page(settings, game_options, v);
             }

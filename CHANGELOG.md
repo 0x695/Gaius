@@ -28,6 +28,11 @@ The first public beta: Gaius plays a whole career of Caesar, from the start scre
 - Saves and settings are written whole: a crash or a closed tab part-way through leaves the old file, not a broken one.
 - In the browser: the page asks the browser to keep your saves, says so when it will not (Safari clears a site's data after about a week away), reminds you to download a backup, and takes that backup's zip back through *Saves > Add*.
 
+### Robustness
+- A damaged file gives a message, not a crash: the file decoders, the simulation, the Forum's pages and the city view are fuzzed under AddressSanitizer and UndefinedBehaviorSanitizer (`docs/ROBUSTNESS.md`), and a handful of problems that only a damaged file could reach were fixed.
+- GOG's top folder (the international release beside a `US` folder) plays from the `US` folder; a folder with only the international release, or with files missing, is explained on the setup screen, the Settings screen and the browser page instead of starting a game without pictures.
+- File names in any letter case work (`houses.pl8`, `Houses.PL8`), which a case-sensitive file system such as Linux's needs.
+
 ### Comforts
 - Any window size, fullscreen, UI scale 1 to 4, edge, key and drag scrolling, remappable keys and buttons, gamepad play (Steam Deck), touch gestures (Android and phones in the browser), a German translation of Gaius's own texts.
 - Your choice of Gaius's gold pointer or the original's arrow, and of the original's game pace or a faster one.
@@ -37,7 +42,7 @@ The first public beta: Gaius plays a whole career of Caesar, from the start scre
 - Command-line tools for every file format and Python scripts to export the game's pictures, sprites, sounds, tunes and maps, and to list, render, compare and check saves.
 
 ### Known limitations
-- The US release of Caesar is the one supported; the international release (a different executable) is not.
+- The US release of Caesar is the one supported; the international release (a different executable) is not, and Gaius says so when it is given that folder.
 - The Tower command is not available (its button is dimmed). The original's start-screen layout, the Golden Sector logo in the opening and a few hover marks are not reproduced.
 - Not yet tried on a Steam Deck or a physical Android phone. The browser version has been tried in Chromium only.
 - The Cohort 2 hand-over (the optional external battle program) has not been tried with the real program.

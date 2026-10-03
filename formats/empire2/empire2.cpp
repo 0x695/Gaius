@@ -14,10 +14,14 @@ EmpireMap load(const std::string& path) {
     std::vector<uint8_t> buf(kFileSize + 1);  // +1 so a too-long file still shows up in the read count
     size_t n = std::fread(buf.data(), 1, buf.size(), f);
     std::fclose(f);
+    buf.resize(n);
+    return parse(buf, path);
+}
 
-    if (n != kFileSize) {
+EmpireMap parse(const std::vector<uint8_t>& buf, const std::string& path) {
+    if (buf.size() != kFileSize) {
         throw FormatError("empire2: expected exactly " + std::to_string(kFileSize) +
-                           " bytes, got " + std::to_string(n) + " (" + path + ")");
+                           " bytes, got " + std::to_string(buf.size()) + " (" + path + ")");
     }
 
     EmpireMap map;

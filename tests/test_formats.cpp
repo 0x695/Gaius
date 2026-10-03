@@ -26,6 +26,7 @@
 #include "apps/viewer/save_view.hpp"
 #include "audio/ail_xmidi.hpp"
 #include "audio/game_audio.hpp"
+#include "formats/common/game_files.hpp"
 #include "formats/gtl/gtl.hpp"
 #include "systems/messages.hpp"
 #include "systems/sounds.hpp"
@@ -2917,8 +2918,11 @@ void test_platform_game_detection() {
     fs::remove_all(root, ec);
     const auto make_game = [](const fs::path& dir) {
         fs::create_directories(dir);
-        std::ofstream(dir / "empire2.001").put('x');  // any letter case
-        std::ofstream(dir / "HOUSES.PL8").put('x');
+        for (int i = 0; i < plat::kEssentialGameFileCount; ++i) {
+            std::string name = plat::kEssentialGameFiles[i];
+            if (i % 2 == 0) std::transform(name.begin(), name.end(), name.begin(), ::tolower);  // any letter case
+            std::ofstream(dir / name).put('x');
+        }
     };
     make_game(root / "Caesar");
     make_game(root / "Caesar" / "US");
@@ -2936,7 +2940,87 @@ void test_platform_game_detection() {
     CHECK(plat::game_folders_under("", 3).empty());
     CHECK(plat::game_folders_under((root / "Other").string(), 2).empty());  // the deep one is out of reach
     CHECK(!plat::looks_like_game_folder((root / "Other").string()));
+
+    // What a folder is: GOG's top folder holds the international release (Caesar's files, but the music as .MDI and
+    // no SHADE.256), which is not a folder to play from; its US folder is. The report says which, for the setup screen.
+    using plat::GameFolderStatus;
+    const fs::path gog = root / "GOG";
+    fs::create_directories(gog / "US");
+    make_game(gog / "US");
+    for (const char* name : {"EMPIRE2.001", "HOUSES.PL8", "HOUSES2.PL8", "FIXTS.PL8", "MOREMEN.PL8", "FONT1.PL8",
+                             "CSR.EXE", "czarjin1.mdi", "MUSIC.MOD"})
+        std::ofstream(gog / name).put('x');
+    const plat::GameFolderReport top = plat::inspect_game_folder(gog.string());
+    CHECK(top.status == GameFolderStatus::International && top.missing == std::vector<std::string>{"SHADE.256"});
+    CHECK(!plat::looks_like_game_folder(gog.string()));
+    const std::vector<std::string> in_gog = plat::game_folders_under(gog.string(), 2);
+    CHECK(in_gog.size() == 1 && fs::path(in_gog[0]).filename() == "US");  // the top folder is skipped, the US one found
+    CHECK(plat::inspect_game_folder((gog / "US").string()).status == GameFolderStatus::Usable);
+    // The US release with files lost is incomplete, and says which; a folder without Caesar's files is not Caesar's.
+    const fs::path lost = root / "Lost";
+    fs::create_directories(lost);
+    for (const char* name : {"EMPIRE2.001", "HOUSES.PL8", "csr.exe"}) std::ofstream(lost / name).put('x');
+    const plat::GameFolderReport part = plat::inspect_game_folder(lost.string());
+    CHECK(part.status == GameFolderStatus::Incomplete && part.missing.size() == 5 && part.missing[0] == "HOUSES2.PL8");
+    CHECK(plat::inspect_game_folder((root / "Other").string()).status == GameFolderStatus::NotCaesar);
+    CHECK(plat::inspect_game_folder("").status == GameFolderStatus::NotCaesar);
+    CHECK(plat::inspect_game_folder((root / "Missing").string()).status == GameFolderStatus::NotCaesar);
     fs::remove_all(root, ec);
+}
+
+void test_game_folder_note() {
+    std::printf("test_game_folder_note (what the setup screen says about a folder Gaius cannot play from)\n");
+    namespace viewer = gaius::viewer;
+    namespace plat = gaius::platform;
+    using plat::GameFolderStatus;
+    plat::GameFolderReport r;
+    r.status = GameFolderStatus::Usable;
+    CHECK(viewer::game_folder_note(r).empty());
+    r.status = GameFolderStatus::NotCaesar;
+    CHECK(viewer::game_folder_note(r) == "That folder doesn't hold Caesar's files");
+    r.status = GameFolderStatus::International;
+    const std::string intl = viewer::game_folder_note(r);
+    CHECK(intl.find("international") != std::string::npos && intl.find("US") != std::string::npos);
+    r.status = GameFolderStatus::Incomplete;
+    r.missing = {"SHADE.256", "FONT1.PL8"};
+    CHECK(viewer::game_folder_note(r) == "Some of Caesar's files are missing: SHADE.256, FONT1.PL8");
+    r.missing = {"A", "B", "C", "D", "E"};
+    CHECK(viewer::game_folder_note(r) == "Some of Caesar's files are missing: A, B, C and 2 more");
+    // Wrapping: lines no longer than the width (a long word alone), and nothing lost.
+    CHECK((viewer::wrap_note("one two three", 7) == std::vector<std::string>{"one two", "three"}));
+    CHECK((viewer::wrap_note("abcdefghij kl", 5) == std::vector<std::string>{"abcdefghij", "kl"}));
+    CHECK(viewer::wrap_note("").empty());
+    std::string joined;
+    for (const std::string& line : viewer::wrap_note(intl)) {
+        CHECK(line.size() <= 36);
+        joined += (joined.empty() ? "" : " ") + line;
+    }
+    CHECK(joined == intl);
+}
+
+void test_game_file_lookup() {
+    std::printf("test_game_file_lookup (game files found in any letter case)\n");
+    namespace formats = gaius::formats;
+    const fs::path dir = fs::temp_directory_path() / "gaius_test_game_files";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir);
+    for (const char* name : {"houses.pl8", "Fixts.Pl8", "SHADE.256", "Empire2.001"}) std::ofstream(dir / name).put('x');
+    // The search itself, which a case-insensitive file system would otherwise make unnecessary.
+    CHECK(formats::find_name_ignoring_case(dir.string(), "HOUSES.PL8") == "houses.pl8");
+    CHECK(formats::find_name_ignoring_case(dir.string(), "FIXTS.PL8") == "Fixts.Pl8");
+    CHECK(formats::find_name_ignoring_case(dir.string(), "EMPIRE2.001") == "Empire2.001");
+    CHECK(formats::find_name_ignoring_case(dir.string(), "SHADE.256") == "SHADE.256");
+    CHECK(formats::find_name_ignoring_case(dir.string(), "FONT1.PL8").empty());
+    CHECK(formats::find_name_ignoring_case((dir / "nowhere").string(), "SHADE.256").empty());
+    // What the loaders call: a path that opens, or the exact name when there is no such file.
+    for (const char* name : {"HOUSES.PL8", "FIXTS.PL8", "SHADE.256", "EMPIRE2.001"}) {
+        CHECK(formats::game_file_exists(dir.string(), name));
+        CHECK(fs::exists(formats::game_file_path(dir.string(), name)));
+    }
+    CHECK(!formats::game_file_exists(dir.string(), "FONT1.PL8"));
+    CHECK(fs::path(formats::game_file_path(dir.string(), "FONT1.PL8")).filename() == "FONT1.PL8");
+    fs::remove_all(dir, ec);
 }
 
 // The version CMake writes from the VERSION.txt file: x.y.z, and the program's name for itself starts with it.
@@ -7377,6 +7461,8 @@ int main() {
     test_version();
     test_platform_paths();
     test_platform_game_detection();
+    test_game_file_lookup();
+    test_game_folder_note();
     test_ui_settings_file();
     test_ui_strings();
     test_settings_page_rows();

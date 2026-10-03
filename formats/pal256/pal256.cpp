@@ -19,9 +19,13 @@ Palette load(const std::string& path) {
     std::vector<uint8_t> buf(768);
     size_t n = std::fread(buf.data(), 1, buf.size(), f);
     std::fclose(f);
+    buf.resize(n);
+    return parse(buf, path);
+}
 
-    if (n != 768) {
-        throw FormatError("pal256: expected exactly 768 bytes, got " + std::to_string(n) +
+Palette parse(const std::vector<uint8_t>& buf, const std::string& path) {
+    if (buf.size() < 768) {
+        throw FormatError("pal256: expected exactly 768 bytes, got " + std::to_string(buf.size()) +
                            " (" + path + ")");
     }
 

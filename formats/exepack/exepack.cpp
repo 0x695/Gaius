@@ -30,8 +30,9 @@ std::vector<uint8_t> read_whole_file(const std::string& path) {
 
 }  // namespace
 
-DecodeResult decode(const std::string& path) {
-    std::vector<uint8_t> data = read_whole_file(path);
+DecodeResult decode(const std::string& path) { return parse(read_whole_file(path), path); }
+
+DecodeResult parse(const std::vector<uint8_t>& data, const std::string& path) {
     if (data.size() < 0x20 || data[0] != 'M' || data[1] != 'Z') {
         throw FormatError("exepack: not an MZ executable: " + path);
     }

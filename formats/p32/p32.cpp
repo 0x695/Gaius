@@ -22,9 +22,13 @@ Palette load(const std::string& path) {
     std::vector<uint8_t> buf(64);
     size_t n = std::fread(buf.data(), 1, buf.size(), f);
     std::fclose(f);
+    buf.resize(n);
+    return parse(buf, path);
+}
 
-    if (n != 64) {
-        throw FormatError("p32: expected exactly 64 bytes, got " + std::to_string(n) +
+Palette parse(const std::vector<uint8_t>& buf, const std::string& path) {
+    if (buf.size() < 64) {
+        throw FormatError("p32: expected exactly 64 bytes, got " + std::to_string(buf.size()) +
                            " (" + path + ")");
     }
 

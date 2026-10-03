@@ -76,19 +76,47 @@ GaiusPaths resolve_paths(const PathEnvironment& e) {
     return p;
 }
 
-bool looks_like_game_folder(const std::string& dir) {
-    if (dir.empty()) return false;
+const char* const kEssentialGameFiles[] = {"EMPIRE2.001", "HOUSES.PL8", "HOUSES2.PL8", "FIXTS.PL8",
+                                           "MOREMEN.PL8",  "SHADE.256",  "FONT1.PL8"};
+const int kEssentialGameFileCount = static_cast<int>(sizeof(kEssentialGameFiles) / sizeof(kEssentialGameFiles[0]));
+
+GameFolderReport inspect_game_folder(const std::string& dir) {
+    GameFolderReport report;
+    if (dir.empty()) return report;
     std::error_code ec;
-    if (!std::filesystem::is_directory(dir, ec)) return false;
-    bool scenario = false, sprites = false;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        std::string name = entry.path().filename().string();
+    if (!std::filesystem::is_directory(dir, ec)) return report;
+    std::vector<std::string> names;  // upper case
+    for (fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        std::string name = it->path().filename().string();
         std::transform(name.begin(), name.end(), name.begin(),
                        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-        if (name == "EMPIRE2.001") scenario = true;
-        if (name == "HOUSES.PL8") sprites = true;
+        names.push_back(std::move(name));
     }
-    return scenario && sprites;
+    const auto has = [&](const std::string& name) { return std::find(names.begin(), names.end(), name) != names.end(); };
+    const auto has_extension = [&](const std::string& ext) {
+        return std::any_of(names.begin(), names.end(), [&](const std::string& n) {
+            return n.size() > ext.size() && n.compare(n.size() - ext.size(), ext.size(), ext) == 0;
+        });
+    };
+    for (int i = 0; i < kEssentialGameFileCount; ++i)
+        if (!has(kEssentialGameFiles[i])) report.missing.push_back(kEssentialGameFiles[i]);
+    const bool caesar = has("EMPIRE2.001") || has("HOUSES.PL8") || has("CSR.EXE");
+    if (!caesar) {
+        report.missing.clear();
+        report.status = GameFolderStatus::NotCaesar;
+    } else if (report.missing.empty()) {
+        report.status = GameFolderStatus::Usable;
+    } else if (has_extension(".MDI") || has("MUSIC.MOD")) {
+        report.status = GameFolderStatus::International;  // its music is .MDI files, not the US release's .XMI
+    } else {
+        report.status = GameFolderStatus::Incomplete;
+    }
+    return report;
+}
+
+bool looks_like_game_folder(const std::string& dir) {
+    return inspect_game_folder(dir).status == GameFolderStatus::Usable;
 }
 
 std::vector<std::string> game_folders_under(const std::string& root, int depth) {

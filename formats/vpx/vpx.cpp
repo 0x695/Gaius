@@ -68,7 +68,10 @@ DecodeResult decode(const std::string& path) {
     size_t read = std::fread(data.data(), 1, file_size, f);
     std::fclose(f);
     if (read != file_size) throw FormatError("vpx: short read on " + path);
+    return parse(data, path);
+}
 
+DecodeResult parse(const std::vector<uint8_t>& data, const std::string& path) {
     DecodeResult result;
     result.image.width = kWidth;
     result.image.height = kHeight;

@@ -317,7 +317,7 @@ void record_history(model::CityState& state, int year) {
     };
     for (const History& h : histories) {
         int i = model::global_word(state, h.index_ds) + 1;
-        if (i >= h.records) i = 0;
+        if (i < 0 || i >= h.records) i = 0;  // (a damaged save's index could be negative: it would index far outside the table)
         model::set_global_word(state, h.index_ds, i);
         const size_t o = static_cast<size_t>(i) * 4;
         if (h.table->size() < o + 4) h.table->resize(o + 4, 0);

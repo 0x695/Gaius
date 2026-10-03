@@ -44,6 +44,8 @@ struct EmpireMap {
 
 // Throws FormatError if the file isn't exactly 1602 bytes.
 EmpireMap load(const std::string& path);
+// The same from the file's bytes; `name` is only for the error messages. FormatError is all it throws.
+EmpireMap parse(const std::vector<uint8_t>& bytes, const std::string& name = "input");
 
 // Writes exactly 1602 bytes: prefix followed by the 1600-byte cell array.
 // Round-tripping load() -> save() on an untouched file must be byte-identical;

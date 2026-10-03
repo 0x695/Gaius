@@ -25,12 +25,35 @@ bool import_game_folder();
 // While the copy runs; with the files copied so far.
 bool import_in_progress(int* files_copied = nullptr);
 
-// Whether a folder holds the game's files: its scenario files (EMPIRE2.001)
-// and the city sprites (HOUSES.PL8), in any letter case.
+// What a folder is, as a place for Gaius to play from. Gaius works from the US release of Caesar (the one every finding
+// was made against). GOG's download keeps it in a folder called US, beside the files of an international release
+// (several languages, music as .MDI files, a different executable) that Gaius cannot play from: it lacks files the US
+// release has, among them SHADE.256, the city's palette. Pointing Gaius at GOG's top folder is the likely mistake,
+// so the report says which of these it is.
+enum class GameFolderStatus {
+    NotCaesar,      // none of Caesar's files
+    International,  // Caesar's files, but the international release
+    Incomplete,     // Caesar's files, some Gaius needs missing (the US release with files lost, or another version)
+    Usable,         // every file Gaius cannot play without is there
+};
+
+struct GameFolderReport {
+    GameFolderStatus status = GameFolderStatus::NotCaesar;
+    std::vector<std::string> missing;  // the essential files not found, in upper case (empty when Usable)
+};
+
+// The files Gaius cannot play without: the first province's map, the city and walker sprites, the city palette and the
+// game's font. All are looked for in any letter case.
+extern const char* const kEssentialGameFiles[];
+extern const int kEssentialGameFileCount;
+
+GameFolderReport inspect_game_folder(const std::string& dir);
+
+// Whether a folder is one Gaius can play from (inspect_game_folder says Usable).
 bool looks_like_game_folder(const std::string& dir);
 
-// The game's folders in and below `root`, down to `depth` levels (platform/game_detect.cpp): breadth first, the US
-// build (a folder named US) ahead of any other.
+// The usable game folders in and below `root`, down to `depth` levels (platform/game_detect.cpp): breadth first, the US
+// build (a folder named US) ahead of any other. GOG's top folder is not one of them -- its US folder is.
 std::vector<std::string> game_folders_under(const std::string& root, int depth = 3);
 
 // Looks for the game where it is usually installed -- GAIUS_GAME_DIR and GAIUS_TEST_ASSETS, GOG's registry entries and

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <vector>
 
+#include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 
@@ -14,14 +15,8 @@ namespace gaius::render {
 namespace {
 
 std::string find_asset(const std::string& dir, const std::string& upper) {
-    namespace fs = std::filesystem;
-    std::string lower = upper;
-    for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    for (const std::string& name : {upper, lower}) {
-        const fs::path p = fs::path(dir) / name;
-        if (fs::exists(p)) return p.string();
-    }
-    throw formats::FormatError("render: " + upper + " not found in " + dir);
+    if (!formats::game_file_exists(dir, upper)) throw formats::FormatError("render: " + upper + " not found in " + dir);
+    return formats::game_file_path(dir, upper);
 }
 
 void blit(formats::IndexedImage& out, const formats::PL8Frame& f, int dx, int dy, bool transparent) {

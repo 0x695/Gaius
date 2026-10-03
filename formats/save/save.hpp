@@ -83,6 +83,8 @@ struct SaveFile {
 
 // Throws FormatError if the file isn't exactly kSaveSize bytes.
 SaveFile load(const std::string& path);
+// The same from the file's bytes; `name` is only for the error messages. FormatError is all it throws.
+SaveFile parse(const std::vector<uint8_t>& bytes, const std::string& name = "input");
 
 // Writes the kSaveSize bytes of `sf` to `path`. Throws FormatError if `sf`
 // isn't that size or the file can't be written.

@@ -12,9 +12,10 @@ std::vector<Timbre> parse(const std::vector<uint8_t>& d) {
         if (d[i + 1] == 0xFF) break;
         if (i + 6 > d.size()) throw FormatError("gtl: truncated directory entry");
         const size_t offset = d[i + 2] | (d[i + 3] << 8) | (d[i + 4] << 16) | (static_cast<size_t>(d[i + 5]) << 24);
-        if (offset + 2 > d.size()) throw FormatError("gtl: a timbre offset is past the file");
+        // (Remainders, not sums: on a 32-bit size_t, the browser build's, `offset + 2` can wrap round and pass.)
+        if (offset > d.size() || d.size() - offset < 2) throw FormatError("gtl: a timbre offset is past the file");
         const size_t length = d[offset] | (d[offset + 1] << 8);
-        if (length < 2 || offset + length > d.size()) throw FormatError("gtl: a timbre runs past the file");
+        if (length < 2 || length > d.size() - offset) throw FormatError("gtl: a timbre runs past the file");
         Timbre t;
         t.patch = d[i];
         t.bank = d[i + 1];

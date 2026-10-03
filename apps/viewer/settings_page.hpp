@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "apps/viewer/game_folder_note.hpp"
 #include "gaius_version.hpp"
 #include "platform/input.hpp"
 #include "platform/web.hpp"
@@ -68,6 +69,7 @@ struct SettingsView {
     bool windowed_platform = true;    // the window mode can change (not on Android)
     bool can_import = false;          // Android: a folder can be imported
     bool game_found = true;
+    std::string game_note;            // why the folder cannot be played from, when it cannot (game_folder_note.hpp)
     std::string game_dir;
     std::vector<ui::Catalog> languages;  // English first
     int capturing = -1;               // the binding being captured: index * 2 + (gamepad ? 1 : 0)
@@ -216,6 +218,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.title = ui::tr("Game files");
             page.rows.push_back({ui::tr("Folder"), v.game_dir.empty() ? "-" : v.game_dir});
             page.rows.push_back({ui::tr("Caesar's files"), ui::tr(v.game_found ? "found" : "not found")});
+            if (!v.game_found)
+                for (const std::string& line : wrap_note(v.game_note)) page.rows.push_back({line, ""});
             if (v.can_import) {
                 page.rows.push_back({ui::tr("Import copies a folder you choose"), ""});
                 page.buttons.push_back({ui::tr("Import"), kActionImportGame});

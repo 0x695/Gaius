@@ -5,6 +5,7 @@
 #include <cctype>
 #include <filesystem>
 
+#include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
 
@@ -14,14 +15,9 @@ namespace {
 
 constexpr size_t kNameOffset = 12;  // DS:0x6B9E in final_state
 
-std::string asset(const std::string& dir, std::string name) {
-    namespace fs = std::filesystem;
-    fs::path p = fs::path(dir) / name;
-    if (fs::exists(p)) return p.string();
-    for (char& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    p = fs::path(dir) / name;
-    if (fs::exists(p)) return p.string();
-    throw formats::FormatError("name dialog: " + name + " not found in " + dir);
+std::string asset(const std::string& dir, const std::string& name) {
+    if (!formats::game_file_exists(dir, name)) throw formats::FormatError("name dialog: " + name + " not found in " + dir);
+    return formats::game_file_path(dir, name);
 }
 
 // 3496:0718.

@@ -4,6 +4,11 @@
 # lang/languages.txt. Lines left untranslated show in English.
 # Written by scripts/extract_strings.py; don't edit it by hand.
 
+That folder doesn't hold Caesar's files = 
+That is the international release of Caesar. Gaius plays the US release: GOG keeps it in a folder called US. = 
+and = 
+more = 
+Some of Caesar's files are missing: = 
 Auto = 
 Away = 
 Quick = 
@@ -257,7 +262,6 @@ Choose the Caesar folder, =
 Drop the Caesar folder on this window, = 
 drop it on this window, or copy the files into = 
 Choose folder = 
-That folder doesn't hold Caesar's files = 
 The folder picker didn't open = 
 Choose the folder with Caesar's files = 
 Still no Caesar files found = 

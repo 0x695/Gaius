@@ -171,7 +171,7 @@ House rules: new source files start with an `SPDX-License-Identifier` line; find
 
 **Do I need the original game?** Yes. Gaius ships no game files and never will. It needs the files of your own legal copy.
 
-**Which version of the game?** The US build, the one whose `CSR.EXE` Gaius was checked against (GOG's `US` folder). The international build is a different executable and has not been analyzed.
+**Which version of the game?** The US build, the one whose `CSR.EXE` Gaius was checked against (GOG's `US` folder). The international build is a different executable and has not been analyzed; if you point Gaius at GOG's top folder it plays from the `US` folder inside it, and if that is missing it tells you so.
 
 **Can I carry on a game I started in the original?** Yes. Gaius reads the original's saves, and what it writes the original can read. It keeps its own saves in its own folder so it never overwrites yours.
 

@@ -72,4 +72,8 @@ PL8Sheet load(const std::string& path);
 // same 72 frames at 8 bits per pixel.
 PL8Sheet load_pl1(const std::string& path);
 
+// Both from the file's bytes (`name` is for the error messages); FormatError is all they throw.
+PL8Sheet parse(const std::vector<uint8_t>& data, const std::string& name = "input");
+PL8Sheet parse_pl1(const std::vector<uint8_t>& data, const std::string& name = "input");
+
 }  // namespace gaius::formats::pl8

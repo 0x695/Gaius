@@ -43,6 +43,8 @@ struct ClickMap {
 };
 
 ClickMap load_click_map(const std::string& path);
+// The same from the file's bytes; `name` is only for the error messages. FormatError is all it throws.
+ClickMap parse_click_map(const std::vector<uint8_t>& bytes);
 
 struct Marker {
     int x, y;  // the marker's drawing position, as 0x0D21E computes it
@@ -50,5 +52,6 @@ struct Marker {
 
 // The 50 province markers.
 std::array<Marker, 50> load_province_markers(const std::string& path);
+std::array<Marker, 50> parse_province_markers(const std::vector<uint8_t>& bytes);
 
 }  // namespace gaius::formats::screen_data

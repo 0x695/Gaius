@@ -449,6 +449,8 @@ bool AilXmidi::register_sequence(const std::vector<uint8_t>& d, int number) {
     while (true) {
         if (!(tag(d, p, "CAT ") || tag(d, p, "FORM")) || p + 12 > d.size()) return false;
         if (tag(d, p + 8, "XMID")) break;
+        // (A remainder, not a sum: on a 32-bit size_t, the browser build's, a length near 4 GB would wrap p round.)
+        if (be32(d, p + 4) > d.size() - p - 8) return false;
         p += static_cast<size_t>(be32(d, p + 4)) + 8;
     }
     if (tag(d, p, "FORM")) {
@@ -466,7 +468,7 @@ bool AilXmidi::register_sequence(const std::vector<uint8_t>& d, int number) {
             }
             const int64_t len = static_cast<int64_t>(be32(d, q + 4)) + 8;
             remaining -= len;
-            if (remaining < 0) return false;
+            if (remaining < 0 || len > static_cast<int64_t>(d.size() - q)) return false;
             q += static_cast<size_t>(len);
         }
     }
@@ -482,10 +484,11 @@ bool AilXmidi::register_sequence(const std::vector<uint8_t>& d, int number) {
             for (int i = 0; i < n && c + 12 + 2 * static_cast<size_t>(i) <= d.size(); ++i)
                 timb_.push_back({d[c + 10 + 2 * static_cast<size_t>(i)], d[c + 11 + 2 * static_cast<size_t>(i)]});
         } else if (tag(d, c, "EVNT")) {
-            if (c + 8 + len > d.size()) return false;
+            if (len > d.size() - c - 8) return false;
             evnt_.assign(d.begin() + static_cast<long>(c + 8), d.begin() + static_cast<long>(c + 8 + len));
             break;
         }
+        if (len > d.size() - c - 8) return false;  // the next chunk would be past the end (or wrap a 32-bit size_t)
         c += len + 8;
     }
     registered_ = true;
@@ -591,6 +594,8 @@ int AilXmidi::control(int chan, int con, int val) {
 
 size_t AilXmidi::note_on_event() {
     const size_t start = ptr_;
+    // A note cut short by the end of the data (a damaged file): the sequence ends there.
+    if (start + 3 > evnt_.size()) return evnt_.size() - start;
     const int chan = evnt_[start] & 0x0F;
     const int note = evnt_[start + 1];
     const int vel = evnt_[start + 2];
@@ -631,7 +636,14 @@ void AilXmidi::serve() {
         }
     }
     if (--interval_cnt > 0) return;
-    while (status_ == kPlaying) {
+    // A damaged file can loop forever without ever waiting (a FOR/NEXT pair with no delay between): after this many
+    // events in one interval the sequence is given up.
+    for (int events = 0; status_ == kPlaying; ++events) {
+        if (events > 100000) {
+            reset_sequence();
+            status_ = kDone;
+            return;
+        }
         if (ptr_ >= evnt_.size()) {  // no end-of-track event: treat the end as one
             reset_sequence();
             status_ = kDone;

@@ -28,6 +28,10 @@ int16_t w16(int32_t v) { return static_cast<int16_t>(static_cast<uint16_t>(v & 0
 int g(const model::CityState& state, uint16_t ds) { return model::global_word(state, ds); }
 void set(model::CityState& state, uint16_t ds, int v) { model::set_global_word(state, ds, w16(v)); }
 
+// A slot of the walker table. The public entry points check the slots they are given (the original indexes whatever
+// it is handed); the simulation only ever passes slots it found, so this guards a caller that did not.
+bool valid_slot(const model::CityState& state, int slot) { return slot >= 0 && slot < static_cast<int>(state.objects.size()); }
+
 int8_t sbyte(uint8_t v) { return static_cast<int8_t>(v); }
 int word(const model::Actor& a, size_t at) { return static_cast<int16_t>(a.raw[at] | (a.raw[at + 1] << 8)); }
 void set_word(model::Actor& a, size_t at, int v) {
@@ -85,6 +89,7 @@ int tactic_strength(const model::CityState& state, Tactic tactic) {
 }
 
 Round fight_round(model::CityState& state, int cohort, int army, Tactic tactic, const month::Random& random) {
+    if (!valid_slot(state, cohort) || !valid_slot(state, army)) return Round{};
     model::Actor& c = state.objects[static_cast<size_t>(cohort)];
     model::Actor& a = state.objects[static_cast<size_t>(army)];
     Round r;
@@ -143,6 +148,7 @@ Round fight_round(model::CityState& state, int cohort, int army, Tactic tactic, 
 }
 
 void retreat(model::CityState& state, int cohort) {
+    if (!valid_slot(state, cohort)) return;
     model::Actor& c = state.objects[static_cast<size_t>(cohort)];
     add_morale(c, -2);
     stop_here(c, true);
@@ -175,8 +181,8 @@ void lose(model::CityState& state, int cohort) {
         state.empire.cells[static_cast<size_t>(cell)] &= 0x7F;
     }
     const int home_x = sbyte(c.raw[kCohortHomeX]), home_y = sbyte(c.raw[kCohortHomeY]);
-    set_word(c, kX, w16(home_x << 4));
-    set_word(c, kY, w16(home_y << 4));
+    set_word(c, kX, w16(home_x * 16));
+    set_word(c, kY, w16(home_y * 16));
     c.raw[kDestX] = static_cast<uint8_t>(home_x);
     c.raw[kDestY] = static_cast<uint8_t>(home_y);
     c.raw[kPixelsLeft] = 0;
@@ -184,6 +190,7 @@ void lose(model::CityState& state, int cohort) {
 }
 
 void hand_over(model::CityState& state, int cohort, int army) {
+    if (!valid_slot(state, cohort) || !valid_slot(state, army)) return;
     const model::Actor& c = state.objects[static_cast<size_t>(cohort)];
     const model::Actor& a = state.objects[static_cast<size_t>(army)];
     set(state, kHandoverPending, 1);
@@ -250,8 +257,8 @@ void take_back(model::CityState& state) {
         state.empire.cells[static_cast<size_t>(cell)] &= 0x7F;
     }
     const int home_x = sbyte(c.raw[kCohortHomeX]), home_y = sbyte(c.raw[kCohortHomeY]);
-    set_word(c, kX, w16(home_x << 4));
-    set_word(c, kY, w16(home_y << 4));
+    set_word(c, kX, w16(home_x * 16));
+    set_word(c, kY, w16(home_y * 16));
     c.raw[kDestX] = static_cast<uint8_t>(home_x);
     c.raw[kDestY] = static_cast<uint8_t>(home_y);
     c.raw[kPixelsLeft] = 0;
