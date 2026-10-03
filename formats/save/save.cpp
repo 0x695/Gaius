@@ -2,6 +2,8 @@
 #include "formats/save/save.hpp"
 
 #include <cstdio>
+#include <filesystem>
+#include <system_error>
 
 namespace gaius::formats::save {
 
@@ -54,11 +56,19 @@ void write(const SaveFile& sf, const std::string& path) {
     if (sf.raw.size() != kSaveSize)
         throw FormatError("save: a save is exactly " + std::to_string(kSaveSize) + " bytes, not " +
                           std::to_string(sf.raw.size()));
-    std::FILE* f = std::fopen(path.c_str(), "wb");
+    // Written beside the target and renamed over it, so a crash, a full disk or a closed browser tab part-way
+    // through leaves the old file whole rather than a short one that will not load.
+    const std::string temp = path + ".tmp";
+    std::FILE* f = std::fopen(temp.c_str(), "wb");
     if (!f) throw FormatError("save: cannot write " + path);
     const size_t n = std::fwrite(sf.raw.data(), 1, sf.raw.size(), f);
     const bool closed = std::fclose(f) == 0;
-    if (n != kSaveSize || !closed) throw FormatError("save: short write to " + path);
+    std::error_code error;
+    if (n == kSaveSize && closed) std::filesystem::rename(temp, path, error);  // replaces an existing file
+    if (n != kSaveSize || !closed || error) {
+        std::filesystem::remove(temp, error);
+        throw FormatError("save: short write to " + path);
+    }
 }
 
 std::pair<const uint8_t*, size_t> SaveFile::block(const std::string& name) const {

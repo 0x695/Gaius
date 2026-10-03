@@ -31,6 +31,14 @@ enum class CursorStyle { Gaius = 0, Original = 1 };
 enum class GamePace { Original = 0, Fast = 1 };
 inline constexpr int kFrameMsOriginal = 66, kFrameMsFast = 19;
 
+// The file's layout version, written as config_version. Bump it when a key is renamed or changes meaning and add the
+// conversion to migrate_settings (settings.cpp); adding a key needs neither, since a missing key keeps its default.
+inline constexpr int kConfigVersion = 1;
+
+// How often the game saves by itself, in game years (0 is never): the "Autosave" row of the Settings screen. The saves
+// go to AUTOSAV1-3.SAV in turn (apps/viewer/save_slots.hpp), apart from the eight slots the player writes.
+inline constexpr int kAutosaveYears[] = {0, 1, 3, 5};
+
 struct Settings {
     WindowModeSetting window_mode = WindowModeSetting::Windowed;
     int ui_scale = 0;      // 0 automatic, 1-4 the toolbar and page scale
@@ -44,6 +52,14 @@ struct Settings {
     bool gamepad_cursor = true;  // a pointer moved by the left stick on screens without a map
     bool edge_scroll = true;     // the map scrolls when the mouse rests at the window's edge (arrow keys and WASD always do)
     bool touch_hints_seen = false;  // the touch controls page has been shown once
+    int autosave_years = 1;         // one of kAutosaveYears
+    bool pause_unfocused = true;    // time stops while the window or browser tab is not the one in front
+    // The config_version the file carried when it was read (0: a file from before versions, or none). Settings made
+    // by the program always have kConfigVersion.
+    int file_version = kConfigVersion;
+    // Keys this build doesn't know, from a newer Gaius's file: kept and written back, so going back to an older
+    // build and forward again does not lose them.
+    std::map<std::string, std::string> unknown;
     // Controls: a command's name (platform::command_name) to a key name
     // (SDL_GetKeyName) or a gamepad button name (SDL's), for the commands the
     // player has changed. Commands not listed keep their default.
@@ -54,6 +70,7 @@ struct Settings {
 inline constexpr int kFrameCaps[] = {0, 30, 60, 120, 144};
 
 bool load_settings(const std::string& path, Settings& out);
+// Written to a temporary file and renamed into place, so a crash part-way leaves the old file.
 bool save_settings(const std::string& path, const Settings& settings);
 
 // The text form, for the file and the tests.

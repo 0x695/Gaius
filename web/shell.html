@@ -50,8 +50,10 @@
       <p id="problem" class="problem" hidden></p>
       <p class="fine">
         Gaius ships none of the game's files. The ones you give it are kept in this browser's storage on your own
-        machine and are never uploaded. Saves are kept there too (use <em>Saves</em> to download them).
+        machine and are never uploaded. Saves are kept there too, the game's own autosaves and the F5 / F9 quick save
+        included (use <em>Saves</em> to download a backup).
       </p>
+      <p id="safety" class="fine safety" hidden></p>
       <p class="fine about">
         Gaius <span id="version"></span> &middot; free software (GPL-3.0-or-later) &middot;
         <a href="https://github.com/0x695/Gaius" target="_blank" rel="noopener">source</a> &middot;
@@ -66,7 +68,7 @@
   </main>
 
   <div id="menu" hidden></div>
-  <input id="in-saves" type="file" accept=".sav,.SAV" multiple hidden>
+  <input id="in-saves" type="file" accept=".sav,.SAV,.zip" multiple hidden>
 
   <script src="gaius-version.js"></script>
   <script src="gaius-web.js"></script>

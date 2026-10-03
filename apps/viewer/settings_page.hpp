@@ -3,8 +3,9 @@
 //
 // The Settings screen (Phase 9). It takes the place of the original's Options
 // screen (findings section 42) and holds everything the player can set:
-//   Game    the original's game and scroll speeds and messages option, and its
-//           menu: resume, pause, load, save, restart, exit
+//   Game    the original's game and scroll speeds and messages option, Gaius's
+//           autosave and pause-when-away, and the original's menu: resume,
+//           pause, load, save, restart, exit
 //   Sound   the original's tunes, effects and city sounds switches, and
 //           Gaius's music and effects volumes
 //   Video   the window, the UI scale, the frame rate, and the original's
@@ -46,6 +47,7 @@ enum class SettingRow {
     Tunes, Effects, CitySounds, MusicVolume, EffectsVolume,
     WindowMode, UiScale, FrameRate, PositionIndicator, IconNames,
     GamepadPointer, EdgeScroll, Cursor, Language,
+    Autosave, PauseUnfocused,
     Binding,  // + the index into platform::kBindable
 };
 
@@ -89,6 +91,13 @@ inline const char* window_mode_name(ui::WindowModeSetting m) {
     return "Windowed";
 }
 
+// "Off", "Each year", "Every 3 years"...
+inline std::string autosave_name(int years) {
+    if (years <= 0) return ui::tr("Off");
+    if (years == 1) return ui::tr("Each year");
+    return std::string(ui::tr("Every")) + " " + std::to_string(years) + " " + ui::tr("years");
+}
+
 inline const char* binding_label(platform::CommandType t) {
     using C = platform::CommandType;
     switch (t) {
@@ -101,6 +110,8 @@ inline const char* binding_label(platform::CommandType t) {
         case C::ToggleWindowMode: return "Window mode";
         case C::Select: return "Select";
         case C::Secondary: return "Back";
+        case C::QuickSave: return "Quick save";
+        case C::QuickLoad: return "Quick load";
         default: return "?";
     }
 }
@@ -132,6 +143,10 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.rows.push_back(row(ui::tr("Messages"), on_off(v.messages_on), row_id(SettingRow::Messages)));
             page.rows.push_back(row(ui::tr("Game pace"), ui::tr(s.pace == ui::GamePace::Fast ? "Fast" : "Original"),
                                     row_id(SettingRow::Pace)));
+            page.rows.push_back(
+                row(ui::tr("Autosave"), settings_detail::autosave_name(s.autosave_years), row_id(SettingRow::Autosave)));
+            page.rows.push_back(row(ui::tr("Pause when away"), on_off(s.pause_unfocused),
+                                    row_id(SettingRow::PauseUnfocused)));
             page.buttons.push_back({ui::tr("Resume"), kActionResume, v.in_game});
             page.buttons.push_back({ui::tr("Pause"), kActionPause, v.in_game});
             page.buttons.push_back({ui::tr("Load"), kActionSettingsLoad, v.game_found});
@@ -278,6 +293,15 @@ inline bool adjust_setting(int action, ui::Settings& s, ui::GameOptions& o, bool
             s.language = languages[static_cast<size_t>((i + delta + n) % n)].code;
             break;
         }
+        case SettingRow::Autosave: {
+            const int n = static_cast<int>(std::size(ui::kAutosaveYears));
+            int i = static_cast<int>(std::find(std::begin(ui::kAutosaveYears), std::end(ui::kAutosaveYears),
+                                               s.autosave_years) - std::begin(ui::kAutosaveYears));
+            if (i >= n) i = 1;
+            s.autosave_years = ui::kAutosaveYears[(i + delta + n) % n];
+            break;
+        }
+        case SettingRow::PauseUnfocused: s.pause_unfocused = !s.pause_unfocused; break;
         case SettingRow::Binding: break;
     }
     return true;

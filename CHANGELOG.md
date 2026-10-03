@@ -21,6 +21,13 @@ The first public beta: Gaius plays a whole career of Caesar, from the start scre
 - The screens are drawn from the game's own files as the original draws them: the city view, the control bar, the message box, the Forum, the maps screen and the battle screen (several checked pixel for pixel against captures), and the original opening.
 - Music and effects play through a transcription of the original's own sound driver on an emulated YM3812.
 
+### Safety nets
+- The game saves itself: at each year's end (or every 3 or 5 years, or never: Settings > Game > Autosave) and whenever a promotion is offered, into three rotating autosaves apart from your eight slots.
+- F5 quick saves and F9 quick loads (rebindable). The Load page's *Autosaves* button lists the quicksave, the autosaves and the *Away* save, newest first.
+- Time stops while the window or browser tab is not in front, and runs again when you return (Settings > Game > Pause when away). If the city has changed since it was last saved, leaving the window or closing the game saves it as the *Away* save, so building done while the clock was stopped is not lost.
+- Saves and settings are written whole: a crash or a closed tab part-way through leaves the old file, not a broken one.
+- In the browser: the page asks the browser to keep your saves, says so when it will not (Safari clears a site's data after about a week away), reminds you to download a backup, and takes that backup's zip back through *Saves > Add*.
+
 ### Comforts
 - Any window size, fullscreen, UI scale 1 to 4, edge, key and drag scrolling, remappable keys and buttons, gamepad play (Steam Deck), touch gestures (Android and phones in the browser), a German translation of Gaius's own texts.
 - Your choice of Gaius's gold pointer or the original's arrow, and of the original's game pace or a faster one.

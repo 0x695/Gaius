@@ -90,6 +90,10 @@ button.big { font-size: 22px; padding: 14px 54px; letter-spacing: 0.08em; }
 .small { font-size: 13px; color: var(--muted); }
 .fine { font-size: 12px; color: var(--muted); margin-top: 18px !important; }
 .about { margin-top: 6px !important; }
+#card .safety { color: var(--gold-light); border-top: 1px solid var(--line); padding-top: 10px; }
+#card .safety[hidden] { display: none; }
+/* a backup is due: a gold dot on the Saves button, which stays in the bar while playing */
+#btn-saves.attention::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 8px; border-radius: 50%; background: var(--gold-light); vertical-align: 1px; }
 .fine a { color: var(--gold); }
 .hint { max-width: 46ch; margin-left: auto !important; margin-right: auto !important; }
 .buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }

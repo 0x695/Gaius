@@ -111,6 +111,8 @@ const char* command_name(CommandType type) {
         case CommandType::ToggleWindowMode: return "toggle_window_mode";
         case CommandType::Select: return "select";
         case CommandType::Secondary: return "secondary";
+        case CommandType::QuickSave: return "quick_save";
+        case CommandType::QuickLoad: return "quick_load";
         default: return "";
     }
 }
@@ -133,6 +135,8 @@ void reset_bindings() {
     b[CommandType::CycleScreen] = {SDLK_m, SDL_CONTROLLER_BUTTON_BACK};
     b[CommandType::Select] = {-1, SDL_CONTROLLER_BUTTON_A};
     b[CommandType::Secondary] = {-1, SDL_CONTROLLER_BUTTON_B};
+    b[CommandType::QuickSave] = {SDLK_F5, -1};
+    b[CommandType::QuickLoad] = {SDLK_F9, -1};
 }
 
 void bind_key(CommandType type, int keycode) {
@@ -296,7 +300,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
                 }
             }
             if (sym == SDLK_AC_BACK) return Command{CommandType::Menu};  // Android's Back
-            if (sym == SDLK_F9) return Command{CommandType::CycleLayer};
+            if (sym == SDLK_F8) return Command{CommandType::CycleLayer};
             if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) {
                 // The manual: the Enter key acts as the right button.
                 Command c{CommandType::Secondary};

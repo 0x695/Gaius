@@ -38,3 +38,16 @@ expects:
 The touchscreen and trackpads work as a mouse too. Every button except the
 sticks can be changed in Settings > Keys; the pointer can be switched off
 there, which gives the left stick to scrolling.
+
+Quick save and quick load (F5 and F9 on a keyboard) have no button by default,
+since each pad has its own spare ones. Bind them in Settings > Keys, for
+example to the back grips (L4 / R4) or the stick clicks (L3 / R3), or give the
+grips the keyboard keys F5 and F9 in Steam Input.
+
+## Saves
+
+Besides the eight slots, the game saves itself at the end of each year (three
+files in turn; Settings > Game > Autosave changes how often or turns it off)
+and keeps the last city you left. Load > *Autosaves* lists them. When Gaius is
+not the window in front (another game, the Steam menu's task switcher) time
+stops and runs again when you come back (Settings > Game > Pause when away).

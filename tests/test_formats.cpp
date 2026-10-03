@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "apps/viewer/save_slots.hpp"
 #include "apps/viewer/save_view.hpp"
 #include "audio/ail_xmidi.hpp"
 #include "audio/game_audio.hpp"
@@ -3100,6 +3102,139 @@ void test_settings_page_rows() {
     int capture = -1;
     CHECK(!viewer::adjust_setting(up(SettingRow::Binding, 2), s, o, messages, langs, &capture) && capture == 5);
     CHECK(!viewer::adjust_setting(123, s, o, messages, langs));
+}
+
+void test_safety_net_settings() {
+    std::printf("test_safety_net_settings (config_version, kept unknown keys, Autosave and Pause when away)\n");
+    using namespace gaius::ui;
+    namespace viewer = gaius::viewer;
+    const Settings defaults;
+    CHECK(defaults.autosave_years == 1 && defaults.pause_unfocused && defaults.file_version == kConfigVersion);
+    // The file says which layout it has, and reads back as current.
+    const std::string text = settings_text(defaults);
+    CHECK(text.find("config_version = " + std::to_string(kConfigVersion)) != std::string::npos);
+    CHECK(parse_settings(text).file_version == kConfigVersion);
+    // A file from before versions (none written) says 0 and still loads.
+    const Settings old = parse_settings("ui_scale = 2\nlanguage = de\n");
+    CHECK(old.file_version == 0 && old.ui_scale == 2 && old.language == "de" && old.autosave_years == 1 &&
+          old.pause_unfocused);
+    // The two new settings round trip; a value that is not one of the choices keeps the default.
+    Settings s;
+    s.autosave_years = 5;
+    s.pause_unfocused = false;
+    const Settings r = parse_settings(settings_text(s));
+    CHECK(r.autosave_years == 5 && !r.pause_unfocused);
+    CHECK(parse_settings("autosave_years = 2\n").autosave_years == defaults.autosave_years);
+    // A newer Gaius's keys are kept and written back; a known key with a bad value is not "unknown".
+    const Settings newer = parse_settings("config_version = 7\nfuture_option = on\nui_scale = 3\nui_scale = 9\n");
+    CHECK(newer.file_version == 7 && newer.ui_scale == 3 && newer.unknown.size() == 1 &&
+          newer.unknown.at("future_option") == "on");
+    CHECK(settings_text(newer).find("future_option = on") != std::string::npos);
+    CHECK(parse_settings("ui_scale = 9\nkey.cycle_tool = Q\n").unknown.empty());
+    // Written through a temporary file that is gone afterwards.
+    const fs::path tmp = fs::temp_directory_path() / "gaius_test_settings_atomic.cfg";
+    CHECK(save_settings(tmp.string(), s) && save_settings(tmp.string(), newer));
+    Settings loaded;
+    CHECK(load_settings(tmp.string(), loaded) && loaded.ui_scale == 3 && loaded.unknown.count("future_option") == 1);
+    CHECK(!fs::exists(tmp.string() + ".tmp"));
+    std::error_code ec;
+    fs::remove(tmp, ec);
+    // The Settings screen's Autosave row steps through off / each year / every 3 / every 5 years, wrapping.
+    GameOptions o = default_options();
+    bool messages = true;
+    Settings t;
+    const int down = viewer::kActionSettingDown + 2 * viewer::row_id(viewer::SettingRow::Autosave);
+    const int up = down + 1;
+    CHECK(t.autosave_years == 1);
+    viewer::adjust_setting(up, t, o, messages, {});
+    CHECK(t.autosave_years == 3);
+    viewer::adjust_setting(up, t, o, messages, {});
+    CHECK(t.autosave_years == 5);
+    viewer::adjust_setting(up, t, o, messages, {});
+    CHECK(t.autosave_years == 0);  // wraps to off
+    viewer::adjust_setting(down, t, o, messages, {});
+    CHECK(t.autosave_years == 5);
+    viewer::adjust_setting(viewer::kActionSettingDown + 2 * viewer::row_id(viewer::SettingRow::PauseUnfocused), t, o,
+                           messages, {});
+    CHECK(!t.pause_unfocused);
+}
+
+void test_save_slots() {
+    std::printf("test_save_slots (quick and automatic saves: names, rotation, newest first; saves written whole)\n");
+    namespace viewer = gaius::viewer;
+    namespace fmt_save = gaius::formats::save;
+    CHECK(viewer::slot_file_name(0) == "CAESAR01.SAV" && viewer::slot_file_name(7) == "CAESAR08.SAV");
+    CHECK(viewer::quicksave_file_name() == "QUICKSAV.SAV" && viewer::autosave_file_name(0) == "AUTOSAV1.SAV" &&
+          viewer::autosave_file_name(2) == "AUTOSAV3.SAV");
+
+    const fs::path dir = fs::temp_directory_path() / "gaius_test_save_slots";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir);
+    CHECK(viewer::recoverable_saves(dir).empty() && viewer::next_autosave(dir) == 0);
+    const auto touch = [&](const std::string& name, int minutes_ago) {
+        std::ofstream(dir / name, std::ios::binary) << "x";
+        fs::last_write_time(dir / name, fs::file_time_type::clock::now() - std::chrono::minutes(minutes_ago));
+    };
+    touch(viewer::autosave_file_name(0), 30);
+    touch(viewer::autosave_file_name(1), 10);
+    CHECK(viewer::next_autosave(dir) == 2);  // a missing one first
+    touch(viewer::autosave_file_name(2), 20);
+    CHECK(viewer::next_autosave(dir) == 0);  // then the one written longest ago
+    touch(viewer::quicksave_file_name(), 5);
+    touch(viewer::slot_file_name(3), 1);  // a player's slot is not listed
+    using viewer::SaveKind;
+    auto list = viewer::recoverable_saves(dir);
+    CHECK(list.size() == 4 && list[0].kind == SaveKind::Quick && list[1].kind == SaveKind::Auto &&
+          list[1].index == 1 && list[2].index == 2 && list[3].index == 0);
+    touch(viewer::autosave_file_name(0), 0);  // written now: the next to go is the one from 20 minutes ago
+    CHECK(viewer::next_autosave(dir) == 2);
+    touch(viewer::away_save_file_name(), 2);  // the away save is listed, in its place by time, and is not an autosave slot
+    list = viewer::recoverable_saves(dir);
+    CHECK(list.size() == 5 && list[0].index == 0 && list[0].kind == SaveKind::Auto && list[1].kind == SaveKind::Away &&
+          list[2].kind == SaveKind::Quick && list[3].index == 1 && list[4].index == 2);
+    CHECK(viewer::next_autosave(dir) == 2);
+    // The fingerprint tells a changed city from an unchanged one, and is never 0 (which means "never saved").
+    const std::vector<uint8_t> bytes_a(57126, 0x11);
+    std::vector<uint8_t> bytes_b = bytes_a;
+    bytes_b[40000] ^= 1;
+    CHECK(viewer::save_fingerprint(bytes_a) == viewer::save_fingerprint(std::vector<uint8_t>(57126, 0x11)) &&
+          viewer::save_fingerprint(bytes_a) != viewer::save_fingerprint(bytes_b) &&
+          viewer::save_fingerprint(bytes_a) != 0 && viewer::save_fingerprint({}) != 0);
+
+    // The year counter: each turn counts down; due when it reaches 0, and the interval starts again.
+    int countdown = 3;
+    CHECK(!viewer::autosave_due(countdown, 3) && !viewer::autosave_due(countdown, 3) &&
+          viewer::autosave_due(countdown, 3) && countdown == 3);
+    countdown = 1;
+    CHECK(viewer::autosave_due(countdown, 1) && viewer::autosave_due(countdown, 1));  // each year
+    countdown = 5;
+    CHECK(viewer::autosave_due(countdown, 1) && countdown == 1);  // the setting was shortened: no waiting out the old one
+    countdown = 1;
+    CHECK(!viewer::autosave_due(countdown, 0));  // off
+
+    // The Load page's "Autosaves" page has its own title and keeps the buttons it is given.
+    CHECK(viewer::files_page(false, {{"Back", viewer::kActionBack}}, true).title == "Autosaves");
+    CHECK(viewer::files_page(false, {}).title == "Load a game");
+
+    // A save is written whole: the temporary is renamed over the old file and does not outlive the write, and a write
+    // that cannot start leaves the old file as it was.
+    fmt_save::SaveFile a, b;
+    a.raw.assign(fmt_save::kSaveSize, 0x11);
+    b.raw.assign(fmt_save::kSaveSize, 0x22);
+    const std::string path = (dir / "CAESAR01.SAV").string();
+    fmt_save::write(a, path);
+    fmt_save::write(b, path);
+    CHECK(fmt_save::load(path).raw == b.raw && !fs::exists(path + ".tmp"));
+    fs::create_directories(path + ".tmp");  // the temporary's name is taken by a folder: the write cannot start
+    bool threw = false;
+    try {
+        fmt_save::write(a, path);
+    } catch (const gaius::formats::FormatError&) {
+        threw = true;
+    }
+    CHECK(threw && fmt_save::load(path).raw == b.raw);
+    fs::remove_all(dir, ec);
 }
 
 void test_gtl_library() {
@@ -7245,6 +7380,8 @@ int main() {
     test_ui_settings_file();
     test_ui_strings();
     test_settings_page_rows();
+    test_safety_net_settings();
+    test_save_slots();
     test_gtl_library();
     test_ail_driver_registers();
     test_ail_sequencer();

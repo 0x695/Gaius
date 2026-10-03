@@ -73,8 +73,11 @@ enum class CommandType {
     Rebound,      // a key or button was captured for a binding (capture_binding): the
                   // command it was bound to is in `rebound`.
     CycleLayer,   // the viewer's developer view of the city: the picture, then each data
-                  // layer. F9, not rebindable; it used to be the right button's meaning,
-                  // which is the original's mode switch now.
+                  // layer. F8, not rebindable; it used to be the right button's meaning,
+                  // which is the original's mode switch now (and F9, until quick load took it).
+    QuickSave,    // write the quicksave slot at once: F5. Keyboard enrichment: the Forum's
+                  // save page does the same with a pointer, so no device depends on it.
+    QuickLoad,    // read the quicksave slot back: F9.
 };
 
 // What a TextKey command carries.
@@ -113,16 +116,18 @@ struct Command {
 //
 // Defaults -- keyboard: Menu Escape, ToggleWindowMode F11, CycleTool Tab,
 // PreviousTool Shift+Tab (not rebindable: Shift with the CycleTool key),
-// CycleVariant V, ToggleTime Space, CycleScreen M. Gamepad: Select A,
-// Secondary B, CycleTool X, ToggleTime Y, PreviousTool left shoulder,
-// CycleVariant right shoulder, CycleScreen Back, Menu Start. The left stick
-// moves the gamepad pointer, the right stick and the d-pad pan the map, the
-// triggers zoom.
+// CycleVariant V, ToggleTime Space, CycleScreen M, QuickSave F5, QuickLoad F9.
+// Gamepad: Select A, Secondary B, CycleTool X, ToggleTime Y, PreviousTool left
+// shoulder, CycleVariant right shoulder, CycleScreen Back, Menu Start (the quick
+// slots have no button: every pad has its own spare ones, so the player picks).
+// The left stick moves the gamepad pointer, the right stick and the d-pad pan
+// the map, the triggers zoom.
 inline constexpr CommandType kBindable[] = {CommandType::Menu,        CommandType::CycleTool,
                                             CommandType::PreviousTool, CommandType::CycleVariant,
                                             CommandType::ToggleTime,  CommandType::CycleScreen,
                                             CommandType::ToggleWindowMode, CommandType::Select,
-                                            CommandType::Secondary};
+                                            CommandType::Secondary,   CommandType::QuickSave,
+                                            CommandType::QuickLoad};
 
 // A stable name for a command ("cycle_tool"), for the settings file.
 const char* command_name(CommandType type);

@@ -6,7 +6,8 @@
 //   * imports the player's own copy of Caesar -- a dropped or chosen folder, or a zip of one -- into /persist/game,
 //     validating that it is Caesar's (HOUSES.PL8 and EMPIRE2.001 beside each other),
 //   * starts the game with the Play click (browsers only let a page make sound after a click),
-//   * and offers the saves back as a download, and takes saves from the original or from other copies of Gaius.
+//   * and offers the saves back as a download (a backup, which it nudges the player to make), takes saves from the
+//     original, from other copies of Gaius or from that backup, and asks the browser to keep them.
 // Nothing is uploaded anywhere and no game file is part of the build.
 'use strict';
 
@@ -56,6 +57,7 @@ var Module = (function () {
       flushing = true;
       await persist();
       flushing = false;
+      showSafety();  // a first save may have made a backup due
     }, 200);
   }
 
@@ -110,6 +112,7 @@ var Module = (function () {
       $('drop').hidden = false;
       $('ready').hidden = true;
     }
+    showSafety();
   }
 
   // ---- importing the player's files ------------------------------------------------------------------------------
@@ -305,36 +308,102 @@ var Module = (function () {
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
 
+  function saveNames() { return listDir(SAVES).filter((n) => /\.sav$/i.test(n)); }
+
   function downloadSaves() {
-    const files = listDir(SAVES).filter((n) => /\.sav$/i.test(n))
-      .map((n) => ({ name: n, data: Module.FS.readFile(SAVES + '/' + n) }));
+    const files = saveNames().map((n) => ({ name: n, data: Module.FS.readFile(SAVES + '/' + n) }));
     if (!files.length) { alert('There are no saves yet. Save a game from the Forum first.'); return; }
     download(makeZip(files), 'gaius-saves.zip');
+    noteBackup();
+    showSafety();
   }
 
+  // Slots the game writes itself, besides the eight the player fills: the quicksave, the three autosaves and the one
+  // written when the player leaves the game with unsaved changes.
+  const OWN_NAME = /^(CAESAR0[1-8]|AUTOSAV[1-3]|QUICKSAV|AWAY)\.SAV$/;
+
+  // Takes saves from loose .SAV files and from a zip of them (the backup this page offers). A save with one of
+  // Gaius's own names goes back where it was; any other (the original's CAESARxx.SAV, say) takes a free slot.
   async function addSaves(fileList) {
     const FS = Module.FS;
-    const taken = new Set(listDir(SAVES).map((n) => n.toUpperCase()));
-    const added = [], skipped = [];
+    const items = [], added = [], skipped = [];
     for (const f of fileList) {
-      const data = new Uint8Array(await f.arrayBuffer());
-      if (data.length !== SAVE_SIZE) { skipped.push(f.name); continue; }
-      let name = f.name.toUpperCase();
-      if (!/^CAESAR0[1-8]\.SAV$/.test(name)) {
+      try {
+        if (/\.zip$/i.test(f.name)) {
+          for (const e of await zipEntries(f)) {
+            const base = e.path.split(/[\\/]/).pop();
+            if (/\.sav$/i.test(base)) items.push({ name: base, data: await e.read() });
+          }
+        } else {
+          items.push({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) });
+        }
+      } catch (e) { skipped.push(f.name + ' (' + (e && e.message ? e.message : e) + ')'); }
+    }
+    const taken = new Set(listDir(SAVES).map((n) => n.toUpperCase()));
+    const clashes = items.filter((it) => it.data.length === SAVE_SIZE && OWN_NAME.test(it.name.toUpperCase()) &&
+      taken.has(it.name.toUpperCase()));
+    if (clashes.length && !confirm('Replace ' + clashes.length + ' save' + (clashes.length > 1 ? 's' : '') +
+        ' already in this browser with the ones you chose?')) return;
+    for (const it of items) {
+      if (it.data.length !== SAVE_SIZE) { skipped.push(it.name); continue; }
+      let name = it.name.toUpperCase();
+      if (!OWN_NAME.test(name)) {
         name = null;
         for (let i = 1; i <= 8 && !name; i++) {
           const slot = 'CAESAR0' + i + '.SAV';
           if (!taken.has(slot)) name = slot;
         }
       }
-      if (!name) { skipped.push(f.name + ' (all eight slots are full)'); continue; }
-      FS.writeFile(SAVES + '/' + name, data);
+      if (!name) { skipped.push(it.name + ' (all eight slots are full)'); continue; }
+      FS.writeFile(SAVES + '/' + name, it.data);
       taken.add(name);
-      added.push(f.name + ' as ' + name);
+      added.push(it.name === name ? name : it.name + ' as ' + name);
     }
     await persist();
-    alert((added.length ? 'Added: ' + added.join(', ') + '.\nLoad them from the Forum.' : 'Nothing added.') +
+    showSafety();
+    alert((added.length ? 'Added: ' + added.join(', ') + '.\nLoad them from the Forum (the quicksave and autosaves are under Load > Autosaves).' : 'Nothing added.') +
       (skipped.length ? '\nSkipped (not a Caesar save): ' + skipped.join(', ') + '.' : ''));
+  }
+
+  // ---- keeping the saves safe -------------------------------------------------------------------------------------
+  //
+  // The saves live in this browser's storage, which a browser may clear when it is short of space, and Safari clears
+  // after about a week without a visit. So: ask the browser to keep them (navigator.storage.persist, which Chrome
+  // grants to sites it sees used, and Firefox asks the player about), say so when it will not, and remind the player
+  // to download a backup now and then.
+
+  const BACKUP_DAYS = 14;
+  let storageKept = null;  // true: the browser promised to keep this site's data; false: it may not; null: not known
+
+  async function checkStorage(ask) {
+    if (!navigator.storage || !navigator.storage.persisted) return;
+    try {
+      storageKept = await navigator.storage.persisted();
+      if (!storageKept && ask && navigator.storage.persist) storageKept = await navigator.storage.persist();
+    } catch (e) { /* stays unknown */ }
+    showSafety();
+  }
+
+  function lastBackup() {
+    try { return Number(localStorage.getItem('gaius.lastBackup')) || 0; } catch (e) { return 0; }
+  }
+  function noteBackup() {
+    try { localStorage.setItem('gaius.lastBackup', String(Date.now())); } catch (e) { /* private window */ }
+  }
+  // Saves exist and none has been downloaded for a while (a first backup is due once there is something to lose).
+  function backupDue() {
+    return saveNames().length > 0 && Date.now() - lastBackup() > BACKUP_DAYS * 86400000;
+  }
+
+  function showSafety() {
+    const lines = [];
+    if (storageKept === false)
+      lines.push('This browser may clear stored data when it runs short of space (Safari does after about a week without a visit).');
+    if (backupDue())
+      lines.push('Your saves have no recent backup: Saves › Download my saves keeps a copy outside the browser.');
+    const p = $('safety');
+    if (p) { p.hidden = !lines.length; p.textContent = lines.join(' '); }
+    $('btn-saves').classList.toggle('attention', backupDue());
   }
 
   // ---- the small menus in the bar ---------------------------------------------------------------------------------
@@ -366,7 +435,8 @@ var Module = (function () {
       openMenu(ev.currentTarget, [
         { label: 'Download my saves (.zip)', run: downloadSaves },
         { label: 'Add saves from files…', run: () => $('in-saves').click() },
-      ], 'Saves are original-format .SAV files. Gaius loads slots CAESAR01 to CAESAR08.');
+      ], (backupDue() ? 'Your saves have no recent backup. ' : '') +
+        'Saves are original-format .SAV files (slots CAESAR01 to 08, QUICKSAV, AWAY and the AUTOSAV files). Add accepts .SAV files or the zip you downloaded.');
     });
     $('btn-data').addEventListener('click', function (ev) {
       ev.stopPropagation();
@@ -393,6 +463,8 @@ var Module = (function () {
     });
     // The right button is the game's (it switches between placing and the toolbar): no browser menu over the canvas.
     $('canvas').addEventListener('contextmenu', (ev) => ev.preventDefault());
+    // F5 is the game's quick save: while playing it must not reload the page (the game gets the key as well).
+    document.addEventListener('keydown', function (ev) { if (playing && ev.key === 'F5') ev.preventDefault(); }, true);
     document.addEventListener('click', closeMenu);
     document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeMenu(); });
     $('in-saves').addEventListener('change', function (ev) { addSaves([...ev.target.files]); ev.target.value = ''; });
@@ -442,6 +514,7 @@ var Module = (function () {
     $('btn-fullscreen').hidden = false;
     $('screen').hidden = false;
     $('canvas').focus();
+    checkStorage(true);  // the Play click is the gesture a browser wants before it will protect the saves
     const extra = (params.get('args') || '').split(/\s+/).filter(Boolean);  // e.g. ?args=--mute%20--no-intro
     try {
       Module.callMain([GAME].concat(extra));
@@ -462,6 +535,7 @@ var Module = (function () {
     $('play').textContent = 'Play again';
     $('play').onclick = () => location.reload();
     card('Gaius has closed', 'Your saves are kept in this browser.');
+    showSafety();
   }
 
   function fail(e) {
@@ -495,6 +569,7 @@ var Module = (function () {
     runtimeUp = true;
     if (window.GAIUS_VERSION) $('version').textContent = window.GAIUS_VERSION;
     wireUi();
+    checkStorage(false);
     const url = params.get('data');
     if (url) {
       const ok = await runImport(() => fromUrl(url));

@@ -102,6 +102,8 @@ inline constexpr int kActionFundingDown = 700, kActionFundingUp = 701, kActionDi
                      kActionDifficultyUp = 703, kActionBegin = 704, kActionChooseName = 705;
 inline constexpr int kActionSlot = 710;  // + slot
 inline constexpr int kActionBack = 720;
+inline constexpr int kActionRecover = 721;      // the Load page's "Autosaves" button
+inline constexpr int kActionRecoverSlot = 730;  // + the entry of the recoverable list (quicksave, autosaves; at most 4)
 inline constexpr int kActionChoice = 740;  // + the option, 0-7 (the Forum type and Industry type menus)
 inline constexpr int kSaveSlots = 8;
 inline constexpr int kActionHint = 800;  // + ratings column (Peace, Culture, Prosperity, Empire)
@@ -374,11 +376,18 @@ inline ui::Page start_page(int funding_level, int difficulty, const std::string&
 }
 
 // The save and load slots: one button per slot (the caller labels them and
-// disables empty ones when loading), and Back.
-inline ui::Page files_page(bool saving, const std::vector<ui::PanelButton>& slots) {
+// disables empty ones when loading), and Back. `recover` is the page behind
+// the Load page's "Autosaves" button: the quicksave and the automatic saves,
+// newest first.
+inline ui::Page files_page(bool saving, const std::vector<ui::PanelButton>& slots, bool recover = false) {
     ui::Page page;
-    page.title = saving ? ui::tr("Save the game") : ui::tr("Load a game");
-    page.rows.push_back({saving ? ui::tr("Choose a slot to write") : ui::tr("Choose a saved game"), ""});
+    if (recover) {
+        page.title = ui::tr("Autosaves");
+        page.rows.push_back({ui::tr("The game's own saves, newest first"), ""});
+    } else {
+        page.title = saving ? ui::tr("Save the game") : ui::tr("Load a game");
+        page.rows.push_back({saving ? ui::tr("Choose a slot to write") : ui::tr("Choose a saved game"), ""});
+    }
     page.buttons = slots;
     return page;
 }

@@ -15,7 +15,8 @@
 //   right button / Enter / two-finger tap / gamepad B                  -> the original's right button: toggles scroll
 //     mode (a command chosen, the map builds) and command mode (the toolbar answers); leaves the Maps panel, the save
 //     page and the funds warning; during a drag-built command it cancels the drag and refunds it
-//   F9                                                                 -> cycle the developer data layers
+//   F5 / F9                                                            -> quick save / quick load (QUICKSAV.SAV)
+//   F8                                                                 -> cycle the developer data layers
 //   Tab / gamepad X (left shoulder: previous)                          -> cycle build tool
 //   V / gamepad right shoulder / tap the selected button               -> next Forum grade or Workshop goods
 //   Space / gamepad Y                                                  -> pause / resume time
@@ -30,6 +31,11 @@
 // auto-tiling recovered from the executable; a mouse left-drag lays roads and walls cell by cell. Time runs through
 // systems::month at the original's pace (Settings > Game pace; a month takes about 7 s, or 2 s on "Fast"), walkers,
 // fire and all, and the city view animates on the engine's frame counters. See systems/construction.hpp.
+//
+// Safety nets (apps/viewer/save_slots.hpp): the game saves itself at each year's end, or every few years, and when a
+// promotion is offered, into AUTOSAV1-3.SAV in turn (Settings > Game > Autosave); F5 / F9 write and read QUICKSAV.SAV;
+// time stops while the window or tab is not in front (Settings > Game > Pause when away). The Load page's Autosaves
+// button reaches the quick and automatic saves; the eight slots are only ever written by the player.
 //
 // Usage:
 //   gaius_viewer --version
@@ -59,6 +65,7 @@
 #include "apps/viewer/cursor.hpp"
 #include "gaius_version.hpp"
 #include "apps/viewer/original_intro_run.hpp"
+#include "apps/viewer/save_slots.hpp"
 #include "apps/viewer/save_view.hpp"
 #include "audio/game_audio.hpp"
 #include "apps/viewer/screens.hpp"
@@ -723,6 +730,19 @@ int main(int argc, char** argv) {
     if (start_speed >= 0) game_options.set(ui::kOptSpeed, std::clamp(start_speed / 10 * 10, 0, 100));
     sim.speed = std::clamp(game_options.speed() / 10 * 10, 0, 100);
     bool time_running = save_mode && !start_paused;
+    // The safety nets (settings: Autosave, Pause when away). A year turning, or a promotion being offered, asks for an
+    // autosave; the main loop writes it once the step is over, so the state is whole.
+    bool autosave_pending = false;
+    int autosave_countdown = settings.autosave_years;  // game years until the next one (viewer::autosave_due)
+    bool focus_paused = false;                         // time stopped because the window lost the focus
+    // The city's viewer::save_fingerprint when last saved or loaded; 0 for a new career, which is on no file yet.
+    uint64_t saved_fingerprint = (save_mode && !new_career) ? viewer::save_fingerprint(save.raw) : 0;
+    std::string toast_text;                            // a line of feedback ("Quicksaved") shown a moment
+    Uint32 toast_until = 0;
+    const auto show_toast = [&](const std::string& text) {
+        toast_text = text;
+        toast_until = SDL_GetTicks() + 1800;
+    };
     // One frame every 66 ms ("Original" pace, measured on the GOG release: a game year in about 85 s at the top speed,
     // so a month of 106 steps in about 7 s) or every 19 ms ("Fast": a month in about 2 s); the walkers move a pixel
     // each step. The Settings screen's Game pace row chooses.
@@ -733,6 +753,7 @@ int main(int argc, char** argv) {
         std::printf("month %d, year %d: population %d, funds %d Dn\n", sim.month + 1, sim.year,
                     4 * sim.population_units, model::global_word(state, systems::economy::kFunds));
         if (sim.month == 0) {
+            if (viewer::autosave_due(autosave_countdown, settings.autosave_years)) autosave_pending = true;
             // The year just settled (systems::economy::run_year): the Treasurer's report.
             auto g = [&](uint16_t ds) { return model::global_word(state, ds); };
             std::printf("  last year: population tax %d, industrial tax %d, construction %d, operating costs %d, "
@@ -961,6 +982,9 @@ int main(int argc, char** argv) {
             promotion_to_caesar = to_caesar;
             screen = Screen::Promotion;
             time_running = false;
+            // The answer cannot be taken back (a new province, or Caesar), so the city as it stands is saved, whatever
+            // the autosave interval: loading it offers the promotion again at the next year's end.
+            if (settings.autosave_years > 0) autosave_pending = true;
             return 0;
         };
         // A Cohort reaches the army it attacks: the battle screen, with time stopped.
@@ -1021,7 +1045,7 @@ int main(int argc, char** argv) {
 
     // The save slots: CAESAR01.SAV-CAESAR08.SAV in --save-dir, or the per-user
     // data folder. The files are the original's format (formats::save::write).
-    auto slot_path = [&](int slot) {
+    const auto saves_dir = [&]() {
         std::string dir = save_dir_option;
         if (dir.empty()) {
             try {
@@ -1032,29 +1056,54 @@ int main(int argc, char** argv) {
         }
         std::error_code mkdir_error;
         fs::create_directories(dir, mkdir_error);
-        char name[16];
-        std::snprintf(name, sizeof name, "CAESAR%02d.SAV", slot + 1);
-        return (fs::path(dir) / name).string();
+        return fs::path(dir);
     };
+    auto slot_path = [&](int slot) { return (saves_dir() / viewer::slot_file_name(slot)).string(); };
+    // "Gallia, 12 AD" for a save that loads, empty when it does not.
+    const auto describe_save = [&](const std::string& path) -> std::string {
+        try {
+            const auto saved = std::make_unique<model::CityState>(model::load(formats::save::load(path)));
+            return std::string(viewer::province_name(model::global_word(*saved, 0x6CA6))) + ", " +
+                   viewer::year_text(model::global_word(*saved, 0x6C32));
+        } catch (const std::exception&) {
+            return std::string();
+        }
+    };
+    std::vector<viewer::RecoverableSave> recoverable;  // what the Autosaves page lists, newest first
+    bool files_recover = false;                         // the Files screen shows the Autosaves page
     auto refresh_slots = [&]() {
         slot_buttons.clear();
+        if (files_recover) {
+            recoverable = viewer::recoverable_saves(saves_dir());
+            for (size_t i = 0; i < recoverable.size() && i < 5; ++i) {
+                const viewer::RecoverableSave& r = recoverable[i];
+                const std::string what = describe_save((saves_dir() / r.file).string());
+                const std::string name =
+                    r.kind == viewer::SaveKind::Auto ? std::string(ui::tr("Auto")) + " " + std::to_string(r.index + 1)
+                    : r.kind == viewer::SaveKind::Away ? std::string(ui::tr("Away"))
+                                                       : std::string(ui::tr("Quick"));
+                slot_buttons.push_back({name + "  " + (what.empty() ? std::string(ui::tr("unreadable")) : what),
+                                        viewer::kActionRecoverSlot + static_cast<int>(i), !what.empty()});
+            }
+            slot_buttons.push_back({ui::tr("Back"), viewer::kActionBack});
+            return;
+        }
         for (int i = 0; i < viewer::kSaveSlots; ++i) {
             const std::string path = slot_path(i);
             std::string label = std::to_string(i + 1) + "  empty";
             bool exists = false;
             if (fs::exists(path)) {
-                try {
-                    const auto saved = std::make_unique<model::CityState>(model::load(formats::save::load(path)));
-                    label = std::to_string(i + 1) + "  " + viewer::province_name(model::global_word(*saved, 0x6CA6)) +
-                            ", " + viewer::year_text(model::global_word(*saved, 0x6C32));
-                    exists = true;
-                } catch (const formats::FormatError&) {
-                    label = std::to_string(i + 1) + "  unreadable";
-                }
+                const std::string what = describe_save(path);
+                exists = !what.empty();
+                label = std::to_string(i + 1) + "  " + (exists ? what : std::string("unreadable"));
             }
             slot_buttons.push_back({label, viewer::kActionSlot + i, files_saving || exists});
         }
-        slot_buttons.push_back({"Back", viewer::kActionBack});
+        // Loading: the quicksave and the automatic saves, when there are any, are one button away.
+        if (!files_saving)
+            slot_buttons.push_back({ui::tr("Autosaves"), viewer::kActionRecover,
+                                    !viewer::recoverable_saves(saves_dir()).empty()});
+        slot_buttons.push_back({ui::tr("Back"), viewer::kActionBack});
     };
     // After a load: the simulation restarts from the state's words, as the
     // engine's loader leaves them (DS:0x6BFE = rate x month, 0x0568F).
@@ -1067,6 +1116,49 @@ int main(int argc, char** argv) {
         install_hooks();
         city_image_dirty = province_image_dirty = true;
         governor_name = ui::governor_name(state);  // 0x054CA: the loader copies it back
+        autosave_countdown = settings.autosave_years;
+    };
+    // Writing and reading one save file, for the Forum's slots, the quick keys and the autosave.
+    const auto write_state = [&](const std::string& path) {
+        try {
+            const formats::save::SaveFile file = model::serialize(state);
+            formats::save::write(file, path);
+            saved_fingerprint = viewer::save_fingerprint(file.raw);
+            std::printf("saved %s\n", path.c_str());
+            platform::web::flush_storage();  // the browser build: into IndexedDB now, not in a few seconds
+            return true;
+        } catch (const std::exception& e) {
+            std::printf("%s: %s\n", path.c_str(), e.what());
+            return false;
+        }
+    };
+    const auto read_state = [&](const std::string& path) {
+        try {
+            state = model::load(formats::save::load(path));
+            adopt_state();
+            saved_fingerprint = viewer::save_fingerprint(model::serialize(state).raw);
+            std::printf("loaded %s\n", path.c_str());
+            return true;
+        } catch (const std::exception& e) {
+            std::printf("%s: %s\n", path.c_str(), e.what());
+            return false;
+        }
+    };
+    // The city as the player leaves it (the window lost the focus, or the game is closing), when it has changed since it
+    // was last saved or loaded: AWAY.SAV, which the Load page's Autosaves lists. Time only runs while the player is
+    // here, and a year's autosave does not cover what was built while the clock was stopped.
+    const auto write_away_save = [&]() {
+        if (!save_mode || !screenshot_path.empty() || settings.autosave_years <= 0) return;
+        if (screen == Screen::Start || screen == Screen::NameEntry) return;
+        if (viewer::save_fingerprint(model::serialize(state).raw) == saved_fingerprint) return;
+        write_state((saves_dir() / viewer::away_save_file_name()).string());
+    };
+    const auto write_autosave = [&]() {
+        const fs::path dir = saves_dir();
+        if (write_state((dir / viewer::autosave_file_name(viewer::next_autosave(dir))).string()))
+            show_toast(ui::tr("Autosaved"));
+        else
+            show_toast(ui::tr("Autosave failed"));
     };
 
     auto current_page = [&]() -> ui::Page {
@@ -1084,7 +1176,7 @@ int main(int argc, char** argv) {
             case Screen::NameEntry:
                 return name_return_to_forum ? viewer::forum_page(state, forum_tab, sim.speed, rating_hint)
                                             : viewer::start_page(funding_level, start_difficulty, governor_name);
-            case Screen::Files: return viewer::files_page(files_saving, slot_buttons);
+            case Screen::Files: return viewer::files_page(files_saving, slot_buttons, files_recover);
             case Screen::Choice: return viewer::choice_page(choice_forum, choice_forum ? forum_grade : workshop_goods);
             case Screen::Settings: {
                 viewer::SettingsView v = settings_view;
@@ -1137,32 +1229,40 @@ int main(int argc, char** argv) {
         if (action == viewer::kActionOpenSave || action == viewer::kActionOpenLoad) {
             files_return = screen;
             files_saving = action == viewer::kActionOpenSave;
+            files_recover = false;
             refresh_slots();
             screen = Screen::Files;
             return;
         }
         if (screen == Screen::Files) {
             if (action == viewer::kActionBack) {
+                if (files_recover) {  // back to the slots, not out of the Files screen
+                    files_recover = false;
+                    refresh_slots();
+                    return;
+                }
                 screen = files_return;
                 return;
             }
-            const int slot = action - viewer::kActionSlot;
-            if (slot < 0 || slot >= viewer::kSaveSlots) return;
-            const std::string path = slot_path(slot);
-            try {
-                if (files_saving) {
-                    formats::save::write(model::serialize(state), path);
-                    std::printf("saved %s\n", path.c_str());
-                    screen = files_return;
-                } else {
-                    state = model::load(formats::save::load(path));
-                    adopt_state();
-                    std::printf("loaded %s\n", path.c_str());
-                    screen = Screen::City;
-                    time_running = true;
-                }
-            } catch (const std::exception& e) {
-                std::printf("%s: %s\n", path.c_str(), e.what());
+            if (action == viewer::kActionRecover && !files_saving) {
+                files_recover = true;
+                refresh_slots();
+                return;
+            }
+            std::string path;
+            const int recovered = action - viewer::kActionRecoverSlot;
+            if (files_recover && recovered >= 0 && recovered < static_cast<int>(recoverable.size())) {
+                path = (saves_dir() / recoverable[static_cast<size_t>(recovered)].file).string();
+            } else {
+                const int slot = action - viewer::kActionSlot;
+                if (files_recover || slot < 0 || slot >= viewer::kSaveSlots) return;
+                path = slot_path(slot);
+            }
+            if (files_saving) {
+                if (write_state(path)) screen = files_return;
+            } else if (read_state(path)) {
+                screen = Screen::City;
+                time_running = true;
             }
             return;
         }
@@ -1181,6 +1281,8 @@ int main(int argc, char** argv) {
             }
             if (action == viewer::kActionBegin) {
                 state = model::blank_state();
+                autosave_countdown = settings.autosave_years;
+                saved_fingerprint = 0;  // a new career is on no file yet
                 sim.difficulty = start_difficulty;
                 const int province =
                     systems::campaign::begin_new_game(state, sim.random, funding_level, start_difficulty);
@@ -1773,6 +1875,7 @@ int main(int argc, char** argv) {
                     // Gaius's slot page stands in for it.
                     files_return = Screen::Settings;
                     files_saving = action == viewer::kActionSettingsSave;
+                    files_recover = false;
                     refresh_slots();
                     screen = Screen::Files;
                     return;
@@ -2373,6 +2476,35 @@ int main(int argc, char** argv) {
                         time_running = true;
                     }
                 }
+                // Away from the game (alt-tab, another browser tab, a phone's home button): time stops, and runs
+                // again when the player is back. Only time that was running stops, so a pause the player chose stays.
+                {
+                    bool left = false, back = false;
+                    if (event.type == SDL_WINDOWEVENT) {
+                        left = event.window.event == SDL_WINDOWEVENT_FOCUS_LOST ||
+                               event.window.event == SDL_WINDOWEVENT_MINIMIZED ||
+                               event.window.event == SDL_WINDOWEVENT_HIDDEN;
+                        back = event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED ||
+                               event.window.event == SDL_WINDOWEVENT_RESTORED ||
+                               event.window.event == SDL_WINDOWEVENT_SHOWN;
+                    } else if (event.type == SDL_APP_WILLENTERBACKGROUND) {
+                        left = true;
+                    } else if (event.type == SDL_APP_DIDENTERFOREGROUND) {
+                        back = true;
+                    }
+                    if (left) write_away_save();
+                    if (left && save_mode && settings.pause_unfocused && time_running && screenshot_path.empty()) {
+                        time_running = false;
+                        focus_paused = true;
+                        std::printf("time: paused (away from the game)\n");
+                    }
+                    if (back && focus_paused) {
+                        focus_paused = false;
+                        time_running = true;
+                        std::printf("time: running again\n");
+                        last_step_ms = SDL_GetTicks();  // no catching up on the time away
+                    }
+                }
                 int pw, ph;
                 window.physical_size(&pw, &ph);
                 auto cmd = platform::translate_event(event, pw, ph);
@@ -2572,6 +2704,28 @@ int main(int argc, char** argv) {
                             std::printf("time: %s\n", time_running ? "running" : "paused");
                         }
                         break;
+                    case platform::CommandType::QuickSave:
+                    case platform::CommandType::QuickLoad: {
+                        // F5 / F9: the quicksave slot, from the screens that have a city behind them (not the start
+                        // screen, a battle or a promotion, which are mid-decision).
+                        const bool has_city = screen == Screen::City || screen == Screen::Province ||
+                                              screen == Screen::Maps || screen == Screen::ForumHall ||
+                                              screen == Screen::Forum || screen == Screen::EmpireMap;
+                        if (!save_mode || !has_city) break;
+                        const std::string path = (saves_dir() / viewer::quicksave_file_name()).string();
+                        if (cmd->type == platform::CommandType::QuickSave) {
+                            show_toast(write_state(path) ? ui::tr("Quicksaved") : ui::tr("Could not save"));
+                        } else if (!fs::exists(path)) {
+                            show_toast(ui::tr("No quicksave yet"));
+                        } else if (read_state(path)) {
+                            screen = Screen::City;
+                            time_running = true;
+                            show_toast(ui::tr("Quickloaded"));
+                        } else {
+                            show_toast(ui::tr("Could not load"));
+                        }
+                        break;
+                    }
                     case platform::CommandType::CycleVariant:
                         if (save_mode) cycle_variant();
                         break;
@@ -2839,6 +2993,14 @@ int main(int argc, char** argv) {
                     }
                 }
                 if (now - last_step_ms >= step_ms()) last_step_ms = now;  // behind: drop the backlog
+            }
+            // The automatic save a year's end or a promotion offer asked for (the step is over, so the city is whole).
+            // Never on the start screen, and never from a headless capture.
+            if (autosave_pending) {
+                autosave_pending = false;
+                if (save_mode && screenshot_path.empty() && screen != Screen::Start && screen != Screen::NameEntry &&
+                    settings.autosave_years > 0)
+                    write_autosave();
             }
             // The effects this frame asked for, in order: one sound at a time,
             // so the last is the one heard.
@@ -3124,6 +3286,28 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+            // A line of feedback for a moment ("Quicksaved"), and the reason time is stopped while the player is away.
+            if (save_mode && (focus_paused || (!toast_text.empty() && SDL_GetTicks() < toast_until))) {
+                const std::string line = focus_paused ? std::string(ui::tr("Paused")) : toast_text;
+                const int text_w = font ? ui::game_text_width(line.c_str(), 1, *font) : ui::text_width(line.c_str(), 1);
+                const bool on_map = screen == Screen::City || screen == Screen::Province;
+                const int floor_y = on_map ? static_cast<int>((screen == Screen::Province ? pcam : cam).visible_h) : kLogicalH;
+                const ui::Rect box{4, floor_y - 14, text_w + 10, 12};
+                for (int y = box.y; y < box.y + box.h; ++y)
+                    for (int x = box.x; x < box.x + box.w; ++x) {
+                        if (x < 0 || y < 0 || x >= kLogicalW || y >= kLogicalH) continue;
+                        const bool edge = y == box.y || x == box.x || y == box.y + box.h - 1 || x == box.x + box.w - 1;
+                        const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
+                        frame[i] = edge ? 212 : 38;
+                        frame[i + 1] = edge ? 165 : 10;
+                        frame[i + 2] = edge ? 55 : 10;
+                    }
+                if (font)
+                    ui::draw_game_text(frame, kLogicalW, kLogicalH, box.x + 5, box.y + 2, line.c_str(), 1, *font);
+                else
+                    ui::draw_text(frame, kLogicalW, kLogicalH, box.x + 5, box.y + 2, line.c_str(), 1,
+                                  formats::RGB{242, 210, 122});
+            }
             // The pointer. Gaius's is the system's (cursor.hpp). The original's, an orange arrow (POINTERS frame 0), is
             // drawn into the picture over everything, and the system's goes while it is there; with a command chosen the
             // cost ghost takes its place on the map (where the captures show no arrow).
@@ -3166,6 +3350,8 @@ int main(int argc, char** argv) {
             }
             window.present_rgb24(frame);
             platform::web::tick();  // the browser build: write the player's files and saves back now and then
+            // Stopped because the player is away: no need to draw at the display's rate.
+            if (focus_paused && screenshot_path.empty()) SDL_Delay(30);
             // The Settings screen's frame rate: vsync, or a cap (SDL_Delay).
             if (settings.frame_cap > 0 && screenshot_path.empty()) {
                 const Uint32 target = 1000 / static_cast<Uint32>(settings.frame_cap);
@@ -3184,6 +3370,7 @@ int main(int argc, char** argv) {
                 running = false;
             }
         }
+        write_away_save();  // closing the window or Exit: what was built since the last save is not lost
     } catch (const std::exception& e) {
         std::fprintf(stderr, "fatal: %s\n", e.what());
         SDL_Quit();
