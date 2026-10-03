@@ -19,7 +19,8 @@
 <p align="center">
   <a href="#what-is-gaius">What is it</a> ·
   <a href="#screenshots">Screenshots</a> ·
-  <a href="#quick-start">Quick start</a> ·
+  <a href="#download">Download</a> ·
+  <a href="#quick-start">Build it</a> ·
   <a href="#controls">Controls</a> ·
   <a href="#how-it-was-built">How it was built</a> ·
   <a href="#contributing">Contributing</a> ·
@@ -70,9 +71,23 @@ It is not an emulator. Gaius **reimplements** the game: the simulation is transc
 
 <sub>These are captures of Gaius running with the author's own copy of the game, so they show the original's art, whose rights stay with their holders. Make your own with `gaius_viewer --screenshot out.png` (see the quick start).</sub>
 
+## Download
+
+Every release is on the [releases page](https://github.com/0x695/Gaius/releases), with its notes and a `SHA256SUMS` file. You need your own copy of Caesar for all of them.
+
+| Where | Download | Notes |
+|---|---|---|
+| **Your browser** | [open the page](https://0x695.github.io/Gaius/) | Nothing to install. It asks for your copy of Caesar the first time; the browser keeps it and your saves. |
+| **Windows** | `gaius-<version>-windows-x64.zip` | Unzip anywhere and run `gaius.exe`. One file, nothing to install. It is not code-signed, so Windows SmartScreen may ask you to confirm. |
+| **Linux and Steam Deck** | `gaius-<version>-linux-x86_64.tar.gz` | Needs SDL 2. The Steam Deck notes are inside ([`STEAM_DECK.md`](packaging/linux/STEAM_DECK.md)). |
+| **Android** | `gaius-<version>-android.apk` | Allow installs from your browser or file manager, then pick your Caesar folder when it asks. |
+| **Your own server** | `gaius-<version>-web.zip` | The browser version as static files ([`web/README.md`](web/README.md)). |
+
+Each build says which version it is: `gaius --version`, the Settings screen's Files tab, and the browser page's footer. What changed between versions: [`CHANGELOG.md`](CHANGELOG.md).
+
 ## Quick start
 
-**No install?** Use the [browser version](https://0x695.github.io/Gaius/) and skip the build: it asks for your copy of Caesar the first time, and the browser keeps it and your saves.
+Building from source (the other way to get Gaius):
 
 **1. Get the game.** Buy or find your own legal copy of *Caesar* (the GOG release works). Gaius reads the US build's files, the folder that holds `CSR.EXE`; the GOG release keeps them in a `US` folder.
 
@@ -188,6 +203,8 @@ This repo ships **no original game files**, ever. Every decoder and every test t
 | [`docs/CAESAR_GOG_BUILD_FINDINGS.md`](docs/CAESAR_GOG_BUILD_FINDINGS.md) | what the GOG package holds |
 | [`scripts/README.md`](scripts/README.md) | the scripts, in full |
 | [`android/README.md`](android/README.md), [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md), [`web/README.md`](web/README.md) | Android, the Steam Deck and the browser |
+| [`docs/RELEASING.md`](docs/RELEASING.md), [`CHANGELOG.md`](CHANGELOG.md) | how a release is made, and what each one changed |
+| [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt) | the licences of the components Gaius contains |
 | [`docs/TRAILER_PROMPT.md`](docs/TRAILER_PROMPT.md) | a prompt pack for a teaser trailer |
 
 ## Reference
@@ -254,7 +271,8 @@ scripts/    small Python scripts over the tools
 tests/      dependency-free test harness (see above)
 docs/       FORMATS.md, the findings (the reverse engineering behind each system), IGA_ENTRY.md, TRAILER_PROMPT.md
 lang/       Gaius's own texts in other languages (ui/strings.hpp); scripts/extract_strings.py makes the template
-packaging/  the Linux package, Steam Deck notes and Gaius's icon
+packaging/  the Windows and Linux packages, Steam Deck notes and Gaius's icon
+VERSION.txt the version, read by CMake, Android, the web page and the release workflow
 export/     git-ignored output of scripts/export_assets.py (the original's files, never committed)
 third_party/stb/   vendored stb_image / stb_image_write (public domain)
 third_party/ymfm/  vendored ymfm, the YM3812 emulator the music plays on (BSD-3-Clause)

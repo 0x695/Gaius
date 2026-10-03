@@ -34,7 +34,8 @@ jobs:
         run: |
           mkdir site
           cp build-web/index.html build-web/gaius.js build-web/gaius.wasm build-web/gaius.data \
-             build-web/gaius-web.js build-web/gaius-web.css build-web/banner.svg site/
+             build-web/gaius-web.js build-web/gaius-web.css build-web/gaius-version.js build-web/banner.svg \
+             THIRD_PARTY_NOTICES.txt site/
           touch site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:

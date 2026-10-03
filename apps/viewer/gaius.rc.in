@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Gaius -- apps/viewer/gaius.rc: the Windows resources of gaius_viewer.exe: its icon (the one Explorer, the taskbar
+// Gaius -- apps/viewer/gaius.rc.in (CMake writes gaius.rc from it, with the version from the VERSION.txt file): the Windows resources of gaius_viewer.exe: its icon (the one Explorer, the taskbar
 // and Alt+Tab show; SDL's window class uses icon 1 too) and the name Task Manager and file properties show.
 // The icon is drawn by packaging/icon/make_icon.py.
 
 #include <winver.h>
 
-1 ICON "../../packaging/icon/gaius.ico"
+1 ICON "@PROJECT_SOURCE_DIR@/packaging/icon/gaius.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION @GAIUS_VERSION_RC@
+PRODUCTVERSION @GAIUS_VERSION_RC@
 FILEFLAGSMASK 0x3fL
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
@@ -24,7 +24,8 @@ BEGIN
             VALUE "LegalCopyright", "GPL-3.0-or-later"
             VALUE "OriginalFilename", "gaius_viewer.exe"
             VALUE "ProductName", "Gaius"
-            VALUE "ProductVersion", "0.1.0"
+            VALUE "FileVersion", "@GAIUS_VERSION_STRING@"
+            VALUE "ProductVersion", "@GAIUS_VERSION_STRING@"
         END
     END
     BLOCK "VarFileInfo"

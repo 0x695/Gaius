@@ -7,6 +7,8 @@ Nothing here needs, or writes, a game file when no folder is named.
     python scripts/test_scripts.py
 """
 
+import contextlib
+import io
 import os
 import struct
 import subprocess
@@ -20,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _gaius  # noqa: E402
 import check_saves  # noqa: E402
 import export_assets  # noqa: E402
+import release_notes  # noqa: E402
 
 SAVE_SIZE = 57126  # formats::save::kSaveSize
 
@@ -121,6 +124,40 @@ class Logic(unittest.TestCase):
 
 
 @unittest.skipUnless(tools_built(), "the tools aren't built")
+class Release(unittest.TestCase):
+    CHANGELOG = (
+        "# Changelog\n\n## [Unreleased]\n\n## [1.2.0] - 2027-01-02\n\n### Added\n- a thing\n- another\n\n"
+        "## [1.1.0] - 2026-12-01\n- older\n\n## [1.0.0] - unreleased\n")
+
+    def test_section_is_the_versions_own(self):
+        self.assertEqual(release_notes.section(self.CHANGELOG, "1.2.0"), "### Added\n- a thing\n- another")
+        self.assertEqual(release_notes.section(self.CHANGELOG, "1.1.0"), "- older")
+
+    def test_missing_and_empty_sections(self):
+        self.assertIsNone(release_notes.section(self.CHANGELOG, "9.9.9"))
+        self.assertEqual(release_notes.section(self.CHANGELOG, "1.0.0"), "")
+        self.assertEqual(release_notes.section(self.CHANGELOG, "1.2"), None)  # a prefix is not the version
+
+    def test_command_exit_codes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "CHANGELOG.md"
+            path.write_text(self.CHANGELOG, encoding="utf-8")
+            quiet = io.StringIO()
+            with contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
+                self.assertEqual(release_notes.main(["1.2.0", "--changelog", str(path)]), 0)
+                self.assertEqual(release_notes.main(["1.0.0", "--changelog", str(path)]), 1)
+                self.assertEqual(release_notes.main(["3.0.0", "--changelog", str(path)]), 1)
+                self.assertEqual(release_notes.main(["1.2.0", "--changelog", str(path) + ".nope"]), 1)
+            self.assertIn("- a thing", quiet.getvalue())
+
+    def test_version_file_and_changelog_agree(self):
+        # The release workflow refuses a tag that is not v<VERSION> or a version with no notes; catch it earlier.
+        version = (_gaius.REPO / "VERSION.txt").read_text(encoding="utf-8").strip()
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+        notes = release_notes.section((_gaius.REPO / "CHANGELOG.md").read_text(encoding="utf-8"), version)
+        self.assertTrue(notes, "CHANGELOG.md needs a '## [%s]' section with notes" % version)
+
+
 class Tools(unittest.TestCase):
     def test_summary_of_a_blank_save(self):
         with tempfile.TemporaryDirectory() as folder:

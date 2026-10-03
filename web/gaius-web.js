@@ -493,6 +493,7 @@ var Module = (function () {
 
   async function ready() {
     runtimeUp = true;
+    if (window.GAIUS_VERSION) $('version').textContent = window.GAIUS_VERSION;
     wireUi();
     const url = params.get('data');
     if (url) {

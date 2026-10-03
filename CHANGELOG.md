@@ -1,0 +1,36 @@
+# Changelog
+
+All notable changes to Gaius. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
+version numbers are `x.y.z` (the `VERSION.txt` file). A release is the commit tagged `v<version>`; its notes are the
+section below that carries its number (`scripts/release_notes.py`). How a release is made: [`docs/RELEASING.md`](docs/RELEASING.md).
+
+## [Unreleased]
+
+## [0.9.0] - unreleased
+
+The first public beta: Gaius plays a whole career of Caesar, from the start screen to Caesar or dismissal, on Windows, Linux, the Steam Deck, Android and in a browser. It needs your own copy of the game; none is included.
+
+### The game
+- A new career from the start screen (funding, difficulty, the governor's name), then the city: roads, water, housing that grows and merges, services, industry, markets, temples, the Forum, walkers, fire, collapse and the barbarians' raids.
+- The province: forts, Cohort orders (patrol, attack, go home), the Imperial Highway, towns, the Great Wall, and battles on the original battle screen with its four tactics.
+- The Forum and its advisors (the Treasurer, the Tribune, the Legion, ratings, histories, industry, the governor), the maps screen, the map of the Empire, the yearly notices from Rome, and promotion through the Empire's ranks to Caesar, or dismissal if the tribute is missed.
+- Saving and loading in the original's `.SAV` format, eight slots. Gaius writes to its own folder, never over the DOS game's saves.
+
+### Faithful to the original
+- The simulation is transcribed from the original executable and checked against real saves: the service and land-value layers match all 17 saves on every cell, a month of steps reproduces six consecutive saves, and the yearly accounts match each save's last year.
+- The screens are drawn from the game's own files as the original draws them: the city view, the control bar, the message box, the Forum, the maps screen and the battle screen (several checked pixel for pixel against captures), and the original opening.
+- Music and effects play through a transcription of the original's own sound driver on an emulated YM3812.
+
+### Comforts
+- Any window size, fullscreen, UI scale 1 to 4, edge, key and drag scrolling, remappable keys and buttons, gamepad play (Steam Deck), touch gestures (Android and phones in the browser), a German translation of Gaius's own texts.
+- Your choice of Gaius's gold pointer or the original's arrow, and of the original's game pace or a faster one.
+- Game files are found without being told (GOG, Steam, the usual folders) or chosen; a browser version imports them from a dropped folder or zip.
+
+### Tools
+- Command-line tools for every file format and Python scripts to export the game's pictures, sprites, sounds, tunes and maps, and to list, render, compare and check saves.
+
+### Known limitations
+- The US release of Caesar is the one supported; the international release (a different executable) is not.
+- The Tower command is not available (its button is dimmed). The original's start-screen layout, the Golden Sector logo in the opening and a few hover marks are not reproduced.
+- Not yet tried on a Steam Deck or a physical Android phone. The browser version has been tried in Chromium only.
+- The Cohort 2 hand-over (the optional external battle program) has not been tried with the real program.

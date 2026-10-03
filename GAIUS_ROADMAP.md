@@ -361,7 +361,10 @@ Every Phase 7 item is done. The scroll speed drives the map's key and edge scrol
 
 - [x] **Gaius in the browser** (2026-10-03, `web/README.md`) — the same engine through Emscripten (Asyncify, no threads, so any static host serves it), a page that imports the player's own copy of Caesar into the browser's storage (a folder, a zip, a drop), keeps the saves there and offers them as a download, and a GitHub Pages workflow. Tried in Chromium: import, play, keyboard, Settings, exit, a phone viewport, a high-density screen.
 
+- [x] **Release plumbing** (2026-10-03, `docs/RELEASING.md`) — one `VERSION.txt` read by CMake, Android, the web page and the program (`--version`, the Settings screen); a tag-triggered release workflow that builds the Windows zip (one static `gaius.exe`), the Linux tarball, the web zip and the Android APK, adds checksums and the `CHANGELOG.md` notes and publishes; `THIRD_PARTY_NOTICES.txt` in every package; a README download table. Written and checked locally; the first GitHub dry run is still to do.
+
 **Open**
+- [ ] **The first release** — a dry run of the release workflow, Android signing secrets, whether to sign the Windows exe, then the `v0.9.0` tag.
 - [ ] **The browser build on more browsers and phones** — Firefox, Safari and a real phone have not run it; sound has not been heard (the test browser had no audio device).
 - [ ] **A water plan the real game allows for the bot** — a reservoir on the nearest lake, pipe to fountains — to restore a full career to Caesar.
 - [ ] **The Tower command** (`0x9A`-`0x9F`, one of six pieces by the walls around it; section 46) — on the toolbar but dimmed.

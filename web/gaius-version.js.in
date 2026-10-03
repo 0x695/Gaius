@@ -1,0 +1,2 @@
+// Written by CMake from the VERSION.txt file. Do not edit.
+window.GAIUS_VERSION = "@GAIUS_VERSION_STRING@";

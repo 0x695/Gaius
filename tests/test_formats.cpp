@@ -43,6 +43,7 @@
 #include "apps/viewer/settings_page.hpp"
 #include "apps/viewer/cursor.hpp"
 #include "apps/viewer/original_intro.hpp"
+#include "gaius_version.hpp"
 #include "apps/viewer/overlays.hpp"
 #include "platform/game_import.hpp"
 #include "platform/paths.hpp"
@@ -2934,6 +2935,17 @@ void test_platform_game_detection() {
     CHECK(plat::game_folders_under((root / "Other").string(), 2).empty());  // the deep one is out of reach
     CHECK(!plat::looks_like_game_folder((root / "Other").string()));
     fs::remove_all(root, ec);
+}
+
+// The version CMake writes from the VERSION.txt file: x.y.z, and the program's name for itself starts with it.
+void test_version() {
+    std::printf("test_version (VERSION as x.y.z; the displayed version starts with it)\n");
+    const std::string number = gaius::kVersionNumber;
+    CHECK(number == std::to_string(gaius::kVersionMajor) + "." + std::to_string(gaius::kVersionMinor) + "." +
+                        std::to_string(gaius::kVersionPatch));
+    CHECK(gaius::kVersionMajor >= 0 && gaius::kVersionMinor >= 0 && gaius::kVersionPatch >= 0);
+    const std::string shown = gaius::kVersion;
+    CHECK(shown.rfind(number, 0) == 0 && (shown == number || shown[number.size()] == '-'));
 }
 
 void test_platform_paths() {
@@ -7227,6 +7239,7 @@ int main() {
     test_battle_screen();
     test_battle_race_matches_saves();
     test_cohort2_handover();
+    test_version();
     test_platform_paths();
     test_platform_game_detection();
     test_ui_settings_file();

@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Packs a Linux build into <name>.tar.gz: the game, its language files, the
-# launcher, the desktop entry and the Steam Deck notes. No game files: players
+# launcher, the desktop entry, the readme, the licences and the Steam Deck notes. No game files: players
 # bring their own copy of Caesar.
 #
 #   packaging/linux/make_tarball.sh <build folder> <name>
@@ -17,9 +17,8 @@ cp -r "$root/lang" "$stage/lang"
 cp "$here/gaius.sh" "$stage/gaius"
 cp "$here/gaius.desktop" "$stage/"
 cp "$root/packaging/icon/gaius.png" "$stage/gaius.png"
-cp "$here/STEAM_DECK.md" "$stage/"
-cp "$root/LICENSE" "$stage/"
-cp -r "$root/third_party/ymfm/LICENSE" "$stage/LICENSE.ymfm"
+cp "$here/STEAM_DECK.md" "$here/README.txt" "$stage/"
+cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.txt" "$stage/"
 chmod +x "$stage/gaius" "$stage/gaius-bin"
 tar -C "$(dirname "$stage")" -czf "$name.tar.gz" "$name"
 echo "$name.tar.gz"

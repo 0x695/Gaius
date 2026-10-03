@@ -185,6 +185,7 @@ not found = nicht gefunden
 Import copies a folder you choose = Import kopiert einen Ordner deiner Wahl
 Import = Import
 Drop the Caesar folder on this window = Caesar-Ordner auf das Fenster ziehen
+Version = Version
 Use Game data, above, to change them = Aendern: oben unter Game data
 Look again = Erneut suchen
 Keys = Tasten

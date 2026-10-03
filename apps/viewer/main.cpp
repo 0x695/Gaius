@@ -32,6 +32,7 @@
 // fire and all, and the city view animates on the engine's frame counters. See systems/construction.hpp.
 //
 // Usage:
+//   gaius_viewer --version
 //   gaius_viewer [<game folder> | <EMPIRE2.0xx | CAESARxx.SAV>]
 //   gaius_viewer <path> --screenshot out.png --frames N   (headless smoke test)
 //   gaius_viewer <CAESARxx.SAV> --assets <game dir>       (draw the city with the game's sprites; by default
@@ -56,6 +57,7 @@
 #include <vector>
 
 #include "apps/viewer/cursor.hpp"
+#include "gaius_version.hpp"
 #include "apps/viewer/original_intro_run.hpp"
 #include "apps/viewer/save_view.hpp"
 #include "audio/game_audio.hpp"
@@ -322,6 +324,12 @@ std::vector<ui::Catalog> load_languages() {
 int main(int argc, char** argv) {
     // On Windows the viewer has no console of its own; started from a terminal it borrows that one for its log lines.
     platform::attach_parent_console();
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--version") == 0) {
+            std::printf("Gaius %s\n", gaius::kVersion);
+            return 0;
+        }
+    }
     // A phone or tablet shows the game's 320 x 200 screen in landscape.
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
     // Gaius's settings (ui/settings.hpp), before anything else: they may name

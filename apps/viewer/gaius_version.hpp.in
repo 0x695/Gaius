@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Gaius -- gaius_version.hpp: written by CMake from the VERSION.txt file (and, off a release tag, the git commit). Do not edit.
+
+#pragma once
+
+namespace gaius {
+
+// What the program calls itself: "0.9.0" on a release build, "0.9.0-dev+abc1234" anywhere else.
+inline constexpr const char* kVersion = "@GAIUS_VERSION_STRING@";
+// The number alone, as VERSION holds it.
+inline constexpr const char* kVersionNumber = "@PROJECT_VERSION@";
+inline constexpr int kVersionMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr int kVersionMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr int kVersionPatch = @PROJECT_VERSION_PATCH@;
+
+}  // namespace gaius

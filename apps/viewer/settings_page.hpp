@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "gaius_version.hpp"
 #include "platform/input.hpp"
 #include "platform/web.hpp"
 #include "ui/options_screen.hpp"
@@ -208,6 +209,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             } else {
                 page.rows.push_back({ui::tr("Drop the Caesar folder on this window"), ""});
             }
+            page.rows.push_back({ui::tr("Version"), gaius::kVersion});
             page.buttons.push_back({ui::tr("Look again"), kActionRescanGame});
             break;
         case kSettingsTabCount: break;

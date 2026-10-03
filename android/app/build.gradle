@@ -1,3 +1,6 @@
+// The version is the repository's VERSION.txt file (x.y.z): versionName as it stands, versionCode major * 10000 + minor * 100 + patch.
+def gaiusVersion = file('../../VERSION.txt').text.trim()
+def gaiusParts = gaiusVersion.tokenize('.').collect { it.toInteger() }
 def buildAsLibrary = project.hasProperty('BUILD_AS_LIBRARY');
 def buildAsApplication = !buildAsLibrary
 if (buildAsApplication) {
@@ -17,8 +20,8 @@ android {
         applicationId "org.gaius.game"
         minSdkVersion 21
         targetSdkVersion 34
-        versionCode 1
-        versionName "0.9"
+        versionCode gaiusParts[0] * 10000 + gaiusParts[1] * 100 + gaiusParts[2]
+        versionName gaiusVersion
         externalNativeBuild {
             // Phones and tablets (arm64-v8a) and the emulator (x86_64).
             cmake {

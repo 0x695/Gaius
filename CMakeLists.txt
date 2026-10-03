@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.16)
-project(gaius LANGUAGES CXX)
+# The version lives in one file, VERSION.txt (x.y.z), which this file, the Windows resources, the Android build, the web page
+# and the release workflow all read. A release is the commit tagged v<VERSION> (docs/RELEASING.md).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt" GAIUS_VERSION_FILE LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt")
+project(gaius VERSION ${GAIUS_VERSION_FILE} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,6 +21,37 @@ else()
 endif()
 
 include_directories(${PROJECT_SOURCE_DIR})
+
+# A static vcpkg triplet (x64-windows-static: the Windows release package, packaging/windows) means the static C++
+# runtime too, so the program is one exe that needs nothing installed.
+if(MSVC AND VCPKG_TARGET_TRIPLET MATCHES "-static$" AND NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
+# --- version -------------------------------------------------------------------------------------------------------
+# GAIUS_VERSION_STRING is "0.9.0" on the commit tagged v0.9.0 and "0.9.0-dev+<commit>" anywhere else (or what
+# -DGAIUS_VERSION_STRING=... says). The generated files go under the build folder.
+if(NOT GAIUS_VERSION_STRING)
+  set(GAIUS_VERSION_STRING "${PROJECT_VERSION}")
+  find_package(Git QUIET)
+  if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --exact-match --match "v${PROJECT_VERSION}"
+                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} RESULT_VARIABLE GAIUS_ON_TAG OUTPUT_QUIET ERROR_QUIET)
+    if(NOT GAIUS_ON_TAG EQUAL 0)
+      execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+                      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} OUTPUT_VARIABLE GAIUS_COMMIT
+                      OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+      if(GAIUS_COMMIT)
+        set(GAIUS_VERSION_STRING "${PROJECT_VERSION}-dev+${GAIUS_COMMIT}")
+      endif()
+    endif()
+  endif()
+endif()
+set(GAIUS_VERSION_RC "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
+configure_file(${PROJECT_SOURCE_DIR}/apps/viewer/gaius_version.hpp.in ${PROJECT_BINARY_DIR}/generated/gaius_version.hpp @ONLY)
+add_library(gaius_version INTERFACE)
+target_include_directories(gaius_version INTERFACE ${PROJECT_BINARY_DIR}/generated)
+message(STATUS "Gaius ${GAIUS_VERSION_STRING}")
 
 # GAIUS_GAME_LIBRARY: build the libraries and the game as a shared library
 # named "main", which SDL's Android activity loads (android/app/jni/src). No
@@ -180,7 +215,7 @@ set(GAIUS_GAME_LIBS gaius_formats gaius_model gaius_systems gaius_ui gaius_rende
 if(GAIUS_GAME_LIBRARY)
   # --- the game for Android: libmain.so --------------------------------------
   add_library(main SHARED apps/viewer/main.cpp)
-  target_link_libraries(main PRIVATE ${GAIUS_GAME_LIBS})
+  target_link_libraries(main PRIVATE ${GAIUS_GAME_LIBS} gaius_version)
   return()
 endif()
 
@@ -192,7 +227,8 @@ if(GAIUS_WEB)
   # /persist/game (IndexedDB) at run time. See web/README.md.
   add_executable(gaius_web apps/viewer/main.cpp)
   set_target_properties(gaius_web PROPERTIES OUTPUT_NAME gaius SUFFIX ".html")
-  target_link_libraries(gaius_web PRIVATE ${GAIUS_GAME_LIBS} idbfs.js)
+  target_link_libraries(gaius_web PRIVATE ${GAIUS_GAME_LIBS} gaius_version idbfs.js)
+  configure_file(${PROJECT_SOURCE_DIR}/web/gaius-version.js.in ${PROJECT_BINARY_DIR}/gaius-version.js @ONLY)
   target_link_options(gaius_web PRIVATE
     -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576
     -sSTACK_SIZE=2097152 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=67108864
@@ -206,7 +242,8 @@ if(GAIUS_WEB)
   # shell's output under the name a web server serves by default.
   add_custom_target(gaius_web_files ALL
     COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/web/gaius-web.js ${PROJECT_SOURCE_DIR}/web/gaius-web.css
-            ${PROJECT_SOURCE_DIR}/docs/images/banner.svg $<TARGET_FILE_DIR:gaius_web>
+            ${PROJECT_SOURCE_DIR}/docs/images/banner.svg ${PROJECT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt
+            $<TARGET_FILE_DIR:gaius_web>
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE_DIR:gaius_web>/gaius.html $<TARGET_FILE_DIR:gaius_web>/index.html
     DEPENDS gaius_web)
   return()
@@ -214,11 +251,12 @@ endif()
 
 # --- viewer app (Phase 1 deliverable) --------------------------------------
 add_executable(gaius_viewer apps/viewer/main.cpp)
-target_link_libraries(gaius_viewer PRIVATE ${GAIUS_GAME_LIBS})
+target_link_libraries(gaius_viewer PRIVATE ${GAIUS_GAME_LIBS} gaius_version)
 if(WIN32)
-  # The icon and the version strings (apps/viewer/gaius.rc; the icon is drawn by packaging/icon/make_icon.py).
+  # The icon and the version strings (apps/viewer/gaius.rc.in; the icon is drawn by packaging/icon/make_icon.py).
   enable_language(RC)
-  target_sources(gaius_viewer PRIVATE apps/viewer/gaius.rc)
+  configure_file(${PROJECT_SOURCE_DIR}/apps/viewer/gaius.rc.in ${PROJECT_BINARY_DIR}/generated/gaius.rc @ONLY)
+  target_sources(gaius_viewer PRIVATE ${PROJECT_BINARY_DIR}/generated/gaius.rc)
   # A GUI program: no console window behind the game (platform/console.hpp borrows the terminal's when there is
   # one). The entry stays `main`, which SDL's SDL2main or the CRT provides either way.
   set_target_properties(gaius_viewer PROPERTIES WIN32_EXECUTABLE ON)
@@ -281,5 +319,5 @@ target_link_libraries(render_audio PRIVATE gaius_audio)
 # --- tests -----------------------------------------------------------------
 enable_testing()
 add_executable(gaius_tests tests/test_formats.cpp)
-target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform_rules stb_image)
+target_link_libraries(gaius_tests PRIVATE gaius_formats gaius_model gaius_systems gaius_ui gaius_render gaius_audio gaius_platform_rules gaius_version stb_image)
 add_test(NAME gaius_tests COMMAND gaius_tests)
