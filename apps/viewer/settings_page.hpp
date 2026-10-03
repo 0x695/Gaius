@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "platform/input.hpp"
+#include "platform/web.hpp"
 #include "ui/options_screen.hpp"
 #include "ui/panel.hpp"
 #include "ui/settings.hpp"
@@ -202,6 +203,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             if (v.can_import) {
                 page.rows.push_back({ui::tr("Import copies a folder you choose"), ""});
                 page.buttons.push_back({ui::tr("Import"), kActionImportGame});
+            } else if (platform::web::enabled()) {
+                page.rows.push_back({ui::tr("Use Game data, above, to change them"), ""});
             } else {
                 page.rows.push_back({ui::tr("Drop the Caesar folder on this window"), ""});
             }

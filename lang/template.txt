@@ -207,6 +207,7 @@ found =
 not found = 
 Import copies a folder you choose = 
 Import = 
+Use Game data, above, to change them = 
 Drop the Caesar folder on this window = 
 Look again = 
 Keys = 

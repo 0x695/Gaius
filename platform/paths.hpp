@@ -20,6 +20,8 @@
 //                 external files folder (Android/data/<package>/files/game,
 //                 reachable over USB and by file managers, no permission
 //                 needed) for game
+//   the browser   /persist/{settings,saves,game}, a folder the page mounts on the browser's IndexedDB (web/), so
+//                 the player's files and saves stay on their own machine between visits
 //   anything else SDL_GetPrefPath("Gaius", "Gaius") for all three
 //
 // The original writes its saves (CAESARXX.SAV ...) and CAESAR.INF into the
@@ -33,7 +35,7 @@
 
 namespace gaius::platform {
 
-enum class Os { Windows, Linux, Android, Other };
+enum class Os { Windows, Linux, Android, Web, Other };
 
 // What resolve_paths needs to know about the machine. current_environment()
 // fills it from the running system; tests fill it by hand.
@@ -45,6 +47,7 @@ struct PathEnvironment {
     std::string xdg_data_home;     // $XDG_DATA_HOME (may be empty)
     std::string android_internal;  // SDL_AndroidGetInternalStoragePath()
     std::string android_external;  // SDL_AndroidGetExternalStoragePath()
+    std::string web_root;          // the browser build's persistent folder (/persist)
     std::string sdl_pref;          // SDL_GetPrefPath("Gaius", "Gaius")
 };
 

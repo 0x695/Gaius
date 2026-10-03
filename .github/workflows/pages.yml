@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds Gaius for the browser (Emscripten; web/README.md) and, once the repository has switched it on, publishes the page
+# with GitHub Pages. The build runs on every push and pull request, so the web target is checked like the others. To
+# publish: Settings > Pages > Source: GitHub Actions, and a repository variable GAIUS_PAGES set to true (Settings >
+# Secrets and variables > Actions > Variables). The page carries none of the game's files.
+name: pages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-22.04
+    env:
+      EMSCRIPTEN_VERSION: "6.0.11"  # the version the build was made and tried with
+    steps:
+      - uses: actions/checkout@v4
+      - name: Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git
+          ./emsdk/emsdk install "$EMSCRIPTEN_VERSION"
+          ./emsdk/emsdk activate "$EMSCRIPTEN_VERSION"
+      - name: Build
+        run: |
+          source ./emsdk/emsdk_env.sh
+          emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-web -j "$(nproc)"
+      - name: Assemble the site
+        run: |
+          mkdir site
+          cp build-web/index.html build-web/gaius.js build-web/gaius.wasm build-web/gaius.data \
+             build-web/gaius-web.js build-web/gaius-web.css build-web/banner.svg site/
+          touch site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: web
+    if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' && vars.GAIUS_PAGES == 'true' }}
+    runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

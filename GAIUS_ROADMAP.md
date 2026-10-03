@@ -27,7 +27,7 @@ RE and engine work run in parallel: when a phase waits on an open RE question, t
 | 10 | Tooling scripts | **Done** | IGA format pages for Caesar (its row links here for now) |
 | 11 | Play-testing and fidelity | **In progress** | The Tower, the original's start screen, captures of the province view; see [Phase 11](#phase-11--play-testing-and-fidelity-to-the-originals-screens) |
 
-**1.0 scope (2026-09-16):** Windows, Linux, Steam Deck and Android, with tooling as a collection of scripts. macOS, iOS and Raspberry Pi are out of scope for 1.0.
+**1.0 scope (2026-09-16, the browser added 2026-10-03):** Windows, Linux, Steam Deck, Android and the browser, with tooling as a collection of scripts. macOS, iOS and Raspberry Pi are out of scope for 1.0.
 
 **Validation so far:** 17 real saves from three play sessions. The simulation reproduces the engine's saved layers cell for cell, a month of steps reproduces six consecutive saves, and the yearly accounts reproduce every save's last year. `gaius_tests`: 4537 checks with the game's files (2772, the rest skipping, without them), on Windows and, in CI, Linux. DOSBox captures check the city, the empire map, the maps screen and four Forum screens pixel for pixel.
 
@@ -359,7 +359,10 @@ Every Phase 7 item is done. The scroll speed drives the map's key and edge scrol
 - [x] **The message box, the province view's bar and a new pointer** (2026-10-03, section 48) — a 16 x 3 stone panel at (0, 0), the province view's bar from `DS:0x123E`, `PANEL1D` for the building pages (`PANEL1B` and `C` are never loaded), and Gaius's own gold pointer as the default with the original's as an option.
 - [x] **The right button, the opening, the pace and the preview** (2026-10-03, section 49) — the right button is the original's scroll-mode / command-mode toggle (the data layers moved to F9); the original's opening (Impressions logo, "presents", the Caesar picture, 25 s of credits) follows Gaius's title; the simulation's clock matches the original's ~66 ms frame (a "Fast" pace is the choice); the build preview draws the pointer routine's one picture or dashed frame, with the cost.
 
+- [x] **Gaius in the browser** (2026-10-03, `web/README.md`) — the same engine through Emscripten (Asyncify, no threads, so any static host serves it), a page that imports the player's own copy of Caesar into the browser's storage (a folder, a zip, a drop), keeps the saves there and offers them as a download, and a GitHub Pages workflow. Tried in Chromium: import, play, keyboard, Settings, exit, a phone viewport, a high-density screen.
+
 **Open**
+- [ ] **The browser build on more browsers and phones** — Firefox, Safari and a real phone have not run it; sound has not been heard (the test browser had no audio device).
 - [ ] **A water plan the real game allows for the bot** — a reservoir on the nearest lake, pipe to fountains — to restore a full career to Caesar.
 - [ ] **The Tower command** (`0x9A`-`0x9F`, one of six pieces by the walls around it; section 46) — on the toolbar but dimmed.
 - [ ] **The original's start screen** — a panel with "Initial funding / Skill level", "Choose name", "Load a game" and "OK"; Gaius's "A new career" page is its own layout.

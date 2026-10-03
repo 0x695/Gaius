@@ -2969,6 +2969,14 @@ void test_platform_paths() {
     CHECK(fs::path(p.saves) == fs::path(a.android_internal) / "saves");
     CHECK(fs::path(p.game) == fs::path(a.android_external) / "game");
 
+    PathEnvironment web;
+    web.os = Os::Web;
+    web.web_root = "/persist/";
+    p = resolve_paths(web);
+    CHECK(fs::path(p.settings) == fs::path("/persist") / "settings");
+    CHECK(fs::path(p.saves) == fs::path("/persist") / "saves");
+    CHECK(fs::path(p.game) == fs::path("/persist") / "game");
+
     // No folder to be had: empty, not a relative path in the working folder.
     PathEnvironment none;
     none.os = Os::Linux;

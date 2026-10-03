@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Gaius in the browser: Emscripten's shell for the game. gaius-web.js and gaius-web.css do the work (web/README.md). -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#260606">
+  <meta name="description" content="Gaius is an open-source engine for Caesar (1992). Play it in your browser with your own copy of the game.">
+  <title>Gaius</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='13' fill='%238b1a1a'/%3E%3Ctext x='32' y='47' font-family='Georgia,serif' font-size='40' font-weight='700' text-anchor='middle' fill='%23e8b854'%3EG%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="gaius-web.css">
+</head>
+<body class="loading">
+  <header id="bar">
+    <a class="brand" href="https://github.com/0x695/Gaius" target="_blank" rel="noopener" title="Gaius on GitHub">
+      <span class="wordmark">GAIUS</span><span class="tag">Caesar (1992) in your browser</span>
+    </a>
+    <nav>
+      <button id="btn-fullscreen" type="button" hidden>Fullscreen</button>
+      <button id="btn-saves" type="button" hidden>Saves</button>
+      <button id="btn-data" type="button" hidden>Game data</button>
+    </nav>
+  </header>
+
+  <main id="stage">
+    <section id="card" aria-live="polite">
+      <h1 id="card-title">Starting the engine</h1>
+      <p id="card-text">One moment.</p>
+      <progress id="progress" max="100" hidden></progress>
+
+      <div id="drop" hidden>
+        <p class="big">Drop your Caesar folder here</p>
+        <p class="small">or</p>
+        <p class="buttons">
+          <button id="pick-folder" type="button" class="primary">Choose the folder</button>
+          <button id="pick-files" type="button">Choose a .zip or files</button>
+        </p>
+        <input id="in-folder" type="file" webkitdirectory directory multiple hidden>
+        <input id="in-files" type="file" multiple hidden>
+        <p class="small hint">The folder that holds <code>CSR.EXE</code>, <code>HOUSES.PL8</code> and <code>EMPIRE2.001</code>
+        (the US release; GOG keeps it in a folder called <code>US</code>). A zip of that folder works too.</p>
+      </div>
+
+      <div id="ready" hidden>
+        <p class="buttons"><button id="play" type="button" class="primary big">Play</button></p>
+        <p class="small" id="ready-note"></p>
+      </div>
+
+      <p id="problem" class="problem" hidden></p>
+      <p class="fine">
+        Gaius ships none of the game's files. The ones you give it are kept in this browser's storage on your own
+        machine and are never uploaded. Saves are kept there too (use <em>Saves</em> to download them).
+      </p>
+    </section>
+
+    <div id="screen" hidden>
+      <canvas id="canvas" tabindex="0" aria-label="Gaius"></canvas>
+      <p id="rotate">Turn your device sideways for a bigger picture.</p>
+    </div>
+  </main>
+
+  <div id="menu" hidden></div>
+  <input id="in-saves" type="file" accept=".sav,.SAV" multiple hidden>
+
+  <script src="gaius-web.js"></script>
+  {{{ SCRIPT }}}
+</body>
+</html>

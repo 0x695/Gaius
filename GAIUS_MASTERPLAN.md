@@ -31,7 +31,7 @@ A playable, moddable, open-source Caesar (1992) that:
 1. Loads the original game's assets (VPX/PL8/P32/256 graphics, EMPIRE2 scenarios, `EDATA.CSR`) — **never redistributed**, always supplied by the user's own legal copy.
 2. Reproduces the simulation faithfully: city tile grid, service layers (A2C4/C9D4/54A4/7BB4), housing evolution, the 70-record object/actor system, the empire-map pathfinding/route model.
 3. Can load and save the original `.SAV` format exactly (round-trip byte compatibility as a stretch goal, semantic compatibility as the baseline goal).
-4. **Runs everywhere**: Windows, Linux, Steam Deck and Android — this is a first-class goal, not a stretch platform, and it shapes early architecture decisions (see section 5a). macOS, iOS and Raspberry Pi are out of scope for 1.0 (decided 2026-09-16).
+4. **Runs everywhere**: Windows, Linux, Steam Deck, Android and the browser — this is a first-class goal, not a stretch platform, and it shapes early architecture decisions (see section 5a). macOS, iOS and Raspberry Pi are out of scope for 1.0 (decided 2026-09-16).
 5. Ships modern QoL expected of any 2020s remaster/port: arbitrary window sizes, fullscreen/borderless/windowed toggle, resolution-independent UI scaling, remappable input across mouse+keyboard/touch/gamepad, and sensible save/config file locations per platform.
 6. Is legible enough — clean modern data structures, documented systems — that any contributor can pick up any subsystem without re-deriving it from the disassembly.
 7. Ships simple tooling: a collection of scripts to export the game's assets and inspect, render and check saves.
@@ -171,6 +171,7 @@ Cross-platform and QoL are treated as architecture, not polish, because retrofit
 | Linux | mouse+kb, optional gamepad | primary dev target; also the Steam Deck's native OS |
 | Steam Deck | gamepad + touch, docked mouse+kb | needs a gamepad-navigable UI, not just "keyboard remapped to buttons"; Steam Input glyph awareness is a nice-to-have, not required at launch |
 | Android | touch, optional gamepad/mouse (DeX-style) | needs a genuinely touch-first control scheme for build/scroll/select, not a mouse emulation layer |
+| Browser | mouse+kb, touch, gamepad | the same engine through Emscripten (added 2026-10-03, `web/README.md`): one page, the player's own files imported into the browser's storage, no threads so any static host serves it |
 
 ### Cross-cutting requirements this implies
 

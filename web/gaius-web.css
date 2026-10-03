@@ -1,0 +1,157 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Gaius in the browser: gold on Roman crimson, the colours of the icon and the README banner. */
+
+:root {
+  --crimson: #8b1a1a;
+  --crimson-deep: #260606;
+  --ground: #1a0707;
+  --gold: #d4a537;
+  --gold-light: #f2d27a;
+  --cream: #ebd9a9;
+  --muted: #b89a78;
+  --line: rgba(232, 184, 84, 0.35);
+  --serif: "Trajan Pro", "Cinzel", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--ground);
+  color: var(--cream);
+  font-family: var(--sans);
+  overscroll-behavior: none;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+#bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  background: linear-gradient(var(--crimson), var(--crimson-deep));
+  border-bottom: 1px solid var(--line);
+}
+
+.brand { display: flex; align-items: baseline; gap: 14px; color: inherit; text-decoration: none; min-width: 0; }
+.wordmark {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: 0.28em;
+  background: linear-gradient(var(--gold-light), var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.tag { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+nav { display: flex; gap: 8px; flex: none; }
+
+button {
+  font: inherit;
+  font-size: 14px;
+  color: var(--cream);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--gold); color: #fff; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--gold-light); outline-offset: 2px; }
+button.primary { background: var(--gold); color: #2b1203; border-color: var(--gold); font-weight: 600; }
+button.primary:hover { background: var(--gold-light); color: #2b1203; }
+button.big { font-size: 22px; padding: 14px 54px; letter-spacing: 0.08em; }
+
+#stage { flex: 1; min-height: 0; position: relative; display: flex; }
+
+#card {
+  margin: auto;
+  width: min(640px, calc(100% - 32px));
+  padding: 28px 30px 22px;
+  background: linear-gradient(rgba(139, 26, 26, 0.28), rgba(38, 6, 6, 0.55));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-align: center;
+}
+#card[hidden] { display: none; }
+#card h1 { margin: 0 0 8px; font-family: var(--serif); font-size: 28px; letter-spacing: 0.04em; color: var(--gold-light); }
+#card p { margin: 0 0 12px; line-height: 1.5; }
+.small { font-size: 13px; color: var(--muted); }
+.fine { font-size: 12px; color: var(--muted); margin-top: 18px !important; }
+.hint { max-width: 46ch; margin-left: auto !important; margin-right: auto !important; }
+.buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+code { font-size: 0.92em; color: var(--gold-light); }
+progress { width: 100%; height: 8px; accent-color: var(--gold); }
+.problem { color: #ffb4a8; background: rgba(120, 10, 10, 0.55); border: 1px solid #c9604f; border-radius: 6px; padding: 10px 12px; text-align: left; }
+
+#drop {
+  margin: 16px 0 0;
+  padding: 22px 16px 10px;
+  border: 2px dashed var(--line);
+  border-radius: 10px;
+  transition: background 0.15s, border-color 0.15s;
+}
+#drop .big { font-family: var(--serif); font-size: 21px; color: var(--cream); margin-bottom: 4px; }
+#drop.over { background: rgba(212, 165, 55, 0.14); border-color: var(--gold); }
+#drop[hidden], #ready[hidden], #problem[hidden], #progress[hidden], #screen[hidden], #menu[hidden] { display: none; }
+
+#screen { position: relative; flex: 1; min-width: 0; background: #000; }
+#canvas {
+  position: absolute;
+  inset: 0;
+  /* the page, not SDL, decides the canvas's box; the game fits its picture inside it (platform/web.cpp) */
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  background: #000;
+  outline: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.playing #card { display: none; }
+body.playing #screen { display: block; }
+#screen:fullscreen { background: #000; }
+
+#menu {
+  position: fixed;
+  top: 52px;
+  right: 12px;
+  z-index: 10;
+  min-width: 230px;
+  padding: 8px;
+  background: var(--crimson-deep);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+#menu button { display: block; width: 100%; text-align: left; margin: 2px 0; background: transparent; border-color: transparent; }
+#menu button:hover { background: rgba(212, 165, 55, 0.16); border-color: var(--line); }
+#menu .note { margin: 6px 8px 4px; font-size: 12px; color: var(--muted); }
+
+#rotate { display: none; position: absolute; top: 10px; left: 0; right: 0; margin: 0; text-align: center; font-size: 13px; color: var(--muted); pointer-events: none; z-index: 2; }
+@media (orientation: portrait) and (max-width: 700px) { body.playing #rotate { display: block; } }
+
+@media (max-width: 560px) {
+  .tag { display: none; }
+  #bar { padding: 6px 10px; gap: 8px; }
+  .wordmark { font-size: 16px; letter-spacing: 0.18em; }
+  nav { gap: 6px; }
+  nav button { padding: 6px 9px; font-size: 13px; }
+  #card { padding: 20px 16px 16px; }
+  #card h1 { font-size: 23px; }
+}
+@media (prefers-reduced-motion: reduce) { #drop { transition: none; } }

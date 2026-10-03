@@ -58,6 +58,13 @@ GaiusPaths resolve_paths(const PathEnvironment& e) {
             p.game = join(trim_separator(e.android_external), "game");
             break;
         }
+        case Os::Web: {
+            const std::string base = trim_separator(e.web_root);
+            p.settings = join(base, "settings");
+            p.saves = join(base, "saves");
+            p.game = join(base, "game");
+            break;
+        }
         case Os::Other: {
             const std::string base = trim_separator(e.sdl_pref);
             p.settings = join(base, "settings");

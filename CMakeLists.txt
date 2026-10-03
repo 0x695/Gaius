@@ -23,8 +23,19 @@ include_directories(${PROJECT_SOURCE_DIR})
 # tools, no tests.
 option(GAIUS_GAME_LIBRARY "Build the game as libmain (Android) instead of executables" OFF)
 
+# GAIUS_WEB: the browser build (Emscripten). Its own SDL2 comes from Emscripten's port; the game is one page, web/.
+if(EMSCRIPTEN)
+  set(GAIUS_WEB ON)
+  # The code throws and catches FormatError and friends; Emscripten leaves exceptions off unless asked.
+  add_compile_options(-fexceptions -sUSE_SDL=2)
+  add_link_options(-fexceptions -sUSE_SDL=2)
+endif()
+
 # --- SDL2 (Phase 1+: platform layer and viewer app) -----------------------
-if(TARGET SDL2::SDL2)
+if(GAIUS_WEB)
+  set(SDL2_LIBRARIES "")
+  set(SDL2_INCLUDE_DIRS "")
+elseif(TARGET SDL2::SDL2)
   # Built alongside (Android's jni CMakeLists adds SDL's source first).
   set(SDL2_LIBRARIES SDL2::SDL2)
 else()
@@ -152,6 +163,7 @@ add_library(gaius_platform STATIC
   platform/input.cpp
   platform/paths.cpp
   platform/game_import.cpp
+  platform/web.cpp
 )
 target_link_libraries(gaius_platform PUBLIC gaius_platform_rules)
 target_include_directories(gaius_platform PUBLIC ${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS})
@@ -169,6 +181,34 @@ if(GAIUS_GAME_LIBRARY)
   # --- the game for Android: libmain.so --------------------------------------
   add_library(main SHARED apps/viewer/main.cpp)
   target_link_libraries(main PRIVATE ${GAIUS_GAME_LIBS})
+  return()
+endif()
+
+if(GAIUS_WEB)
+  # --- the game in a browser: gaius.html + gaius.js + gaius.wasm + gaius.data ----------------------------
+  # Asyncify lets the viewer's own blocking frame loop yield to the browser (SDL_Delay and SDL_RenderPresent do it),
+  # so the same main() runs unchanged. No threads: the page needs no special headers and can be served anywhere,
+  # GitHub Pages included. The player's game files are never built in; web/gaius-web.js imports them into
+  # /persist/game (IndexedDB) at run time. See web/README.md.
+  add_executable(gaius_web apps/viewer/main.cpp)
+  set_target_properties(gaius_web PROPERTIES OUTPUT_NAME gaius SUFFIX ".html")
+  target_link_libraries(gaius_web PRIVATE ${GAIUS_GAME_LIBS} idbfs.js)
+  target_link_options(gaius_web PRIVATE
+    -sASYNCIFY -sASYNCIFY_STACK_SIZE=1048576
+    -sSTACK_SIZE=2097152 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=67108864
+    -sFORCE_FILESYSTEM=1 -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 -sMODULARIZE=0
+    "-sEXPORTED_RUNTIME_METHODS=['callMain','FS','IDBFS','ccall']"
+    "-sEXPORTED_FUNCTIONS=['_main']"
+    --shell-file ${PROJECT_SOURCE_DIR}/web/shell.html
+    --preload-file ${PROJECT_SOURCE_DIR}/lang@/lang)
+  set_target_properties(gaius_web PROPERTIES LINK_DEPENDS ${PROJECT_SOURCE_DIR}/web/shell.html)
+  # The page's own files go beside the build (a custom target, so editing them needs no relink); index.html is the
+  # shell's output under the name a web server serves by default.
+  add_custom_target(gaius_web_files ALL
+    COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_SOURCE_DIR}/web/gaius-web.js ${PROJECT_SOURCE_DIR}/web/gaius-web.css
+            ${PROJECT_SOURCE_DIR}/docs/images/banner.svg $<TARGET_FILE_DIR:gaius_web>
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE_DIR:gaius_web>/gaius.html $<TARGET_FILE_DIR:gaius_web>/index.html
+    DEPENDS gaius_web)
   return()
 endif()
 

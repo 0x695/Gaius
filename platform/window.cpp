@@ -3,6 +3,8 @@
 
 #include <SDL.h>
 
+#include "platform/web.hpp"
+
 #if defined(_WIN32)
 #include <SDL_syswm.h>
 #ifndef WIN32_LEAN_AND_MEAN
@@ -148,6 +150,13 @@ void Window::recompute_viewport() {
 }
 
 void Window::present_rgb24(const std::vector<uint8_t>& rgb) {
+    // In the browser the page decides how big the canvas is; follow it.
+    int page_w = 0, page_h = 0;
+    if (web::page_canvas_size(&page_w, &page_h)) {
+        int w = 0, h = 0;
+        SDL_GetWindowSize(window_, &w, &h);
+        if (w != page_w || h != page_h) SDL_SetWindowSize(window_, page_w, page_h);
+    }
     recompute_viewport();  // cheap; handles window resizes without a separate event hookup
 
     void* pixels = nullptr;

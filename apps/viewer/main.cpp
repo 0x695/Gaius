@@ -94,6 +94,7 @@
 #include "platform/game_import.hpp"
 #include "platform/input.hpp"
 #include "platform/paths.hpp"
+#include "platform/web.hpp"
 #include "platform/window.hpp"
 #include "stb_image_write.h"
 #include "systems/construction.hpp"
@@ -2342,9 +2343,11 @@ int main(int argc, char** argv) {
         Uint32 last_frame_ms = SDL_GetTicks();
         double pad_pointer_x = 0, pad_pointer_y = 0;
         bool pad_pointer_moved = false;
+        bool click_latched = false;  // a left press this frame, even if the button is up again by the time it is polled
         while (running) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) click_latched = true;
                 if (event.type == SDL_KEYDOWN) {
                     // 0x3029B: each key read moves the last one to 2EF9:0031.
                     const SDL_Keycode sym = event.key.keysym.sym;
@@ -2669,8 +2672,11 @@ int main(int argc, char** argv) {
                 if (!window.window_to_logical(wx, wy, &lx, &ly)) lx = ly = -1;
                 pointer.x = lx;
                 pointer.y = ly;
-                pointer.left_held = (mouse & SDL_BUTTON_LMASK) != 0 ||
+                // The buttons are polled once a frame, so a click (or a touch's tap) that begins and ends between two
+                // polls still gets its pressed frame: the latch holds it, and the release comes on the next frame.
+                pointer.left_held = (mouse & SDL_BUTTON_LMASK) != 0 || click_latched ||
                                     platform::gamepad_button_down(platform::button_for(platform::CommandType::Select));
+                click_latched = false;
                 pointer.left_released = pointer_was_held && !pointer.left_held;
                 pointer_was_held = pointer.left_held;
                 if (key >= 0 && !active_buttons.empty()) {
@@ -3151,6 +3157,7 @@ int main(int argc, char** argv) {
                     }
             }
             window.present_rgb24(frame);
+            platform::web::tick();  // the browser build: write the player's files and saves back now and then
             // The Settings screen's frame rate: vsync, or a cap (SDL_Delay).
             if (settings.frame_cap > 0 && screenshot_path.empty()) {
                 const Uint32 target = 1000 / static_cast<Uint32>(settings.frame_cap);
@@ -3176,6 +3183,7 @@ int main(int argc, char** argv) {
     }
 
     if (gaius_cursor) SDL_FreeCursor(gaius_cursor);
+    platform::web::flush_storage();
     SDL_Quit();
     return 0;
 }

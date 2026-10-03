@@ -27,6 +27,9 @@ PathEnvironment current_environment() {
     e.os = Os::Android;
     if (const char* p = SDL_AndroidGetInternalStoragePath()) e.android_internal = p;
     if (const char* p = SDL_AndroidGetExternalStoragePath()) e.android_external = p;
+#elif defined(__EMSCRIPTEN__)
+    e.os = Os::Web;
+    e.web_root = "/persist";
 #elif defined(_WIN32)
     e.os = Os::Windows;
     e.appdata = env("APPDATA");
