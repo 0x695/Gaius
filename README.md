@@ -51,7 +51,7 @@ It is not an emulator. Gaius **reimplements** the game: the simulation is transc
 | **Exact where it can be** | A month is the original's 106 steps with its random numbers. One pass of the transcribed rules reproduces the land value and service layers of all 17 real saves on every one of their 10,000 cells; a month of steps reproduces six consecutive saves; the yearly accounts match every save's last year. |
 | **The original's look and sound** | Housing, workshops and walkers drawn from your `.PL8` sheets, the control bar, message box, Forum screens and battle screen as the original draws them (several checked pixel for pixel against DOSBox captures), the original opening, and the music and effects through a transcribed AIL driver on an emulated YM3812. |
 | **Runs everywhere** | In a browser (WebAssembly, nothing to install), on Windows, Linux, the Steam Deck and Android (arm64 and x86_64), all from one code base, with a resolution-independent UI, gamepad and touch controls, and a paged toolbar that grows with the screen. |
-| **Modern comforts** | Fullscreen, borderless or windowed; UI scale 1 to 4; edge, key and middle-drag scrolling; every key and button rebindable; a German translation of Gaius's own texts; your choice of Gaius's gold pointer or the original's arrow; and the original's game pace or a faster one. |
+| **Modern comforts** | Fullscreen, borderless or windowed; UI scale 1 to 4; edge, key and middle-drag scrolling; every key and button rebindable; German and French translations of Gaius's own texts; your choice of Gaius's gold pointer or the original's arrow; and the original's game pace or a faster one. |
 | **Compatible saves** | Reads and writes the original's `.SAV` files; all 17 real saves round-trip byte for byte. Gaius saves to its own folder, never over your DOS game's. |
 | **Tools for modders and tinkerers** | Python scripts to export every picture, sprite, sound, tune and map to PNG, WAV and MIDI; list, render, compare and check saves; command-line tools for every file format. |
 | **A bot that plays it** | `tools/playtest` plays a career through the real game logic, a regression test with a sense of humour. |
@@ -120,7 +120,7 @@ Android: see [`android/README.md`](android/README.md). The browser build: [`web/
 ./build/gaius_viewer EMPIRE2.0xx          # a province's map
 ```
 
-Options for one run: `--no-intro` (skips Gaius's title and the original's opening), `--cursor original|gaius`, `--mute`, `--ui-scale N`, `--speed N`, `--save-dir DIR`. The settings (pointer, game pace, window, sound, language) are kept in `gaius.cfg` in the per-user folder (`%APPDATA%\Gaius` on Windows, `~/.config/gaius` on Linux); the game pace is the original's by default, with a faster one as a choice. Saves written by Gaius go to the per-user `saves` folder.
+Options for one run: `--no-intro` (skips Gaius's title and the original's opening), `--cursor original|gaius`, `--mute`, `--language de|fr`, `--ui-scale N`, `--speed N`, `--save-dir DIR`. The settings (pointer, game pace, window, sound, language) are kept in `gaius.cfg` in the per-user folder (`%APPDATA%\Gaius` on Windows, `~/.config/gaius` on Linux); the game pace is the original's by default, with a faster one as a choice. Saves written by Gaius go to the per-user `saves` folder.
 
 For headless/CI verification (no real display): `SDL_VIDEODRIVER=dummy ./build/gaius_viewer <file> --screenshot out.png --frames 3`, optionally with `--test-pan X Y`, `--test-zoom Z`, `--test-build T X Y`, `--test-hover X Y` or `--screen province|maps|forum`.
 

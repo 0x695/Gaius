@@ -30,6 +30,8 @@ FUNCTIONS = {
     "apps/viewer/settings_page.hpp": ["window_mode_name", "binding_label"],
 }
 
+DRAWN = " !\"%'()+,-.=?"
+
 CALL = re.compile(r'\btr\(\s*(?:[^;"()]*\?\s*)?"((?:[^"\\]|\\.)*)"(?:\s*:\s*"((?:[^"\\]|\\.)*)")?')
 
 
@@ -72,6 +74,18 @@ def main():
         for s in missing:
             print(s)
         print(f"{len(missing)} of {len(strings)} not translated", file=sys.stderr)
+        # The game's font (FONT1.PL8) draws letters, digits and ! " % ' ( ) + , - . = ? only; a ':' shows as a 0.
+        undrawable = 0
+        for line in pathlib.Path(sys.argv[2]).read_text(encoding="utf-8-sig").splitlines():
+            if " = " not in line or line.lstrip().startswith("#"):
+                continue
+            text = line.split(" = ", 1)[1]
+            bad = sorted({c for c in text if not (c.isascii() and (c.isalnum() or c in DRAWN))})
+            if bad:
+                undrawable += 1
+                print(f"cannot be drawn ({' '.join(bad)}): {line}", file=sys.stderr)
+        if undrawable:
+            print(f"{undrawable} translations use characters the game's font lacks", file=sys.stderr)
         return 0
     out = ROOT / "lang" / "template.txt"
     lines = [

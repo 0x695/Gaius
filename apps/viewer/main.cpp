@@ -361,6 +361,9 @@ int main(int argc, char** argv) {
 #if defined(__ANDROID__)
     settings.window_mode = ui::WindowModeSetting::Fullscreen;
 #endif
+    // --language CODE (de, fr): the language for this run, whatever the settings say (headless captures).
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::strcmp(argv[i], "--language") == 0) settings.language = argv[i + 1];
     const std::vector<ui::Catalog> languages = load_languages();
     for (const ui::Catalog& c : languages)
         if (c.code == settings.language) ui::set_catalog(c);

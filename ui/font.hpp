@@ -34,7 +34,7 @@
 // scales with icons and hit targets exactly as masterplan 5a point 3
 // requires, whichever font is behind it.
 //
-// Uppercase only (A-Z, 0-9, space and a little punctuation); anything
+// Uppercase only (A-Z, 0-9, space and - . / : , ' ( ) ! ?); anything
 // unmapped renders as blank rather than throwing, since UI text must
 // never be able to crash a frame.
 

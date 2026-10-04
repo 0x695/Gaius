@@ -7454,6 +7454,13 @@ void test_ui_font_rendering() {
     draw_text(lower, w, h, 1, 1, "ab", 1, RGB{255, 255, 255});
     CHECK(lower == buf);
 
+    // The punctuation that translations lean on (l'armee, (GOG), Oui !) is drawn, not left blank.
+    for (const char* mark : {"'", "(", ")", "!", "?"}) {
+        std::vector<uint8_t> shown(static_cast<size_t>(w) * h * 3, 0);
+        draw_text(shown, w, h, 1, 1, mark, 1, RGB{255, 255, 255});
+        CHECK(shown != std::vector<uint8_t>(static_cast<size_t>(w) * h * 3, 0));
+    }
+
     // Clipping: drawing far off every edge must not write out of bounds
     // or crash. (Buffer contents are checked for no growth/corruption.)
     std::vector<uint8_t> edge(static_cast<size_t>(w) * h * 3, 7);
