@@ -9,29 +9,38 @@ repository's own CMake project (`GAIUS_GAME_LIBRARY`, see
 ## Playing
 
 Gaius ships no game files. On first start it asks for them: **Import** opens
-Android's folder picker; choose the Caesar folder (copied to the device from a
-GOG install, for instance) and Gaius copies its files into its own storage,
-`Android/data/org.gaius.game/files/game`. Files can also be copied there over
-USB. No storage permission is asked for.
+Android's folder picker (in the Download folder, where a game copied to the phone
+usually is); choose the Caesar folder, or the GOG folder that holds it. Gaius looks
+in what you chose for the folder with Caesar's US files (GOG keeps them in a folder
+called `US`, beside the international release, which Gaius cannot play), and copies
+that folder into its own storage, `Android/data/org.gaius.game/files/game`. If it
+finds none it says so. Files can also be copied there over USB, in the US folder or
+a folder holding it. No storage permission is asked for, which is also why Gaius
+cannot search the phone by itself: Android lets an app see only what you hand it.
 
 A touch screen gets a one-time page on the controls:
 
 | Gesture | Does |
 |---|---|
-| Tap | Choose, build, press a button |
-| One finger drag | Scroll the map; with Road, Wall, Plaza or Clear Area (or a province road, wall or highway), lay it along the drag |
+| Tap | Choose a building, press a button. On the map with a building chosen, the first tap shows it there with its cost (a finger cannot hover); a tap on that building builds it, a tap elsewhere moves the preview |
+| One finger drag | Scroll the map; with Road, Wall, Plaza or Clear Area (or a province road, wall or highway), lay it along the drag, after which the tool puts itself away so the next drag scrolls |
 | **Undo** (appears after a built drag) | Takes the drag back and refunds it, as the original's right button during a drag |
 | Two fingers drag / pinch | Scroll / zoom |
 | Two finger tap | Back (the right mouse button) |
-| Back button | Settings |
+| Back button | Settings; again, leaves them |
 
 Settings (speed, sound, load, save, language, controls) are the same screen as
-on the desktop. Gamepads work as on the Steam Deck
+on the desktop, with a Back button on every tab. The toolbar is the original's
+one-row bar on a phone-sized screen (the 2x flat list is kept for the Steam Deck and
+for smaller screens, and the Settings screen's UI scale chooses any), and a finger
+may press anywhere in a button's slot. Gamepads work as on the Steam Deck
 (`packaging/linux/STEAM_DECK.md`).
 
 Verified on the `Medium_Phone` emulator (x86_64, 2400 x 1080): the import
-through the folder picker, a new career, the city, a touch-built road and its
-Undo.
+of a GOG top folder through the folder picker (the US folder inside it found and
+copied alone), a new career, the one-row toolbar, a building previewed by one tap
+and built by the second, a touch-laid road with its Undo and the tool put away
+after it, and Settings opened and left from the start screen.
 Not yet on a physical arm64 device.
 
 ## Prerequisites
@@ -60,6 +69,19 @@ A release is signed when `GAIUS_KEYSTORE` names a keystore, with
 them `app-release-unsigned.apk` and the bundle `app-release.aab` are unsigned
 (sign them with `apksigner` / `jarsigner` before installing or uploading).
 
+## Installing, and Play Protect
+
+An APK from outside the Play Store is "sideloaded", and Google Play Protect
+checks it: it may ask to scan the app, or warn that the developer is unknown (tap
+*More details*, then *Install anyway*). It does this hardest for an app signed
+with a key it has never seen. The APK the release workflow builds without the
+signing secrets is signed with a debug key that is new on every run, so each build
+looks like a new, unknown developer (and cannot update the one before: uninstall
+first, which also removes the imported game files). A release signed with one
+stable key (docs/RELEASING.md, "Android signing") is recognised from the second
+build on. Play Protect's verdict on a new key is not something a build can set; the
+Play Store (or F-Droid) is the way to no warning at all.
+
 ## Run
 
 ```powershell
@@ -80,10 +102,10 @@ android/
   app/src/main/AndroidManifest.xml    edited: GaiusActivity, landscape
 ```
 
-The language files (`lang/`) are copied into the APK's assets by the
-`copyGaiusLanguages` task. The rest (`build.gradle`, `gradlew`, `gradle/`) is
+The language files (`lang/`) are built into `libmain.so` (`ui/embedded_lang.hpp`),
+not shipped as assets. The rest (`build.gradle`, `gradlew`, `gradle/`) is
 the stock SDL2 `android-project` template, edited: namespace and application
-id, `ndkVersion`, CMake instead of ndk-build, ABIs, signing, assets.
+id, `ndkVersion`, CMake instead of ndk-build, ABIs, signing.
 
 The launcher icon is Gaius's own (`packaging/icon/make_icon.py` writes the five sizes under `app/src/main/res/mipmap-*`).
 

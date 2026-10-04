@@ -2958,6 +2958,13 @@ void test_platform_game_detection() {
     const std::vector<std::string> in_gog = plat::game_folders_under(gog.string(), 2);
     CHECK(in_gog.size() == 1 && fs::path(in_gog[0]).filename() == "US");  // the top folder is skipped, the US one found
     CHECK(plat::inspect_game_folder((gog / "US").string()).status == GameFolderStatus::Usable);
+    // Gaius's own game folder may hold the whole top folder (an import, or files copied by hand): the US folder inside it
+    // is where the game is. A folder that is itself the game wins over what is below it.
+    const std::string in_top = plat::first_game_folder({(root / "Missing").string(), gog.string()});
+    CHECK(fs::path(in_top).filename() == "US" && fs::path(in_top).parent_path() == gog);
+    CHECK(plat::first_game_folder({gog.string(), (root / "Caesar").string()}) == (root / "Caesar").string());
+    CHECK(plat::first_game_folder({(root / "Missing").string(), (root / "Other").string()}).empty());
+    CHECK(plat::first_game_folder({}).empty());
     // The US release with files lost is incomplete, and says which; a folder without Caesar's files is not Caesar's.
     const fs::path lost = root / "Lost";
     fs::create_directories(lost);
@@ -3157,6 +3164,30 @@ void test_ui_strings() {
     CHECK(listed >= 1);
     CHECK(embedded_language_file("languages.txt") == index);
     CHECK(embedded_language_file("template.txt").empty() && embedded_language_file("nonsense.txt").empty());
+}
+
+void test_touch_scale_and_slots() {
+    std::printf("test_touch_scale_and_slots (a phone's toolbar: the original's bar, a whole slot to press)\n");
+    using namespace gaius::ui;
+    using gaius::systems::construction::CommandId;
+    CHECK(touch_scale(2400, 1080) == 1 && touch_scale(1920, 1080) == 1 && touch_scale(2560, 1600) == 1);
+    CHECK(touch_scale(1280, 800) == 2 && touch_scale(1280, 720) == 2 && touch_scale(960, 600) == 2);
+    // At 1x with touch, the bar answers in the whole 24 px slot, as high as the panel; without touch only on the icon.
+    const CommandId ring[] = {CommandId::Road, CommandId::Wall, CommandId::Well};
+    Metrics touch = metrics_for_scale(1);
+    touch.touch = true;
+    const Toolbar finger(ring, 3, touch, 320, 200, true);
+    const Toolbar mouse(ring, 3, metrics_for_scale(1), 320, 200, true);
+    CHECK(finger.original_bar() && mouse.original_bar());
+    const Rect icon = mouse.button(2);
+    CHECK(mouse.hit_test(icon.x + icon.w / 2, icon.y + icon.h / 2) == 2);
+    CHECK(mouse.hit_test(icon.x + icon.w + 3, icon.y + icon.h / 2) == -1);   // beside the icon: nothing
+    CHECK(mouse.hit_test(icon.x + icon.w / 2, mouse.panel().y + 1) == -1);   // above it: nothing
+    CHECK(finger.hit_test(icon.x + icon.w + 3, icon.y + icon.h / 2) == 2);   // a finger beside it still gets it
+    CHECK(finger.hit_test(icon.x + icon.w / 2, finger.panel().y + 1) == 2);  // and above, in the panel
+    CHECK(finger.hit_test(icon.x + icon.w + 6, icon.y + 4) == 3);            // the next slot starts 4 px before its icon
+    CHECK(finger.hit_test(finger.button(0).x - 3, finger.button(0).y + 2) == 0);
+    CHECK(finger.hit_test(2, finger.panel().y + 2) == -1);                   // left of the first slot
 }
 
 void test_settings_page_rows() {
@@ -7529,6 +7560,7 @@ int main() {
     test_ui_settings_file();
     test_ui_strings();
     test_settings_page_rows();
+    test_touch_scale_and_slots();
     test_safety_net_settings();
     test_save_slots();
     test_gtl_library();

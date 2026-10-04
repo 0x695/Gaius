@@ -298,6 +298,13 @@ Rect Toolbar::button(int i) const {
 }
 
 int Toolbar::hit_test(int lx, int ly) const {
+    if (bar_ && m_.touch) {
+        // A finger is wider than the 16 px icon: the whole slot answers, as high as the panel.
+        for (int i = 0; i < count(); ++i)
+            if (Rect{grid_x0_ + kBarPitch * i - (kBarPitch - kBarIconPx) / 2, panel_.y, kBarPitch, panel_.h}.contains(lx, ly))
+                return i;
+        return -1;
+    }
     if (previous_arrow().contains(lx, ly)) return kPreviousPage;
     if (next_arrow().contains(lx, ly)) return kNextPage;
     for (int i = 0; i < count(); ++i) {

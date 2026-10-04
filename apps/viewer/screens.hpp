@@ -430,11 +430,13 @@ inline ui::Page notice_page(const char* const* lines, size_t count) {
 inline ui::Page touch_hints_page() {
     ui::Page page;
     page.title = ui::tr("Playing by touch");
-    page.rows.push_back({ui::tr("Tap - choose, build, press"), ""});
+    page.rows.push_back({ui::tr("Tap - choose or press"), ""});
+    page.rows.push_back({ui::tr("Tap the map - see it and its cost"), ""});
+    page.rows.push_back({ui::tr("Tap it again - build"), ""});
     page.rows.push_back({ui::tr("Drag one finger - scroll the map"), ""});
     page.rows.push_back({ui::tr("With a road, wall or clearing tool"), ""});
-    page.rows.push_back({std::string("  ") + ui::tr("one finger lays it along the drag"), ""});
-    page.rows.push_back({std::string("  ") + ui::tr("and Undo takes the drag back"), ""});
+    page.rows.push_back({std::string("  ") + ui::tr("one finger lays it along the drag,"), ""});
+    page.rows.push_back({std::string("  ") + ui::tr("then the tool puts itself away"), ""});
     page.rows.push_back({ui::tr("Two fingers - scroll, pinch to zoom"), ""});
     page.rows.push_back({ui::tr("Tap with two fingers - back"), ""});
     page.rows.push_back({ui::tr("Settings - speed, sound, save, load"), ""});

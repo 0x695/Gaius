@@ -545,6 +545,10 @@ int main(int argc, char** argv) {
     // "no command"), so a click on the map does nothing then. The flat list always has one.
     bool tool_armed = true;
     bool tool_remembered = true;  // a command has been chosen, so the right button can take it up again
+    // Touch has no hover, so the pointer's preview (the ghost and its cost) is shown where a first tap landed; a tap on
+    // it builds. touch_preview_tool is the tool it was shown for (a different tool starts again).
+    int touch_preview_x = -1, touch_preview_y = -1, touch_preview_tool = -1;
+    bool select_is_touch = false;  // the Select being handled is a finger's tap
     bool province_armed = true;   // the province view's twin of tool_armed: the map acts only while a command is up
 
     try {
@@ -1588,9 +1592,15 @@ int main(int argc, char** argv) {
         ui::Breakpoint bp = ui_scale_override >= 0 ? static_cast<ui::Breakpoint>(ui_scale_override)
                                                    : ui::breakpoint_for(pw0, ph0, has_touch);
         // The Settings screen's UI scale, unless --ui-scale names one.
+        // On a touch device the bar's scale follows the screen's pixels (ui::touch_scale: a phone keeps the original's
+        // one-row bar, with a whole slot to press), unless the player or --ui-scale chose one.
         const auto toolbar_metrics = [&]() {
-            if (ui_scale_override < 0 && settings.ui_scale > 0) return ui::metrics_for_scale(settings.ui_scale);
-            return ui::metrics_for(bp);
+            ui::Metrics m;
+            if (ui_scale_override < 0 && settings.ui_scale > 0) m = ui::metrics_for_scale(settings.ui_scale);
+            else if (ui_scale_override < 0 && has_touch) m = ui::metrics_for_scale(ui::touch_scale(pw0, ph0));
+            else m = ui::metrics_for(bp);
+            m.touch = has_touch;
+            return m;
         };
         ui::Metrics metrics = toolbar_metrics();
         ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
@@ -2379,6 +2389,7 @@ int main(int argc, char** argv) {
                 if (tool_armed && picked == tool_index && cycle_variant()) return;  // tapping the selected button again
                 tool_index = picked;
                 tool_armed = tool_remembered = true;
+                touch_preview_x = touch_preview_y = -1;
                 std::printf("tool: %s\n", systems::construction::command_name(kBuildTools[tool_index]));
                 play_effect(0);  // 0x0FFA5
                 return;
@@ -2389,12 +2400,36 @@ int main(int argc, char** argv) {
             int cell_x = static_cast<int>(cam.x + lx / cam.zoom) / city_cell_px;
             int cell_y = static_cast<int>(cam.y + ly / cam.zoom) / city_cell_px;
             auto tool = kBuildTools[tool_index];
+            const auto spec = systems::construction::placement_spec(tool);
+            if (select_is_touch) {
+                // A finger cannot hover: the first tap shows what would be built there and what it costs (the ghost a
+                // pointer draws), and a tap on that building builds it. A tap elsewhere moves the preview.
+                using Kind = systems::construction::PlacementKind;
+                const bool sized = spec.kind == Kind::MultiCell || spec.kind == Kind::VariantSelected;
+                const int w = sized ? std::max(1, spec.width) : 1, h = sized ? std::max(1, spec.height) : 1;
+                const bool on_preview = touch_preview_x >= 0 && touch_preview_tool == tool_index &&
+                                        cell_x >= touch_preview_x && cell_x < touch_preview_x + w &&
+                                        cell_y >= touch_preview_y && cell_y < touch_preview_y + h;
+                if (!on_preview) {
+                    touch_preview_x = cell_x;
+                    touch_preview_y = cell_y;
+                    touch_preview_tool = tool_index;
+                    std::printf("preview %s at (%d,%d)\n", systems::construction::command_name(tool), cell_x, cell_y);
+                    return;
+                }
+                cell_x = touch_preview_x;
+                cell_y = touch_preview_y;
+            }
+            touch_preview_x = touch_preview_y = -1;
             bool ok = place_tool(tool, cell_x, cell_y);
             if (ok) city_image_dirty = true;
             drag_last_x = cell_x;
             drag_last_y = cell_y;
             std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x, cell_y,
                         ok ? "OK" : "rejected (terrain not buildable / off grid)");
+            // A road, wall, plaza or clearing laid by touch puts the tool away, so the next finger that lands scrolls
+            // instead of laying more of it.
+            if (select_is_touch && spec.kind == systems::construction::PlacementKind::DragAutoTiled) tool_armed = false;
         };
 
         if (save_mode && test_message > 0) {
@@ -2549,7 +2584,7 @@ int main(int argc, char** argv) {
                         } else if (screen == Screen::Settings) {
                             if (settings_view.confirm != viewer::SettingsView::Confirm::None)
                                 settings_view.confirm = viewer::SettingsView::Confirm::None;
-                            else if (settings_return != Screen::Start)
+                            else
                                 screen = settings_return;
                         } else if (screen != Screen::NameEntry) {
                             switch_to(4);
@@ -2601,7 +2636,7 @@ int main(int argc, char** argv) {
                                 platform::cancel_capture();
                             } else if (settings_view.confirm != viewer::SettingsView::Confirm::None) {
                                 settings_view.confirm = viewer::SettingsView::Confirm::None;
-                            } else if (settings_return != Screen::Start) {
+                            } else {
                                 screen = settings_return;
                             }
                             break;
@@ -2763,7 +2798,9 @@ int main(int argc, char** argv) {
                         // gamepad A all land on the same button or cell.
                         int lx = 0, ly = 0;
                         if (!window.window_to_logical(cmd->x, cmd->y, &lx, &ly)) break;
+                        select_is_touch = cmd->touch;
                         handle_select_logical(lx, ly, false);
+                        select_is_touch = false;
                         break;
                     }
                     case platform::CommandType::SelectMove: {
@@ -2771,6 +2808,7 @@ int main(int argc, char** argv) {
                         const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
                         pointer_lx = inside ? lx : -1;
                         pointer_ly = inside ? ly : -1;
+                        touch_preview_x = touch_preview_y = -1;  // a mouse is in use: the pointer previews
                         select_move(cmd->x, cmd->y);
                         break;
                     }
@@ -2783,6 +2821,7 @@ int main(int argc, char** argv) {
                         const bool inside = window.window_to_logical(cmd->x, cmd->y, &lx, &ly);
                         pointer_lx = inside ? lx : -1;
                         pointer_ly = inside ? ly : -1;
+                        touch_preview_x = touch_preview_y = -1;  // a mouse is in use: the pointer previews
                         hovered = inside && screen == Screen::City ? toolbar.hit_test(lx, ly) : -1;
                         province_hover = inside && screen == Screen::Province && province_orig() ? province_toolbar.hit_test(lx, ly) : -1;
                         page_hovered = -1;
@@ -2805,7 +2844,13 @@ int main(int argc, char** argv) {
                         break;
                     }
                     case platform::CommandType::PanEnd:
-                        if (touch_building) touch_undo = !drag_undo.empty();
+                        if (touch_building) {
+                            touch_undo = !drag_undo.empty();
+                            // The road, wall, plaza or clearing is laid: the tool is put away, so the next finger that
+                            // lands scrolls instead of laying more (two fingers or Undo reach the old state again).
+                            if (screen == Screen::City) tool_armed = false;
+                            else if (screen == Screen::Province) province_armed = false;
+                        }
                         touch_building = false;
                         break;
                     case platform::CommandType::PanMove: {
@@ -3217,12 +3262,17 @@ int main(int argc, char** argv) {
                                have_font ? &game_font : nullptr, have_icons ? &toolbar_icons : nullptr,
                                have_sprites ? &sprites.palette : nullptr, tool_text.c_str(), funds_text.c_str());
                 }
-                if (screen == Screen::City && tool_armed && pointer_lx >= 0 && !toolbar.contains(pointer_lx, pointer_ly)) {
+                // Where a finger's first tap put the preview, if it did and it is still for this tool.
+                const bool touch_preview = touch_preview_x >= 0 && touch_preview_tool == tool_index;
+                if (screen == Screen::City && tool_armed &&
+                    (touch_preview || (pointer_lx >= 0 && !toolbar.contains(pointer_lx, pointer_ly)))) {
                     // What the original draws at the pointer (overlays.hpp, findings section 49): the dashed frame for a
                     // command with no preview tile, else that tile's picture, and the cost at the cell.
                     const auto tool = kBuildTools[tool_index];
-                    const int cell_x = static_cast<int>(cam.x + pointer_lx / cam.zoom) / city_cell_px;
-                    const int cell_y = static_cast<int>(cam.y + pointer_ly / cam.zoom) / city_cell_px;
+                    const int cell_x = touch_preview ? touch_preview_x
+                                                     : static_cast<int>(cam.x + pointer_lx / cam.zoom) / city_cell_px;
+                    const int cell_y = touch_preview ? touch_preview_y
+                                                     : static_cast<int>(cam.y + pointer_ly / cam.zoom) / city_cell_px;
                     const int sx = static_cast<int>((cell_x * city_cell_px - cam.x) * cam.zoom);
                     const int sy = static_cast<int>((cell_y * city_cell_px - cam.y) * cam.zoom);
                     const viewer::GhostSeed seed = viewer::ghost_seed(tool, forum_grade, workshop_goods);

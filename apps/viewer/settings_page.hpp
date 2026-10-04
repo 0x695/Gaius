@@ -136,6 +136,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
     static constexpr const char* kTabs[] = {"Game", "Sound", "Video", "Keys", "Lang", "Files"};
     for (int i = 0; i < kSettingsTabCount; ++i) page.tabs.push_back({ui::tr(kTabs[i]), kActionSettingsTab + i});
     page.selected_tab = v.tab;
+    // Every tab but the Game tab (which has Resume) ends with Back; a touch screen has no Escape to leave by.
+    const auto back_button = [&]() { page.buttons.push_back({ui::tr("Back"), kActionResume}); };
     switch (v.tab) {
         case kSettingsGame:
             page.title = ui::tr("Game");
@@ -151,7 +153,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
                                     row_id(SettingRow::PauseUnfocused)));
             page.rows.push_back(row(ui::tr("Tribune"), ui::tr(s.tribune_auto ? "Automatic" : "By hand"),
                                     row_id(SettingRow::TribuneAuto)));
-            page.buttons.push_back({ui::tr("Resume"), kActionResume, v.in_game});
+            // Always a way out: back into the game, or to the start screen when Settings was opened from there.
+            page.buttons.push_back({ui::tr(v.in_game ? "Resume" : "Back"), kActionResume});
             page.buttons.push_back({ui::tr("Pause"), kActionPause, v.in_game});
             page.buttons.push_back({ui::tr("Load"), kActionSettingsLoad, v.game_found});
             page.buttons.push_back({ui::tr("Save"), kActionSettingsSave, v.in_game});
@@ -167,6 +170,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
                 row(ui::tr("Music volume"), std::to_string(s.music_volume) + " %", row_id(SettingRow::MusicVolume)));
             page.rows.push_back(row(ui::tr("Effects volume"), std::to_string(s.effects_volume) + " %",
                                     row_id(SettingRow::EffectsVolume)));
+            back_button();
             break;
         case kSettingsVideo:
             page.title = ui::tr("Video");
@@ -185,6 +189,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.rows.push_back(row(ui::tr("Edge scrolling"), on_off(s.edge_scroll), row_id(SettingRow::EdgeScroll)));
             page.rows.push_back(row(ui::tr("Cursor"), ui::tr(s.cursor == ui::CursorStyle::Original ? "Original" : "Gaius"),
                                     row_id(SettingRow::Cursor)));
+            back_button();
             break;
         case kSettingsKeys: {
             page.title = ui::tr("Arrows - left key, right button");
@@ -205,6 +210,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             }
             page.rows.push_back(row(ui::tr("Gamepad pointer"), on_off(s.gamepad_cursor), row_id(SettingRow::GamepadPointer)));
             page.buttons.push_back({ui::tr("Reset"), kActionResetControls});
+            back_button();
             break;
         }
         case kSettingsLanguage: {
@@ -214,6 +220,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
                 if (c.code == s.language) name = c.name;
             page.rows.push_back(row(ui::tr("Language"), name, row_id(SettingRow::Language)));
             page.rows.push_back({ui::tr("The game's own texts stay in English"), ""});
+            back_button();
             break;
         }
         case kSettingsFiles:
@@ -232,6 +239,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             }
             page.rows.push_back({ui::tr("Version"), gaius::kVersion});
             page.buttons.push_back({ui::tr("Look again"), kActionRescanGame});
+            back_button();
             break;
         case kSettingsTabCount: break;
     }

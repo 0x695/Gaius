@@ -24,7 +24,7 @@ cmake --build build-san -j --target gaius_tests fuzz_formats
 ./build-san/fuzz_formats --assets /path/to/Caesar/US --cases 30000 --seed 7
 ```
 
-**CI** (`.github/workflows/build.yml`, the `sanitize` job) builds under AddressSanitizer and UndefinedBehaviorSanitizer on Linux, runs `gaius_tests` and two fuzz passes from the synthetic seeds. CI has no game files, so the corpus tests skip (2867 of 4632 checks run); the real-seed runs are local.
+**CI** (`.github/workflows/build.yml`, the `sanitize` job) builds under AddressSanitizer and UndefinedBehaviorSanitizer on Linux, runs `gaius_tests` and two fuzz passes from the synthetic seeds. CI has no game files, so the corpus tests skip (2882 of 4647 checks run); the real-seed runs are local.
 
 **On Windows**, MSVC has AddressSanitizer only: `-DGAIUS_SANITIZE=address` (the Visual Studio component "C++ AddressSanitizer"; put its `clang_rt.asan_dynamic-x86_64.dll`, in the compiler's `bin\Hostx64\x64`, on the PATH). For undefined behaviour without GCC or Clang there is a route through Emscripten and Node, which also tests the 32-bit build the browser runs:
 
@@ -48,7 +48,7 @@ All of it in code the real files never exercised, and none on a real save:
 
 ## Not covered
 
-- The corpus tests (4632 checks with the game's files) do not run in CI, only locally.
+- The corpus tests (4647 checks with the game's files) do not run in CI, only locally.
 - Gamepad, touch, window and audio-device code (`platform/`, the viewer's main loop) are not fuzzed; they take their input from the system, not from a file.
 - The fuzzer starts from the files this project has: a different release's files are not among its seeds (the international release is detected before any file is read).
 - The Cohort 2 hand-over (`csr0.dat` and `cohort.csr`, read back after an external program) is not fuzzed.

@@ -56,6 +56,17 @@ bool import_in_progress(int* files_copied) {
     return call_activity("isImporting", "()Z") == JNI_TRUE;
 }
 
+ImportResult import_result() {
+    int status = 0;
+    if (!call_activity("importStatus", "()I", &status)) return ImportResult::None;
+    switch (status) {
+        case 1: return ImportResult::Done;
+        case 2: return ImportResult::NotFound;
+        case 3: return ImportResult::Failed;
+        default: return ImportResult::None;
+    }
+}
+
 #else
 
 bool can_import_game_folder() { return false; }
@@ -64,6 +75,7 @@ bool import_in_progress(int* files_copied) {
     if (files_copied) *files_copied = 0;
     return false;
 }
+ImportResult import_result() { return ImportResult::None; }
 
 #endif
 

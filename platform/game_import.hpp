@@ -6,8 +6,10 @@
 // without a broad permission, so Gaius asks the system's folder picker
 // (ACTION_OPEN_DOCUMENT_TREE) and copies the chosen folder's files into its
 // own game folder (platform::paths().game), where the rest of Gaius reads them
-// like any other folder. The copy runs on a background thread in the activity
-// (android/app/src/main/java/org/gaius/game/GaiusActivity.java).
+// like any other folder. The activity looks in the chosen folder for the one that
+// holds Caesar's US files (GOG's top folder holds it in a folder called US) and
+// copies only that, so the player may choose either. The copy runs on a background
+// thread in the activity (android/app/src/main/java/org/gaius/game/GaiusActivity.java).
 //
 // Elsewhere these do nothing: desktop players name the folder on the command
 // line, in Settings, or drop it on the window.
@@ -24,6 +26,14 @@ bool can_import_game_folder();
 bool import_game_folder();
 // While the copy runs; with the files copied so far.
 bool import_in_progress(int* files_copied = nullptr);
+// How the last import ended (None: none yet, or the picker was dismissed).
+enum class ImportResult {
+    None,
+    Done,      // the game's files were copied
+    NotFound,  // the chosen folder holds no complete Caesar US release
+    Failed,    // reading or writing failed part-way
+};
+ImportResult import_result();
 
 // What a folder is, as a place for Gaius to play from. Gaius works from the US release of Caesar (the one every finding
 // was made against). GOG's download keeps it in a folder called US, beside the files of an international release
@@ -55,6 +65,11 @@ bool looks_like_game_folder(const std::string& dir);
 // The usable game folders in and below `root`, down to `depth` levels (platform/game_detect.cpp): breadth first, the US
 // build (a folder named US) ahead of any other. GOG's top folder is not one of them -- its US folder is.
 std::vector<std::string> game_folders_under(const std::string& root, int depth = 3);
+
+// The first of `dirs` that is a usable game folder, else the first usable folder below one of them (depth levels down; the
+// US build ahead of the others): where Gaius looks in the settings' folder and in its own game folder, so a GOG top folder
+// copied whole, or imported from a phone, plays from the US folder inside it. Empty if there is none.
+std::string first_game_folder(const std::vector<std::string>& dirs, int depth = 3);
 
 // Looks for the game where it is usually installed -- GAIUS_GAME_DIR and GAIUS_TEST_ASSETS, GOG's registry entries and
 // default folders, Steam's libraries, the usual game folders on every fixed drive (on Linux: ~/GOG Games, Steam's

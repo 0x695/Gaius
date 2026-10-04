@@ -146,4 +146,14 @@ std::vector<std::string> game_folders_under(const std::string& root, int depth) 
     return found;
 }
 
+std::string first_game_folder(const std::vector<std::string>& dirs, int depth) {
+    for (const std::string& dir : dirs)
+        if (looks_like_game_folder(dir)) return dir;
+    for (const std::string& dir : dirs) {
+        const std::vector<std::string> inside = game_folders_under(dir, depth);
+        if (!inside.empty()) return inside.front();
+    }
+    return std::string();
+}
+
 }  // namespace gaius::platform

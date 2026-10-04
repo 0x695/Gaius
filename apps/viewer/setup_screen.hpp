@@ -53,8 +53,9 @@ inline std::string find_game_folder(const ui::Settings& settings) {
     std::error_code ec;
     candidates.push_back(std::filesystem::current_path(ec).string());
 #endif
-    for (const std::string& dir : candidates)
-        if (platform::looks_like_game_folder(dir)) return dir;
+    // The folder itself, or the game in a folder inside one of them (GOG's top folder copied whole, its US folder below).
+    const std::string found = platform::first_game_folder(candidates);
+    if (!found.empty()) return found;
     const std::vector<std::string> installed = platform::detect_game_folders();
     return installed.empty() ? std::string() : installed.front();
 }
@@ -123,8 +124,19 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
     if (note.empty()) note = unusable_game_folder_note(settings);
     int hovered = -1;
     Uint32 last_look = SDL_GetTicks();
+    bool was_importing = false;
     while (game_dir.empty()) {
-        const bool importing = platform::import_in_progress();
+        int copied = 0;
+        const bool importing = platform::import_in_progress(&copied);
+        if (was_importing && !importing) {
+            // The copy has ended: say so if it did not bring a game.
+            const platform::ImportResult result = platform::import_result();
+            if (result == platform::ImportResult::NotFound)
+                note = ui::tr("No complete Caesar US folder in that one. Choose the folder with HOUSES.PL8 in it (GOG: US), or one that holds it.");
+            else if (result == platform::ImportResult::Failed)
+                note = ui::tr("Copying stopped part-way. Choose the folder again.");
+        }
+        was_importing = importing;
         ui::Page page;
         page.title = ui::tr("Gaius needs Caesar's files");
         page.rows.push_back({ui::tr("Gaius plays your own copy of Caesar"), ""});
@@ -133,6 +145,7 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
         for (const std::string& line : wrap_note(note)) page.rows.push_back({line, ""});
         if (platform::can_import_game_folder()) {
             page.rows.push_back({ui::tr("Import copies its folder into Gaius"), ""});
+            if (importing) page.rows.push_back({ui::tr("Copying...") + std::string(" ") + std::to_string(copied), ""});
             page.buttons.push_back({ui::tr(importing ? "Importing..." : "Import"), kImport, !importing});
         } else {
             if (note.empty()) page.rows.push_back({ui::tr("Gaius looked in the usual places and found none."), ""});

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/metrics.hpp"
 
+#include <algorithm>
+
 namespace gaius::ui {
 
 const char* breakpoint_name(Breakpoint b) {
@@ -26,6 +28,12 @@ Breakpoint breakpoint_for(int physical_w, int physical_h, bool has_touch) {
     // 2x scale today, so a wrong answer here is currently cosmetic.
     int shorter = physical_w < physical_h ? physical_w : physical_h;
     return shorter <= 600 ? Breakpoint::Phone : Breakpoint::Handheld;
+}
+
+int touch_scale(int physical_w, int physical_h) {
+    const double per_pixel = std::min(physical_w / static_cast<double>(kOriginalScreenW),
+                                      physical_h / static_cast<double>(kOriginalScreenH));
+    return per_pixel >= 5.0 ? 1 : 2;
 }
 
 Metrics metrics_for(Breakpoint b) {
