@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/strings.hpp"
 
+#include "ui/embedded_lang.hpp"
+
 #include <sstream>
 #include <utility>
 
@@ -59,6 +61,14 @@ Catalog parse_catalog(const std::string& code, const std::string& file_text) {
         if (!english.empty() && !translation.empty()) c.text[english] = translation;
     }
     return c;
+}
+
+std::string embedded_language_file(const std::string& name) {
+    for (int i = 0; i < kEmbeddedLanguageFileCount; ++i) {
+        const EmbeddedLanguageFile& f = kEmbeddedLanguageFiles[i];
+        if (name == f.name) return std::string(reinterpret_cast<const char*>(f.data), f.size);
+    }
+    return std::string();
 }
 
 void set_catalog(Catalog c) { catalog() = std::move(c); }

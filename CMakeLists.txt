@@ -174,7 +174,12 @@ target_link_libraries(gaius_systems PUBLIC gaius_model)
 # --- ui library (Phase 5: scalable toolbar, masterplan 5a point 3) ---------
 # Deliberately free of SDL and of apps/: pure geometry + pixel writes into
 # an RGB24 buffer, so layout/hit-testing is unit-testable headlessly.
+# The language files are built into the program (ui/embedded_lang.hpp): one gaius.exe is all a player needs.
+include(${PROJECT_SOURCE_DIR}/cmake/embed_languages.cmake)
+gaius_embed_languages(${PROJECT_BINARY_DIR}/generated/embedded_lang.cpp)
+
 add_library(gaius_ui STATIC
+  ${PROJECT_BINARY_DIR}/generated/embedded_lang.cpp
   ui/metrics.cpp
   ui/font.cpp
   ui/game_font.cpp
@@ -257,7 +262,7 @@ if(GAIUS_GAME_LIBRARY)
 endif()
 
 if(GAIUS_WEB)
-  # --- the game in a browser: gaius.html + gaius.js + gaius.wasm + gaius.data ----------------------------
+  # --- the game in a browser: gaius.html + gaius.js + gaius.wasm ----------------------------
   # Asyncify lets the viewer's own blocking frame loop yield to the browser (SDL_Delay and SDL_RenderPresent do it),
   # so the same main() runs unchanged. No threads: the page needs no special headers and can be served anywhere,
   # GitHub Pages included. The player's game files are never built in; web/gaius-web.js imports them into
@@ -272,8 +277,7 @@ if(GAIUS_WEB)
     -sFORCE_FILESYSTEM=1 -sINVOKE_RUN=0 -sEXIT_RUNTIME=1 -sMODULARIZE=0
     "-sEXPORTED_RUNTIME_METHODS=['callMain','FS','IDBFS','ccall']"
     "-sEXPORTED_FUNCTIONS=['_main']"
-    --shell-file ${PROJECT_SOURCE_DIR}/web/shell.html
-    --preload-file ${PROJECT_SOURCE_DIR}/lang@/lang)
+    --shell-file ${PROJECT_SOURCE_DIR}/web/shell.html)
   set_target_properties(gaius_web PROPERTIES LINK_DEPENDS ${PROJECT_SOURCE_DIR}/web/shell.html)
   # The page's own files go beside the build (a custom target, so editing them needs no relink); index.html is the
   # shell's output under the name a web server serves by default.
@@ -303,10 +307,6 @@ if(WIN32)
     target_link_options(gaius_viewer PRIVATE -mwindows)
   endif()
 endif()
-# The language files sit beside the executable (ui/strings.hpp).
-add_custom_command(TARGET gaius_viewer POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/lang $<TARGET_FILE_DIR:gaius_viewer>/lang)
-
 # --- CLI tools -----------------------------------------------------------
 add_executable(dump_vpx tools/dump_vpx.cpp)
 target_link_libraries(dump_vpx PRIVATE gaius_formats)

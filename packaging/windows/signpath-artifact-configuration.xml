@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  The artifact configuration for SignPath (docs/RELEASING.md, "Windows signing"): paste it into the project's
+  artifact configuration on signpath.io. The release workflow uploads gaius_viewer.exe as a GitHub Actions artifact,
+  which SignPath receives as a zip with the exe at its root; this says to Authenticode-sign it.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="gaius_viewer.exe">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

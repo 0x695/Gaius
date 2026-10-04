@@ -42,6 +42,8 @@ inline constexpr uint16_t kWelfare = 0x6C46;
 inline constexpr uint16_t kFirePrevention = 0x6C62, kBuildingMaintenance = 0x6C60, kRoadMaintenance = 0x6C5E,
                           kConstruction = 0x6C5C, kArmyDuty = 0x6C5A;
 inline constexpr uint16_t kFireNeed = 0x6C44, kBuildingNeed = 0x6C42, kRoadNeed = 0x6C40, kConstructionNeed = 0x6C3E;
+// The pleb groups `assign` keeps back before it gives any to a duty.
+inline constexpr int kPlebsKeptBack = 50;
 
 // 0x2DC72: the needs. With shift 4 at rank 1 or below, 3 at ranks 2-3, 2
 // above (1 on the hard difficulty) and 16 more buildings counted at rank 3:
@@ -57,6 +59,7 @@ int set_needs(model::CityState& state, int difficulty);
 // (plebs / 20) x rank + 150) / 3. Paying less loses the difference in pleb
 // groups, at most 10 a month; paying more gains half the difference, at most 5,
 // up to 2000.
+int expected_welfare(const model::CityState& state);
 void pay_welfare(model::CityState& state);
 
 // 0x2DD21: 50 pleb groups are kept back; the rest go to the duties in order --

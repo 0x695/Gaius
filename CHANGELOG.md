@@ -34,6 +34,8 @@ The first public beta: Gaius plays a whole career of Caesar, from the start scre
 - File names in any letter case work (`houses.pl8`, `Houses.PL8`), which a case-sensitive file system such as Linux's needs.
 
 ### Comforts
+- The Tribune of the Plebs looks after itself (Settings > Game > Tribune: Automatic, the default). The original leaves it to you: a new game starts with 10 pleb groups on each duty, which covers a city of about 160 buildings, and past that the shortfall is the chance, every month, of a fire, a collapse or worn roads. Left alone, a real 166-house city loses about half its houses in four years. Automatic does what a careful player does with the Tribune's page, once a month: it staffs the fire, building and road duties to what the city needs (from plebs nobody has given work, never from army duty) and sets the welfare so the plebs keep coming. *By hand* is the original's rule.
+- Windows is one `gaius.exe`: the language files are inside it, so nothing else is needed. The release has it alone and in a zip with the readme and the licences.
 - Any window size, fullscreen, UI scale 1 to 4, edge, key and drag scrolling, remappable keys and buttons, gamepad play (Steam Deck), touch gestures (Android and phones in the browser), a German translation of Gaius's own texts.
 - Your choice of Gaius's gold pointer or the original's arrow, and of the original's game pace or a faster one.
 - Game files are found without being told (GOG, Steam, the usual folders) or chosen; a browser version imports them from a dropped folder or zip.

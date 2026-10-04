@@ -33,7 +33,7 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir site
-          cp build-web/index.html build-web/gaius.js build-web/gaius.wasm build-web/gaius.data \
+          cp build-web/index.html build-web/gaius.js build-web/gaius.wasm \
              build-web/gaius-web.js build-web/gaius-web.css build-web/gaius-version.js build-web/banner.svg \
              THIRD_PARTY_NOTICES.txt site/
           touch site/.nojekyll

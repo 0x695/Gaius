@@ -71,6 +71,7 @@
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
 #include "apps/viewer/setup_screen.hpp"
+#include "apps/viewer/tribune_assist.hpp"
 #include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
@@ -111,6 +112,7 @@
 #include "systems/economy.hpp"
 #include "ui/metrics.hpp"
 #include "ui/settings.hpp"
+#include "ui/embedded_lang.hpp"
 #include "ui/strings.hpp"
 #include "ui/toolbar.hpp"
 
@@ -243,8 +245,6 @@ void render_sprite_view(const formats::IndexedImage& img, const formats::Palette
 
 namespace {
 
-// The languages lang/languages.txt lists, read through SDL so Android finds
-// them among the APK's assets: English first.
 // Gaius pointer as a system cursor (apps/viewer/cursor.hpp): 32 pixels, or larger on a display that scales, so it
 // stays the size of the system own. Null when the platform has no cursors (a phone).
 SDL_Cursor* make_gaius_cursor() {
@@ -293,6 +293,9 @@ void write_cursor_sheet(const char* path) {
     stbi_write_png(path, W, H, 3, rgb.data(), W * 3);
 }
 
+// The languages lang/languages.txt lists: English first, then the files built into the program (ui/embedded_lang.hpp),
+// each replaced by the file of the same name in a lang/ folder beside the executable when there is one, which is how a
+// translator tries a language without rebuilding.
 std::vector<ui::Catalog> load_languages() {
     std::vector<ui::Catalog> out{ui::Catalog{"en", "English", {}}};
     std::string base;
@@ -304,13 +307,13 @@ std::vector<ui::Catalog> load_languages() {
 #endif
     const auto read = [&](const std::string& name) {
         std::string text;
-        SDL_RWops* rw = SDL_RWFromFile((base + "lang/" + name).c_str(), "rb");
-        if (!rw) return text;
-        char buf[4096];
-        size_t n = 0;
-        while ((n = SDL_RWread(rw, buf, 1, sizeof buf)) > 0) text.append(buf, n);
-        SDL_RWclose(rw);
-        return text;
+        if (SDL_RWops* rw = SDL_RWFromFile((base + "lang/" + name).c_str(), "rb")) {
+            char buf[4096];
+            size_t n = 0;
+            while ((n = SDL_RWread(rw, buf, 1, sizeof buf)) > 0) text.append(buf, n);
+            SDL_RWclose(rw);
+        }
+        return text.empty() ? ui::embedded_language_file(name) : text;
     };
     std::string index = read("languages.txt");
     size_t at = 0;
@@ -760,6 +763,8 @@ int main(int argc, char** argv) {
     auto report_month = [&]() {
         std::printf("month %d, year %d: population %d, funds %d Dn\n", sim.month + 1, sim.year,
                     4 * sim.population_units, model::global_word(state, systems::economy::kFunds));
+        // Settings > Game > Tribune: Automatic staffs the duties and pays the welfare the city needs (tribune_assist.hpp).
+        if (settings.tribune_auto) viewer::tribune_assist(state, sim.difficulty);
         if (sim.month == 0) {
             if (viewer::autosave_due(autosave_countdown, settings.autosave_years)) autosave_pending = true;
             // The year just settled (systems::economy::run_year): the Treasurer's report.

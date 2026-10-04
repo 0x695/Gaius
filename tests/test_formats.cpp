@@ -44,6 +44,7 @@
 #include "model/city_state.hpp"
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
+#include "apps/viewer/tribune_assist.hpp"
 #include "apps/viewer/cursor.hpp"
 #include "apps/viewer/original_intro.hpp"
 #include "gaius_version.hpp"
@@ -51,6 +52,7 @@
 #include "platform/game_import.hpp"
 #include "platform/paths.hpp"
 #include "ui/settings.hpp"
+#include "ui/embedded_lang.hpp"
 #include "ui/strings.hpp"
 #include "render/city_render.hpp"
 #include "render/province_render.hpp"
@@ -3134,7 +3136,7 @@ void test_ui_strings() {
     // The shipped files parse, and every language listed has a file.
     const fs::path lang = fs::path(__FILE__).parent_path().parent_path() / "lang";
     const std::string index = [&] {
-        std::ifstream f(lang / "languages.txt");
+        std::ifstream f(lang / "languages.txt", std::ios::binary);
         return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
     }();
     CHECK(!index.empty());
@@ -3145,12 +3147,16 @@ void test_ui_strings() {
         while (!code.empty() && (code.back() == '\r' || code.back() == ' ')) code.pop_back();
         if (code.empty() || code[0] == '#' || code == "en") continue;
         ++listed;
-        std::ifstream f(lang / (code + ".txt"));
+        std::ifstream f(lang / (code + ".txt"), std::ios::binary);
         const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         const Catalog lc = parse_catalog(code, text);
         CHECK(!lc.text.empty() && lc.name != code);
+        // The copy built into the program is the file's text, byte for byte.
+        CHECK(embedded_language_file(code + ".txt") == text);
     }
     CHECK(listed >= 1);
+    CHECK(embedded_language_file("languages.txt") == index);
+    CHECK(embedded_language_file("template.txt").empty() && embedded_language_file("nonsense.txt").empty());
 }
 
 void test_settings_page_rows() {
@@ -3194,6 +3200,8 @@ void test_safety_net_settings() {
     namespace viewer = gaius::viewer;
     const Settings defaults;
     CHECK(defaults.autosave_years == 1 && defaults.pause_unfocused && defaults.file_version == kConfigVersion);
+    CHECK(defaults.tribune_auto && parse_settings("tribune_auto = 0\n").tribune_auto == false);
+    CHECK(parse_settings(settings_text(Settings{})).tribune_auto && parse_settings("ui_scale = 2\n").tribune_auto);
     // The file says which layout it has, and reads back as current.
     const std::string text = settings_text(defaults);
     CHECK(text.find("config_version = " + std::to_string(kConfigVersion)) != std::string::npos);
@@ -3241,6 +3249,10 @@ void test_safety_net_settings() {
     viewer::adjust_setting(viewer::kActionSettingDown + 2 * viewer::row_id(viewer::SettingRow::PauseUnfocused), t, o,
                            messages, {});
     CHECK(!t.pause_unfocused);
+    CHECK(t.tribune_auto);
+    viewer::adjust_setting(viewer::kActionSettingDown + 2 * viewer::row_id(viewer::SettingRow::TribuneAuto), t, o,
+                           messages, {});
+    CHECK(!t.tribune_auto && !parse_settings(settings_text(t)).tribune_auto);
 }
 
 void test_save_slots() {
@@ -4185,6 +4197,57 @@ void test_plebs_duties() {
         return global_word(*st, plebs::kPlebs);
     };
     CHECK(welfare(89) == 112 && welfare(90) == 112 && welfare(0) == 102 && welfare(200) == 117);
+}
+
+// Settings > Game > Tribune: Automatic does with the Tribune's arrows what a careful player does.
+void test_tribune_assist() {
+    std::printf("test_tribune_assist (the automatic Tribune: duties staffed to the need, welfare, nothing taken)\n");
+    using namespace gaius::systems;
+    auto st = std::make_unique<CityState>();
+    st->global_words_128.assign(256, 0);
+    st->final_state.assign(68, 0);
+    const auto word = [&](uint16_t ds) { return global_word(*st, ds); };
+    const auto set = [&](uint16_t ds, int v) { set_global_word(*st, ds, v); };
+    // A new game's Tribune (the engine's reset: 120 plebs, 10 on every duty, 20 unassigned, welfare 88) over a city of
+    // 500 buildings and 160 road cells: the needs are 31, 16 and 10.
+    set(0x6C30, 1);
+    set(plebs::kPlebs, 120);
+    set(plebs::kUnassigned, 20);
+    for (uint16_t d : {plebs::kFirePrevention, plebs::kBuildingMaintenance, plebs::kRoadMaintenance,
+                       plebs::kConstruction, plebs::kArmyDuty})
+        set(d, 10);
+    set(plebs::kWelfare, 88);
+    set(0x6BF2, 500);
+    set(0x6BF0, 160);
+    gaius::viewer::tribune_assist(*st, 0);
+    CHECK(word(plebs::kFireNeed) == 31 && word(plebs::kBuildingNeed) == 16 && word(plebs::kRoadNeed) == 10);
+    // Fire prevention first, up to what the unassigned plebs allow; army duty and the other duties are not touched.
+    CHECK(word(plebs::kFirePrevention) == 30 && word(plebs::kUnassigned) == 0);
+    CHECK(word(plebs::kBuildingMaintenance) == 10 && word(plebs::kRoadMaintenance) == 10 &&
+          word(plebs::kConstruction) == 10 && word(plebs::kArmyDuty) == 10);
+    // Fewer plebs than the duties need: welfare ten above what they expect, so they grow.
+    CHECK(plebs::expected_welfare(*st) == 92 && word(plebs::kWelfare) == 102);
+
+    // More plebs: every duty reaches its target (need and a fifth, and one), a duty above its need stays, and welfare
+    // is one above what they expect, which keeps the count where it is.
+    set(plebs::kPlebs, 300);
+    set(plebs::kUnassigned, 100);
+    gaius::viewer::tribune_assist(*st, 0);
+    CHECK(word(plebs::kFirePrevention) == 38 && word(plebs::kBuildingMaintenance) == 20 &&
+          word(plebs::kRoadMaintenance) == 13 && word(plebs::kConstruction) == 10);
+    CHECK(word(plebs::kUnassigned) == 100 - 8 - 10 - 3);
+    CHECK(word(plebs::kWelfare) == plebs::expected_welfare(*st) + 1);
+    const int paid = word(plebs::kPlebs);
+    plebs::pay_welfare(*st);
+    CHECK(word(plebs::kPlebs) == paid);
+    // It does not run away: a second month changes nothing.
+    const int fire = word(plebs::kFirePrevention), welfare = word(plebs::kWelfare);
+    gaius::viewer::tribune_assist(*st, 0);
+    CHECK(word(plebs::kFirePrevention) == fire && word(plebs::kWelfare) == welfare);
+    // With that staffing a month's roll finds the duties covered: thresholds of 100.
+    plebs::assign(*st);
+    plebs::set_thresholds(*st, 1);
+    CHECK(word(0x6BE4) == 100 && word(0x6BE2) == 100 && word(0x6BE0) == 100);
 }
 
 // Every save's pleb figures are what the routines give from its own counts.
@@ -7479,6 +7542,7 @@ int main() {
     test_province_commands();
     test_province_construction();
     test_plebs_duties();
+    test_tribune_assist();
     test_plebs_match_saves();
     test_economy_province_costs();
     test_administration_ratings();

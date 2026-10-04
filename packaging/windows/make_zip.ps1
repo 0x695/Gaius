@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Packs a Windows build into <Name>.zip: gaius.exe, its language files, the readme, the licence and the third-party
-# notices. No game files: players bring their own copy of Caesar. A static build (vcpkg's x64-windows-static, the
+# Packs a Windows build into <Name>.zip: gaius.exe (the language files are built into it), the readme, the licence
+# and the third-party notices. No game files: players bring their own copy of Caesar. A static build (vcpkg's x64-windows-static, the
 # release workflow's) is one program that needs nothing installed; a dynamic one brings SDL2.dll along.
 #
 #   pwsh packaging/windows/make_zip.ps1 -Build build/Release -Name gaius-0.9.0-windows-x64
@@ -22,7 +22,6 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 Copy-Item (Join-Path $build 'gaius_viewer.exe') (Join-Path $dir 'gaius.exe')
 $sdl = Join-Path $build 'SDL2.dll'
 if (Test-Path $sdl) { Copy-Item $sdl $dir }
-Copy-Item -Recurse (Join-Path $root 'lang') (Join-Path $dir 'lang')
 Copy-Item (Join-Path $here 'README.txt') $dir
 Copy-Item (Join-Path $root 'LICENSE') $dir
 Copy-Item (Join-Path $root 'THIRD_PARTY_NOTICES.txt') $dir

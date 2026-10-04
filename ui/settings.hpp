@@ -54,6 +54,10 @@ struct Settings {
     bool touch_hints_seen = false;  // the touch controls page has been shown once
     int autosave_years = 1;         // one of kAutosaveYears
     bool pause_unfocused = true;    // time stops while the window or browser tab is not the one in front
+    // The Tribune of the Plebs looks after itself (apps/viewer/tribune_assist.hpp): each month the duties that keep fires,
+    // collapses and road wear away are staffed to what the city needs, and welfare keeps the plebs coming. Off is the
+    // original's rule, where the player does it by hand on the Tribune's page.
+    bool tribune_auto = true;
     // The config_version the file carried when it was read (0: a file from before versions, or none). Settings made
     // by the program always have kConfigVersion.
     int file_version = kConfigVersion;

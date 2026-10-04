@@ -18,11 +18,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "The Gaius contributors"
+            VALUE "CompanyName", "0x"
             VALUE "FileDescription", "Gaius"
-            VALUE "InternalName", "gaius_viewer"
-            VALUE "LegalCopyright", "GPL-3.0-or-later"
-            VALUE "OriginalFilename", "gaius_viewer.exe"
+            VALUE "InternalName", "gaius"
+            VALUE "LegalCopyright", "Copyright (C) 2026 0x. GPL-3.0-or-later"
+            VALUE "OriginalFilename", "gaius.exe"
             VALUE "ProductName", "Gaius"
             VALUE "FileVersion", "@GAIUS_VERSION_STRING@"
             VALUE "ProductVersion", "@GAIUS_VERSION_STRING@"

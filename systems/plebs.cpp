@@ -27,10 +27,15 @@ int set_needs(model::CityState& state, int difficulty) {
     return construction;
 }
 
+int expected_welfare(const model::CityState& state) {
+    const int plebs = g(state, kPlebs);
+    const int expected_extra = w16((plebs / 20) * g(state, 0x6C30) + 150);
+    return w16(plebs - (g(state, kUnassigned) >> 2) + expected_extra) / 3;
+}
+
 void pay_welfare(model::CityState& state) {
     const int plebs = g(state, kPlebs), welfare = g(state, kWelfare);
-    const int expected_extra = w16((plebs / 20) * g(state, 0x6C30) + 150);
-    const int expected = w16(plebs - (g(state, kUnassigned) >> 2) + expected_extra) / 3;
+    const int expected = expected_welfare(state);
     if (expected > welfare) {
         int loss = expected - welfare;
         if (loss > 10) loss = 10;
@@ -47,13 +52,13 @@ void pay_welfare(model::CityState& state) {
 void assign(model::CityState& state) {
     const int plebs = g(state, kPlebs);
     const uint16_t duties[] = {kFirePrevention, kBuildingMaintenance, kRoadMaintenance, kConstruction, kArmyDuty};
-    if (plebs <= 50) {
+    if (plebs <= kPlebsKeptBack) {
         set(state, 0x6C64, plebs);
         set(state, kUnassigned, 0);
         for (uint16_t d : duties) set(state, d, 0);
         return;
     }
-    int left = plebs - 50;
+    int left = plebs - kPlebsKeptBack;
     for (size_t i = 0; i < std::size(duties); ++i) {
         const int assigned = g(state, duties[i]);
         if (assigned < left) {

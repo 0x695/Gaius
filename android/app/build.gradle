@@ -52,10 +52,8 @@ android {
             }
         }
     }
-    // Gaius's language files (lang/) go into the APK's assets as lang/.
-    sourceSets.main.assets.srcDirs += "$buildDir/gaius-assets"
+    // Gaius's language files are built into libmain.so (ui/embedded_lang.hpp), not shipped as assets.
     applicationVariants.all { variant ->
-        tasks["merge${variant.name.capitalize()}Assets"].dependsOn("copyGaiusLanguages")
         tasks["merge${variant.name.capitalize()}Assets"]
             .dependsOn("externalNativeBuild${variant.name.capitalize()}")
     }
@@ -90,11 +88,3 @@ android {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
 }
-
-task copyGaiusLanguages(type: Copy) {
-    from "${rootProject.projectDir}/../lang"
-    into "$buildDir/gaius-assets/lang"
-}
-
-// Every task that reads the assets sees the languages.
-preBuild.dependsOn copyGaiusLanguages

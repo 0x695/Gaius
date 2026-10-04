@@ -48,7 +48,7 @@ enum class SettingRow {
     Tunes, Effects, CitySounds, MusicVolume, EffectsVolume,
     WindowMode, UiScale, FrameRate, PositionIndicator, IconNames,
     GamepadPointer, EdgeScroll, Cursor, Language,
-    Autosave, PauseUnfocused,
+    Autosave, PauseUnfocused, TribuneAuto,
     Binding,  // + the index into platform::kBindable
 };
 
@@ -149,6 +149,8 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
                 row(ui::tr("Autosave"), settings_detail::autosave_name(s.autosave_years), row_id(SettingRow::Autosave)));
             page.rows.push_back(row(ui::tr("Pause when away"), on_off(s.pause_unfocused),
                                     row_id(SettingRow::PauseUnfocused)));
+            page.rows.push_back(row(ui::tr("Tribune"), ui::tr(s.tribune_auto ? "Automatic" : "By hand"),
+                                    row_id(SettingRow::TribuneAuto)));
             page.buttons.push_back({ui::tr("Resume"), kActionResume, v.in_game});
             page.buttons.push_back({ui::tr("Pause"), kActionPause, v.in_game});
             page.buttons.push_back({ui::tr("Load"), kActionSettingsLoad, v.game_found});
@@ -306,6 +308,7 @@ inline bool adjust_setting(int action, ui::Settings& s, ui::GameOptions& o, bool
             break;
         }
         case SettingRow::PauseUnfocused: s.pause_unfocused = !s.pause_unfocused; break;
+        case SettingRow::TribuneAuto: s.tribune_auto = !s.tribune_auto; break;
         case SettingRow::Binding: break;
     }
     return true;

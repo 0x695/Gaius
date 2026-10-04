@@ -12,7 +12,9 @@
 // language file maps it to a translation. Anything a file doesn't translate
 // shows in English, so a partial translation works.
 //
-// A language file is UTF-8 text in lang/, named by its code (de.txt):
+// A language file is UTF-8 text in lang/, named by its code (de.txt). The files are built into the program
+// (ui/embedded_lang.hpp), so gaius.exe needs nothing beside it; a lang/ folder next to the executable replaces the built-in
+// file of the same name, which is how to try a translation without rebuilding:
 //   # language = Deutsch          (the name the Settings screen shows)
 //   Save the game = Spiel speichern
 // one "English = translation" a line, split at the first " = ". lang/

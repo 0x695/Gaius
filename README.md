@@ -78,7 +78,7 @@ Every release is on the [releases page](https://github.com/0x695/Gaius/releases)
 | Where | Download | Notes |
 |---|---|---|
 | **Your browser** | [open the page](https://0x695.github.io/Gaius/) | Nothing to install. It asks for your copy of Caesar the first time; the browser keeps it and your saves. |
-| **Windows** | `gaius-<version>-windows-x64.zip` | Unzip anywhere and run `gaius.exe`. One file, nothing to install. It is not code-signed, so Windows SmartScreen may ask you to confirm. |
+| **Windows** | `gaius-<version>-windows-x64.exe` (or the `.zip`, which adds the readme and licences) | Run it. One file, nothing to install: even the language files are inside. It is not code-signed yet, so Windows SmartScreen may ask you to confirm. |
 | **Linux and Steam Deck** | `gaius-<version>-linux-x86_64.tar.gz` | Needs SDL 2. The Steam Deck notes are inside ([`STEAM_DECK.md`](packaging/linux/STEAM_DECK.md)). |
 | **Android** | `gaius-<version>-android.apk` | Allow installs from your browser or file manager, then pick your Caesar folder when it asks. |
 | **Your own server** | `gaius-<version>-web.zip` | The browser version as static files ([`web/README.md`](web/README.md)). |
@@ -177,6 +177,8 @@ House rules: new source files start with an `SPDX-License-Identifier` line; find
 
 **Can I play it in a browser?** Yes: [the web build](https://0x695.github.io/Gaius/) is the same engine compiled to WebAssembly. The first visit asks for your copy of Caesar (a dropped or chosen folder, or a zip of one); the files and your saves stay in the browser's storage on your machine, and *Saves* downloads them. Only Chromium-based browsers have been tried so far.
 
+**Why do fires and collapses keep happening?** In the original they come from the Tribune of the Plebs' page: fire prevention, building and road maintenance need pleb groups in proportion to the city, a new game gives each 10, and the share of the need left uncovered is the chance, every month, of a fire, a collapse or worn roads. Gaius's *Tribune: Automatic* (Settings > Game, on by default) keeps those duties staffed and the plebs coming for you; set it to *By hand* for the original's rule and do it on the Tribune's page yourself.
+
 **Is this Caesar II or Caesar III?** No, only the first game. Caesar III has [Julius](https://github.com/bvschaik/julius) and [Augustus](https://github.com/Keriew/augustus).
 
 **Does it run on the Steam Deck?** It is built for it, with gamepad-only play and fullscreen on first start ([notes](packaging/linux/STEAM_DECK.md)), but nobody has tried it on the real hardware yet. The same goes for a physical Android phone; the emulator, Windows and CI's Linux build are checked.
@@ -205,6 +207,7 @@ This repo ships **no original game files**, ever. Every decoder and every test t
 | [`scripts/README.md`](scripts/README.md) | the scripts, in full |
 | [`android/README.md`](android/README.md), [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md), [`web/README.md`](web/README.md) | Android, the Steam Deck and the browser |
 | [`docs/RELEASING.md`](docs/RELEASING.md), [`CHANGELOG.md`](CHANGELOG.md) | how a release is made, and what each one changed |
+| [`docs/CODE_SIGNING_POLICY.md`](docs/CODE_SIGNING_POLICY.md) | what is signed, by whom, and what the program does with the network |
 | [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt) | the licences of the components Gaius contains |
 | [`docs/TRAILER_PROMPT.md`](docs/TRAILER_PROMPT.md) | a prompt pack for a teaser trailer |
 

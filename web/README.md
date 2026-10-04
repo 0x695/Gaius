@@ -23,7 +23,7 @@ cmake --build build-web -j
 python -m http.server 8080 --directory build-web     # then open http://localhost:8080
 ```
 
-On Windows, PowerShell, with `emsdk_env.ps1` run and a Ninja on `PATH`, add `-G Ninja`. The result in `build-web/` is `index.html` (the shell, `shell.html`), `gaius.js`, `gaius.wasm`, `gaius.data` (the language files) and the page's own `gaius-web.js`, `gaius-web.css` and `banner.svg`. Any static host serves it; there are **no special headers** to set, because the build uses no threads (below).
+On Windows, PowerShell, with `emsdk_env.ps1` run and a Ninja on `PATH`, add `-G Ninja`. The result in `build-web/` is `index.html` (the shell, `shell.html`), `gaius.js`, `gaius.wasm` and the page's own `gaius-web.js`, `gaius-web.css` and `banner.svg`. Any static host serves it; there are **no special headers** to set, because the build uses no threads (below).
 
 ## How it differs from the desktop build
 

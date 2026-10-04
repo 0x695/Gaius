@@ -6,7 +6,7 @@ A release is a commit tagged `v<version>`. Pushing the tag runs `.github/workflo
 
 | Download | Built by | Notes |
 |---|---|---|
-| `gaius-<version>-windows-x64.zip` | `windows` job: MSVC, SDL 2 and the C++ runtime linked in (vcpkg `x64-windows-static`), `packaging/windows/make_zip.ps1` | one `gaius.exe` that needs nothing installed, plus `lang/`, a readme, `LICENSE`, `THIRD_PARTY_NOTICES.txt`. Not code-signed, so Windows SmartScreen may warn. |
+| `gaius-<version>-windows-x64.exe` and `.zip` | `windows` job: MSVC, SDL 2 and the C++ runtime linked in (vcpkg `x64-windows-static`), `packaging/windows/make_zip.ps1` | one `gaius.exe` that needs nothing installed (the language files are built into it), alone and in the zip with a readme, `LICENSE`, `THIRD_PARTY_NOTICES.txt`. Signed when the repository has a signing certificate (below); otherwise unsigned, and Windows SmartScreen warns. |
 | `gaius-<version>-linux-x86_64.tar.gz` | `linux` job (Ubuntu 22.04), `packaging/linux/make_tarball.sh` | the program, launcher, desktop entry, icon, Steam Deck notes. Needs the system's SDL 2. |
 | `gaius-<version>-web.zip` | `web` job: Emscripten 6.0.11 | the page of [`web/`](../web/README.md), to host yourself; the hosted copy is the GitHub Pages site. |
 | `gaius-<version>-android.apk` and `.aab` | `android` job | signed, if the repository has the keystore secrets (below); otherwise `gaius-<version>-android-debug.apk`, debug-signed and installable for testing. This job may fail without stopping the release. |
@@ -44,6 +44,24 @@ Without a key the workflow builds a debug APK. For a signed release, make a keys
 | `GAIUS_KEY_PASSWORD` | the key password |
 
 The Android `versionName` is the version and `versionCode` is `major * 10000 + minor * 100 + patch`, so every release is a higher number than the one before.
+
+## Windows signing (once)
+
+An unsigned `gaius.exe` is shown by Windows as from an "Unknown publisher" and SmartScreen asks the player to confirm. A signed one shows the publisher's name, and SmartScreen's warning fades as the certificate gains reputation. Gaius uses the [SignPath Foundation](https://signpath.org/)'s free certificate for open-source projects: the publisher Windows shows is "SignPath Foundation", the signing is done by SignPath (the private key never leaves it), and the release workflow only has to send the built exe and wait for the signature.
+
+**To set it up** (the application is the owner's; SignPath's own documentation, [docs.signpath.io](https://docs.signpath.io/), covers each screen):
+
+1. **Release first, unsigned.** SignPath wants a project that is already released: tag `v0.9.0` as usual (steps above) and let it go out unsigned.
+2. **Apply** at [signpath.org](https://signpath.org/) with the repository, the release and [`CODE_SIGNING_POLICY.md`](CODE_SIGNING_POLICY.md), which is the policy page they ask for (it names `0x` as committer, reviewer and approver). Their conditions: an OSI-approved licence (GPL-3.0-or-later), no proprietary component, no malware, binaries built from source by an automated build, and each signing request approved by hand. The one thing they may query is the music driver, which follows the source of the Audio Interface Library 2.14 driver, released by its author as freeware (see `THIRD_PARTY_NOTICES.txt`).
+3. **In SignPath**, once accepted: create the project (slug `gaius`), link *GitHub.com* as its trusted build system and install the SignPath GitHub App on the repository, paste [`packaging/windows/signpath-artifact-configuration.xml`](../packaging/windows/signpath-artifact-configuration.xml) as the artifact configuration, add a signing policy for releases (slug `release-signing`) with yourself as the approver, and make an API token for a submitter.
+4. **In the repository** (*Settings > Secrets and variables > Actions*): the secret `SIGNPATH_API_TOKEN` (that token) and the variable `SIGNPATH_ORGANIZATION_ID`. The variables `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` and `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` are only needed if you chose other names than `gaius` and `release-signing`, or want a configuration other than the project's default.
+5. **Then update the README** with the attribution that `CODE_SIGNING_POLICY.md` carries ("Free code signing provided by SignPath.io, certificate by SignPath Foundation") and a link to that page.
+
+From then on a release (a pushed tag, or a manual run with *publish* on) uploads the built `gaius.exe` to SignPath and **waits up to an hour for you to approve the request** in SignPath; open the link in the job's log, check that it is the release you meant, and approve it. A dry run (publish off) never asks for a signature and stays unsigned. The signature's status is printed at the end of the `windows` job either way.
+
+**Another certificate.** A certificate you hold as a `.pfx` file (an organisation's own, or one a CA lets you export) works through two secrets, used when SignPath is not set up: `GAIUS_SIGN_PFX_BASE64` (`base64 -w0 gaius.pfx`) and `GAIUS_SIGN_PFX_PASSWORD`. `packaging/windows/sign.ps1` does the signing (signtool, SHA-256, an RFC 3161 timestamp so the signature outlives the certificate) and works the same on your machine: `pwsh packaging/windows/sign.ps1 -File gaius.exe -Pfx gaius.pfx -Password ...`. Most certificate authorities now keep the private key on hardware, which a `.pfx` cannot express; [Azure Artifact Signing](https://azure.microsoft.com/products/artifact-signing/) (about US$10 a month; individuals in the USA and Canada, organisations in the USA, Canada, the EU and the UK) is the paid alternative to SignPath and would be a step of its own in the `windows` job, not wired.
+
+Keep any certificate, token and password outside the repository except as a secret, like the Android keystore.
 
 ## The web site
 

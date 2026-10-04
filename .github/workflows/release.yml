@@ -6,6 +6,14 @@
 #   * Run it by hand (Actions > release > Run workflow) with "publish" off for a dry run: the same builds, kept as
 #     artifacts of the run, and no release.
 #
+# gaius.exe is Authenticode-signed when the repository is set up for it (docs/RELEASING.md, "Windows signing"):
+#   * with SignPath (free for open source; docs/CODE_SIGNING_POLICY.md): the secret SIGNPATH_API_TOKEN and the variable
+#     SIGNPATH_ORGANIZATION_ID. Only a release (a tag, or a manual run with "publish" on) asks for a signature, and SignPath
+#     waits for the owner's approval of each request, so a dry run stays unsigned;
+#   * or with a certificate in a .pfx file: the secrets GAIUS_SIGN_PFX_BASE64 and GAIUS_SIGN_PFX_PASSWORD.
+# Without either it is built unsigned. The release carries the exe twice: alone (gaius-<version>-windows-x64.exe: the
+# language files are inside, so nothing else is needed) and in the zip with the readme and the licences.
+#
 # Android is signed when the repository has the secrets GAIUS_KEYSTORE_BASE64, GAIUS_KEYSTORE_PASSWORD, GAIUS_KEY_ALIAS and
 # GAIUS_KEY_PASSWORD; without them the job builds a debug-signed APK (installable for testing) instead. The Android job may
 # fail without stopping the release: its files are simply missing from it.
@@ -79,8 +87,14 @@ jobs:
   windows:
     needs: check
     runs-on: windows-2022
+    permissions:
+      contents: read
+      actions: read
     env:
       VERSION: ${{ needs.check.outputs.version }}
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+      GAIUS_SIGN_PFX_BASE64: ${{ secrets.GAIUS_SIGN_PFX_BASE64 }}
+      GAIUS_SIGN_PFX_PASSWORD: ${{ secrets.GAIUS_SIGN_PFX_PASSWORD }}
     defaults:
       run:
         shell: pwsh
@@ -95,12 +109,60 @@ jobs:
         run: cmake --build build --config Release -j 4
       - name: Test
         run: ./build/Release/gaius_tests.exe
+      - name: Stage the unsigned exe for SignPath
+        if: ${{ env.SIGNPATH_API_TOKEN != '' && (startsWith(github.ref, 'refs/tags/v') || inputs.publish) }}
+        run: |
+          New-Item -ItemType Directory unsigned | Out-Null
+          Copy-Item build/Release/gaius_viewer.exe unsigned/gaius_viewer.exe
+      - name: Upload the unsigned exe
+        id: unsigned
+        if: ${{ env.SIGNPATH_API_TOKEN != '' && (startsWith(github.ref, 'refs/tags/v') || inputs.publish) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-windows
+          path: unsigned/gaius_viewer.exe
+      # Waits for the owner to approve the request in SignPath (up to an hour), then brings the signed file back.
+      - name: Sign gaius.exe with SignPath
+        if: ${{ env.SIGNPATH_API_TOKEN != '' && (startsWith(github.ref, 'refs/tags/v') || inputs.publish) }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'gaius' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed
+      - name: Use the signed exe
+        if: ${{ env.SIGNPATH_API_TOKEN != '' && (startsWith(github.ref, 'refs/tags/v') || inputs.publish) }}
+        run: |
+          Copy-Item signed/gaius_viewer.exe build/Release/gaius_viewer.exe -Force
+          if (-not (Get-AuthenticodeSignature build/Release/gaius_viewer.exe).SignerCertificate) { throw 'SignPath returned an unsigned exe' }
+      - name: Sign gaius.exe with a certificate file
+        if: ${{ env.GAIUS_SIGN_PFX_BASE64 != '' && env.SIGNPATH_API_TOKEN == '' }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'gaius-sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:GAIUS_SIGN_PFX_BASE64))
+          try {
+            ./packaging/windows/sign.ps1 -File build/Release/gaius_viewer.exe -Pfx $pfx -Password $env:GAIUS_SIGN_PFX_PASSWORD
+          } finally {
+            Remove-Item $pfx -Force
+          }
       - name: Package
-        run: ./packaging/windows/make_zip.ps1 -Build build/Release -Name "gaius-$env:VERSION-windows-x64"
+        run: |
+          ./packaging/windows/make_zip.ps1 -Build build/Release -Name "gaius-$env:VERSION-windows-x64"
+          Copy-Item build/Release/gaius_viewer.exe "gaius-$env:VERSION-windows-x64.exe"
+      - name: Signature
+        run: |
+          $s = Get-AuthenticodeSignature "gaius-$env:VERSION-windows-x64.exe"
+          "Authenticode: $($s.Status) $($s.SignerCertificate.Subject)"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
-          path: gaius-*-windows-x64.zip
+          path: |
+            gaius-*-windows-x64.zip
+            gaius-*-windows-x64.exe
 
   web:
     needs: check
@@ -124,7 +186,7 @@ jobs:
         run: |
           name="gaius-$VERSION-web"
           mkdir "$name"
-          cp build-web/index.html build-web/gaius.js build-web/gaius.wasm build-web/gaius.data \
+          cp build-web/index.html build-web/gaius.js build-web/gaius.wasm \
              build-web/gaius-web.js build-web/gaius-web.css build-web/gaius-version.js build-web/banner.svg \
              LICENSE THIRD_PARTY_NOTICES.txt "$name/"
           cp web/README.md "$name/README.md"
@@ -213,7 +275,7 @@ jobs:
           {
             echo
             echo "---"
-            echo "**Downloads:** Windows (one exe, nothing to install), Linux (needs SDL 2; the Steam Deck notes are inside), Android, and a zip of the web page to host yourself. Or play in the browser: $page"
+            echo "**Downloads:** Windows (one exe, nothing to install; also in a zip with the readme), Linux (needs SDL 2; the Steam Deck notes are inside), Android, and a zip of the web page to host yourself. Or play in the browser: $page"
             echo
             echo "You need your own copy of Caesar (1992); none is included. SHA-256 checksums are in \`SHA256SUMS\`."
           } >> notes.md

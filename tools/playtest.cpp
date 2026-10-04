@@ -12,7 +12,8 @@
 //        playtest <game folder> fuzz    [seed [months [funding [difficulty]]]]  a player who clicks at random
 //        playtest <game folder> inspect <save>   houses by grade, services and last year's accounts
 // The bot is tuned for funding 0 (8000 Dn) on Easy or Medium. Environment knobs: PT_QUIET, PT_TRACE, PT_DUTIES=<year>,
-// PT_PROVINCE, PT_GRADES, PT_HOUSES, PT_TAX, PT_ITAX, PT_UNEMP, PT_MARGIN, PT_PROVINCE_AFTER, PT_ORACLE_AFTER, PT_RANK,
+// PT_NO_TRIBUNE (never touch the Tribune's duties or the welfare: what an unattended new game is like; with PT_ASSIST the
+// viewer's Tribune: Automatic, apps/viewer/tribune_assist.hpp, does it), PT_PROVINCE, PT_GRADES, PT_HOUSES, PT_TAX, PT_ITAX, PT_UNEMP, PT_MARGIN, PT_PROVINCE_AFTER, PT_ORACLE_AFTER, PT_RANK,
 // PT_SAVE_DIR (milestone saves for the viewer), PT_CHAOS=<seed> [PT_CHAOS_N, PT_CHAOS_GENTLE] (random clicks on top).
 
 #include <algorithm>
@@ -31,6 +32,7 @@
 #include "formats/empire2/empire2.hpp"
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
+#include "apps/viewer/tribune_assist.hpp"
 #include "systems/actors.hpp"
 #include "systems/administration.hpp"
 #include "systems/battle.hpp"
@@ -1519,6 +1521,10 @@ struct Bot {
     int pending_roads = 0;  // province pieces about to be laid: their upkeep is staffed first
     void tribune() {
         using systems::forum::Duty;
+        if (std::getenv("PT_NO_TRIBUNE")) {  // a player who never opens the Tribune: the new game's duties stay as they are
+            if (std::getenv("PT_ASSIST")) viewer::tribune_assist(s, g.sim.difficulty);  // ... unless the viewer's Tribune: Automatic does it
+            return;
+        }
         const int construction_need =
             std::max(systems::plebs::set_needs(s, g.sim.difficulty), (construction_need_now_with(pending_roads)));
         struct D { Duty duty; uint16_t have; int target; };
@@ -1563,6 +1569,7 @@ struct Bot {
     // plebs its duties need (plus the 50 kept back and a margin), and level with it otherwise.
     int welfare_margin = std::getenv("PT_MARGIN") ? std::atoi(std::getenv("PT_MARGIN")) : 60;
     void welfare() {
+        if (std::getenv("PT_NO_TRIBUNE")) return;  // ... nor changes the welfare
         const int rank = gw(s, 0x6C30);
         const int plebs = gw(s, systems::plebs::kPlebs);
         const int needs = pleb_deficit + (plebs - 50);  // total need, from tribune()
@@ -2409,6 +2416,45 @@ int main(int argc, char** argv) {
         const int f = argc > 5 ? std::atoi(argv[5]) : static_cast<int>(seed % 10);
         const int d = argc > 6 ? std::atoi(argv[6]) : static_cast<int>(seed % 3);
         return run_fuzz(game, seed, months, f, d);
+    }
+    if (command == "tribune" && argc > 3) {
+        // playtest <dir> tribune <save> [years [mode]]: what the Tribune's duties do to a city left alone. A real save runs
+        // for `years` with the duties as saved (mode "saved"), put back to a new game's (10 on each, welfare 88: "default"),
+        // or kept by the viewer's Tribune: Automatic ("assist"). Prints the share of the months a fire, a collapse or a road
+        // wear roll could hit (the thresholds the pleb coverage sets: a roll fires when the generator's walk, 1-99, beats
+        // it, so 100 is never), and what the city is at the end.
+        const int years = argc > 4 ? std::atoi(argv[4]) : 5;
+        const std::string mode = argc > 5 ? argv[5] : "saved";
+        game.state = model::load(formats::save::load(argv[3]));
+        game.sim = systems::month::sim_state_from_save(game.state);
+        game.install_hooks();
+        if (mode == "default") {
+            using systems::plebs::kArmyDuty;
+            for (uint16_t d : {systems::plebs::kFirePrevention, systems::plebs::kBuildingMaintenance,
+                               systems::plebs::kRoadMaintenance, systems::plebs::kConstruction, kArmyDuty})
+                model::set_global_word(game.state, d, 10);
+            model::set_global_word(game.state, systems::plebs::kWelfare, 88);
+        }
+        const Census before = census(game.state);
+        double fire = 0, collapse = 0, wear = 0;
+        int months = 0;
+        for (int m = 0; m < years * 12; ++m) {
+            if (mode == "assist") viewer::tribune_assist(game.state, game.sim.difficulty);
+            if (!game.month()) break;
+            if (game.promotion_pending) break;
+            // the chance of a roll's hit this month, from the thresholds the month set: (99 - threshold) / 99
+            fire += (99.0 - std::min(99, gw(game.state, 0x6BE4))) / 99.0;
+            collapse += (99.0 - std::min(99, gw(game.state, 0x6BE2))) / 99.0;
+            wear += (99.0 - std::min(99, gw(game.state, 0x6BE0))) / 99.0;
+            ++months;
+        }
+        const Census after = census(game.state);
+        std::printf("%s, %d years (%d months): chance of a fire a month %.0f%%, a collapse %.0f%%, road wear %.0f%% | "
+                    "houses %d -> %d cells, rubble %d, plebs %d, welfare %d, funds %d\n", mode.c_str(), years, months,
+                    100.0 * fire / std::max(1, months), 100.0 * collapse / std::max(1, months),
+                    100.0 * wear / std::max(1, months), before.houses_cells, after.houses_cells, after.rubble,
+                    gw(game.state, 0x6C56), gw(game.state, 0x6C46), gw(game.state, economy::kFunds));
+        return 0;
     }
     if (command == "inspect" && argc > 3) {
         // a real save, through the same houses report: usage `playtest <dir> inspect <save>`
