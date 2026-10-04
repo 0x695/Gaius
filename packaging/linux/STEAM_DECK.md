@@ -39,6 +39,16 @@ The touchscreen and trackpads work as a mouse too. Every button except the
 sticks can be changed in Settings > Keys; the pointer can be switched off
 there, which gives the left stick to scrolling.
 
+Gaius shows the buttons as the Deck's own pictures: A B X Y as discs in green,
+red, blue and yellow, the bumpers and triggers as L1 R1 L2 R2, View and Menu
+with their marks, the d-pad with the arm that is bound, and the back grips as
+L4 L5 R4 R5. They appear in Settings > Keys, next to each key, and on the
+*Playing with a controller* page, which opens by itself the first time Gaius
+starts with a controller connected and again from Settings > Keys >
+*Controller help*; it lists what the buttons do now, whatever they are bound to.
+A PlayStation or Nintendo controller keeps its own names (Cross, Circle, Plus)
+in text.
+
 Quick save and quick load (F5 and F9 on a keyboard) have no button by default,
 since each pad has its own spare ones. Bind them in Settings > Keys, for
 example to the back grips (L4 / R4) or the stick clicks (L3 / R3), or give the
@@ -48,6 +58,7 @@ grips the keyboard keys F5 and F9 in Steam Input.
 
 Besides the eight slots, the game saves itself at the end of each year (three
 files in turn; Settings > Game > Autosave changes how often or turns it off)
-and keeps the last city you left. Load > *Autosaves* lists them. When Gaius is
+and keeps the last city you left. The Load page puts the newest two at the top;
+Load > *Autosaves* lists all of them. When Gaius is
 not the window in front (another game, the Steam menu's task switcher) time
 stops and runs again when you come back (Settings > Game > Pause when away).

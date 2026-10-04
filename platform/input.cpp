@@ -210,6 +210,38 @@ std::string button_label(int button) {
     }
 }
 
+char button_glyph(int button) {
+    if (button < 0) return 0;
+    SDL_GameControllerType type = SDL_CONTROLLER_TYPE_UNKNOWN;
+    if (!g_pads.empty()) type = SDL_GameControllerGetType(g_pads.front());
+    if (type == SDL_CONTROLLER_TYPE_PS3 || type == SDL_CONTROLLER_TYPE_PS4 || type == SDL_CONTROLLER_TYPE_PS5 ||
+        type == SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO)
+        return 0;
+    switch (button) {
+        case SDL_CONTROLLER_BUTTON_A: return 'a';
+        case SDL_CONTROLLER_BUTTON_B: return 'b';
+        case SDL_CONTROLLER_BUTTON_X: return 'x';
+        case SDL_CONTROLLER_BUTTON_Y: return 'y';
+        case SDL_CONTROLLER_BUTTON_BACK: return 'v';
+        case SDL_CONTROLLER_BUTTON_START: return 'm';
+        case SDL_CONTROLLER_BUTTON_GUIDE: return 'g';
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return 'l';
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return 'r';
+        case SDL_CONTROLLER_BUTTON_LEFTSTICK: return 's';
+        case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return 't';
+        case SDL_CONTROLLER_BUTTON_DPAD_UP: return 'u';
+        case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return 'd';
+        case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return '<';
+        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return '>';
+        // The Deck's four back grips as SDL numbers them: R4, L4, R5, L5.
+        case SDL_CONTROLLER_BUTTON_PADDLE1: return 'h';
+        case SDL_CONTROLLER_BUTTON_PADDLE2: return 'e';
+        case SDL_CONTROLLER_BUTTON_PADDLE3: return 'i';
+        case SDL_CONTROLLER_BUTTON_PADDLE4: return 'f';
+        default: return 0;
+    }
+}
+
 void capture_binding(CommandType type, bool gamepad) {
     g_capturing = true;
     g_capture_gamepad = gamepad;

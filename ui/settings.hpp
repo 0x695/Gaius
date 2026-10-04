@@ -52,6 +52,7 @@ struct Settings {
     bool gamepad_cursor = true;  // a pointer moved by the left stick on screens without a map
     bool edge_scroll = true;     // the map scrolls when the mouse rests at the window's edge (arrow keys and WASD always do)
     bool touch_hints_seen = false;  // the touch controls page has been shown once
+    bool pad_hints_seen = false;    // so has the controller page (a gamepad was connected)
     int autosave_years = 1;         // one of kAutosaveYears
     bool pause_unfocused = true;    // time stops while the window or browser tab is not the one in front
     // The Tribune of the Plebs looks after itself (apps/viewer/tribune_assist.hpp): each month the duties that keep fires,

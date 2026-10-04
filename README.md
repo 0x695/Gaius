@@ -141,7 +141,7 @@ The right button works as in the original: with a building chosen the map builds
 | Settings | Esc | Menu | Back |
 | Window mode, data layers | F11, F8 | — | — |
 
-The game also saves itself (each year by default, into three rotating autosaves apart from your eight slots) and stops the clock while its window is not in front; both are in Settings > Game, and the Load page's *Autosaves* button lists the quicksave, autosaves and the save made when you last left the window. Every key and button can be rebound in Settings > Keys. Gamepad play on the Steam Deck is described in [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md); touch in [`android/README.md`](android/README.md).
+The game also saves itself (each year by default, into three rotating autosaves apart from your eight slots) and stops the clock while its window is not in front; both are in Settings > Game, and the Load page leads with the newest of the game's own saves (an autosave, the quicksave, the save made when you last left the window), with its *Autosaves* button listing them all. A controller's buttons are drawn as the Steam Deck's own (coloured A B X Y, L1 R1, L2 R2, View, Menu) in Settings > Keys, and Settings > Keys > *Controller help* says what each does. Every key and button can be rebound in Settings > Keys. Gamepad play on the Steam Deck is described in [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md); touch in [`android/README.md`](android/README.md).
 
 ## How it was built
 

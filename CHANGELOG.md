@@ -33,6 +33,12 @@ The first public beta: Gaius plays a whole career of Caesar, from the start scre
 - GOG's top folder (the international release beside a `US` folder) plays from the `US` folder; a folder with only the international release, or with files missing, is explained on the setup screen, the Settings screen and the browser page instead of starting a game without pictures.
 - File names in any letter case work (`houses.pl8`, `Houses.PL8`), which a case-sensitive file system such as Linux's needs.
 
+### Steam Deck and controllers
+- Buttons are drawn as the Steam Deck's own pictures where a binding is shown: Settings > Keys has A B X Y in their colours, L1 R1, L2 R2, View, Menu and the d-pad. A *Playing with a controller* page lists what the buttons do now (whatever they are bound to); it opens once the first time Gaius starts with a controller, and again from Settings > Keys > *Controller help*. A PlayStation or Nintendo controller keeps its own names.
+
+### Saves
+- The Load page leads with the newest of the game's own saves (an autosave, the quicksave, the save made when you last left the window), so an autosave is one click from the start screen or the Settings screen, not behind the small *Autosaves* button. The "Autosaved" note stays on screen for four seconds and says where to find it.
+
 ### Android
 - Import finds Caesar's US folder inside the folder you pick (GOG's top folder works) and copies only that; the picker opens in Download; if the folder holds no complete US release it says so. A GOG top folder copied by hand into Gaius's game folder plays too, on every platform.
 - The toolbar is the original's one-row bar on a phone, not a two-row list filling a third of the screen, and a button answers a finger anywhere in its slot.

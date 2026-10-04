@@ -148,6 +148,9 @@ int button_from_name(const std::string& name);
 // What a button is called on the gamepad in use: "A" on an Xbox pad or the
 // Steam Deck, "Cross" on a PlayStation pad, "B" for A's place on a Nintendo pad.
 std::string button_label(int button);
+// The ui::pad_glyphs code (ui/pad_glyphs.hpp) that draws the button, for a Steam Deck, Xbox-style or generic pad; 0 for
+// a button with no glyph, and for a PlayStation or Nintendo pad, whose buttons keep their own names (button_label).
+char button_glyph(int button);
 
 // While capturing, the next key or gamepad button press binds to `type`
 // (Escape on the keyboard cancels) and translate_event returns Rebound.

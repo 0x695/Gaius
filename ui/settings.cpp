@@ -33,7 +33,7 @@ bool is_known_key(const std::string& key) {
     static const char* const kKnown[] = {"config_version", "window_mode", "ui_scale", "frame_cap", "music_volume",
                                          "effects_volume", "language", "game_dir", "cursor", "pace", "gamepad_cursor",
                                          "edge_scroll", "touch_hints_seen", "autosave_years", "pause_unfocused",
-                                         "tribune_auto"};
+                                         "tribune_auto", "pad_hints_seen"};
     for (const char* k : kKnown)
         if (key == k) return true;
     return key.rfind("key.", 0) == 0 || key.rfind("button.", 0) == 0;
@@ -64,6 +64,7 @@ std::string settings_text(const Settings& s) {
     o << "gamepad_cursor = " << (s.gamepad_cursor ? 1 : 0) << "\n";
     o << "edge_scroll = " << (s.edge_scroll ? 1 : 0) << "\n";
     o << "touch_hints_seen = " << (s.touch_hints_seen ? 1 : 0) << "\n";
+    o << "pad_hints_seen = " << (s.pad_hints_seen ? 1 : 0) << "\n";
     o << "autosave_years = " << s.autosave_years << "\n";
     o << "pause_unfocused = " << (s.pause_unfocused ? 1 : 0) << "\n";
     o << "tribune_auto = " << (s.tribune_auto ? 1 : 0) << "\n";
@@ -113,6 +114,8 @@ Settings parse_settings(const std::string& text) {
             s.edge_scroll = n != 0;
         } else if (key == "touch_hints_seen" && to_int(value, n)) {
             s.touch_hints_seen = n != 0;
+        } else if (key == "pad_hints_seen" && to_int(value, n)) {
+            s.pad_hints_seen = n != 0;
         } else if (key == "autosave_years" && to_int(value, n) &&
                    std::find(std::begin(kAutosaveYears), std::end(kAutosaveYears), n) != std::end(kAutosaveYears)) {
             s.autosave_years = n;

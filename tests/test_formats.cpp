@@ -53,6 +53,7 @@
 #include "platform/paths.hpp"
 #include "ui/settings.hpp"
 #include "ui/embedded_lang.hpp"
+#include "ui/pad_glyphs.hpp"
 #include "ui/strings.hpp"
 #include "render/city_render.hpp"
 #include "render/province_render.hpp"
@@ -3188,6 +3189,58 @@ void test_touch_scale_and_slots() {
     CHECK(finger.hit_test(icon.x + icon.w + 6, icon.y + 4) == 3);            // the next slot starts 4 px before its icon
     CHECK(finger.hit_test(finger.button(0).x - 3, finger.button(0).y + 2) == 0);
     CHECK(finger.hit_test(2, finger.panel().y + 2) == -1);                   // left of the first slot
+}
+
+void test_pad_glyphs() {
+    std::printf("test_pad_glyphs (gamepad buttons drawn as pictures, inside a panel's text)\n");
+    using namespace gaius::ui;
+    for (char c : std::string("abxylrLRstud<>vmgefhi")) {
+        CHECK(is_pad_code(c));
+        CHECK(pad_glyph_w(c, 1) >= 9 && pad_glyph_h(c, 1) >= 7 && pad_glyph_w(c, 2) == 2 * pad_glyph_w(c, 1));
+    }
+    CHECK(!is_pad_code('z') && pad_glyph_w('z', 1) == 0 && pad_glyph_h('z', 1) == 0);
+    const auto count_colour = [](const std::vector<uint8_t>& img, int rgb) {  // 0 green, 1 red, 2 blue, 3 yellow
+        int n = 0;
+        for (size_t i = 0; i + 2 < img.size(); i += 3) {
+            const int r = img[i], g = img[i + 1], b = img[i + 2];
+            if (rgb == 0 && g > r + 60 && g > b + 60) ++n;
+            if (rgb == 1 && r > g + 90 && r > b + 90) ++n;
+            if (rgb == 2 && b > r + 90 && b > g + 40) ++n;
+            if (rgb == 3 && r > 200 && g > 170 && b < 110) ++n;
+        }
+        return n;
+    };
+    // The four face buttons wear their colours.
+    int colours[4] = {};
+    for (int k = 0; k < 4; ++k) {
+        std::vector<uint8_t> img(20 * 20 * 3, 0);
+        draw_pad_glyph(img, 20, 20, 5, 5, "abxy"[k], 1);
+        for (int c = 0; c < 4; ++c) colours[c] += count_colour(img, c) > 0 ? 1 : 0;
+    }
+    CHECK(colours[0] >= 1 && colours[1] >= 1 && colours[2] >= 1 && colours[3] >= 1);
+    // Clipped at every edge, nothing breaks.
+    std::vector<uint8_t> edge(20 * 20 * 3, 0);
+    draw_pad_glyph(edge, 20, 20, 18, 18, 'L', 2);
+    draw_pad_glyph(edge, 20, 20, -5, -5, 'R', 3);
+    draw_pad_glyph(edge, 20, 20, 3, 3, 'z', 1);  // unknown: nothing
+    // A panel row whose value holds two glyphs draws both, to the right of its label.
+    Page page;
+    page.title = "Keys";
+    page.rows.push_back({"Select", pad_markup('a') + pad_markup('b')});
+    const Metrics m = metrics_for_scale(1);
+    const PanelLayout lay = layout(page, m, 320, 200);
+    std::vector<uint8_t> frame(320 * 200 * 3, 0);
+    render(page, lay, frame, 320, 200, m, nullptr, -1);
+    const Rect row = lay.rows[0];
+    std::vector<uint8_t> strip;
+    for (int y = row.y - 2; y < row.y + row.h + 2; ++y)
+        strip.insert(strip.end(), frame.begin() + (y * 320 + row.x) * 3, frame.begin() + (y * 320 + row.x + row.w) * 3);
+    CHECK(count_colour(strip, 0) > 0 && count_colour(strip, 1) > 0);
+    // Settings > Keys is marked so the controller page is shown once.
+    CHECK(!Settings{}.pad_hints_seen);
+    Settings s;
+    s.pad_hints_seen = true;
+    CHECK(parse_settings(settings_text(s)).pad_hints_seen && !parse_settings("ui_scale = 2\n").pad_hints_seen);
 }
 
 void test_settings_page_rows() {
@@ -7561,6 +7614,7 @@ int main() {
     test_ui_strings();
     test_settings_page_rows();
     test_touch_scale_and_slots();
+    test_pad_glyphs();
     test_safety_net_settings();
     test_save_slots();
     test_gtl_library();

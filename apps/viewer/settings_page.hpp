@@ -29,10 +29,12 @@
 #include <vector>
 
 #include "apps/viewer/game_folder_note.hpp"
+#include "apps/viewer/screens.hpp"
 #include "gaius_version.hpp"
 #include "platform/input.hpp"
 #include "platform/web.hpp"
 #include "ui/options_screen.hpp"
+#include "ui/pad_glyphs.hpp"
 #include "ui/panel.hpp"
 #include "ui/settings.hpp"
 #include "ui/strings.hpp"
@@ -54,6 +56,7 @@ enum class SettingRow {
 
 inline constexpr int kActionSettingsTab = 1200;  // + SettingsTab
 inline constexpr int kActionSettingDown = 1300;  // + 2 x row id; +1 for up (see row_id)
+inline constexpr int kActionControllerHelp = 1411;
 inline constexpr int kActionResume = 1400, kActionPause = 1401, kActionSettingsLoad = 1402,
                      kActionSettingsSave = 1403, kActionRestart = 1404, kActionExit = 1405, kActionYes = 1406,
                      kActionNo = 1407, kActionResetControls = 1408, kActionImportGame = 1409,
@@ -98,6 +101,12 @@ inline std::string autosave_name(int years) {
     if (years <= 0) return ui::tr("Off");
     if (years == 1) return ui::tr("Each year");
     return std::string(ui::tr("Every")) + " " + std::to_string(years) + " " + ui::tr("years");
+}
+
+// A gamepad button for a row: its glyph (ui/pad_glyphs.hpp), or its name on a PlayStation or Nintendo pad.
+inline std::string button_markup(int button) {
+    const char glyph = platform::button_glyph(button);
+    return glyph ? ui::pad_markup(glyph) : platform::button_label(button);
 }
 
 inline const char* binding_label(platform::CommandType t) {
@@ -197,7 +206,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             for (int i = 0; i < count; ++i) {
                 const platform::CommandType t = platform::kBindable[i];
                 std::string key = platform::key_name(platform::key_for(t));
-                std::string button = platform::button_label(platform::button_for(t));
+                std::string button = settings_detail::button_markup(platform::button_for(t));
                 if (t == platform::CommandType::PreviousTool && key.empty())
                     key = std::string(ui::tr("Shift")) + "+" +
                           platform::key_name(platform::key_for(platform::CommandType::CycleTool));
@@ -210,6 +219,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             }
             page.rows.push_back(row(ui::tr("Gamepad pointer"), on_off(s.gamepad_cursor), row_id(SettingRow::GamepadPointer)));
             page.buttons.push_back({ui::tr("Reset"), kActionResetControls});
+            page.buttons.push_back({ui::tr("Controller help"), kActionControllerHelp});
             back_button();
             break;
         }
@@ -243,6 +253,34 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             break;
         case kSettingsTabCount: break;
     }
+    return page;
+}
+
+// Shown once when a gamepad is connected, and by Settings > Keys > Controller help: what the buttons do, with the
+// glyphs of the buttons they are bound to now.
+inline ui::Page controller_hints_page() {
+    using platform::CommandType;
+    ui::Page page;
+    page.title = ui::tr("Playing with a controller");
+    const auto bound = [&](CommandType t, const std::string& what) {
+        const int button = platform::button_for(t);
+        if (button >= 0) page.rows.push_back({what, settings_detail::button_markup(button)});
+    };
+    bound(CommandType::Select, ui::tr("Choose, build, press"));
+    bound(CommandType::Secondary, ui::tr("Back (the right button)"));
+    bound(CommandType::CycleTool, ui::tr("Next building"));
+    bound(CommandType::PreviousTool, ui::tr("Previous building"));
+    bound(CommandType::CycleVariant, ui::tr("Building type"));
+    bound(CommandType::ToggleTime, ui::tr("Pause time"));
+    bound(CommandType::CycleScreen, ui::tr("Next screen"));
+    bound(CommandType::Menu, ui::tr("Settings"));
+    bound(CommandType::QuickSave, ui::tr("Quick save"));
+    bound(CommandType::QuickLoad, ui::tr("Quick load"));
+    page.rows.push_back({ui::tr("Move the pointer"), ui::tr("Left stick")});
+    page.rows.push_back({ui::tr("Scroll the map"), std::string(ui::tr("Right stick")) + " " + ui::pad_markup('u') +
+                                                       ui::pad_markup('d') + ui::pad_markup('<') + ui::pad_markup('>')});
+    page.rows.push_back({ui::tr("Zoom"), ui::pad_markup('L') + ui::pad_markup('R')});
+    page.buttons.push_back({ui::tr("Continue"), kActionContinue});
     return page;
 }
 

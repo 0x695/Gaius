@@ -754,9 +754,9 @@ int main(int argc, char** argv) {
     uint64_t saved_fingerprint = (save_mode && !new_career) ? viewer::save_fingerprint(save.raw) : 0;
     std::string toast_text;                            // a line of feedback ("Quicksaved") shown a moment
     Uint32 toast_until = 0;
-    const auto show_toast = [&](const std::string& text) {
+    const auto show_toast = [&](const std::string& text, Uint32 ms = 1800) {
         toast_text = text;
-        toast_until = SDL_GetTicks() + 1800;
+        toast_until = SDL_GetTicks() + ms;
     };
     // One frame every 66 ms ("Original" pace, measured on the GOG release: a game year in about 85 s at the top speed,
     // so a month of 106 steps in about 7 s) or every 19 ms ("Fast": a month in about 2 s); the walkers move a pixel
@@ -939,6 +939,9 @@ int main(int argc, char** argv) {
     bool name_return_to_forum = false;  // opened from the governor's screen rather than the start screen
     Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
     bool notice_is_hints = false;         // the notice page shows the touch hints, not the funds warning
+    bool notice_is_pad_hints = false;     // ... or the controller page (a gamepad is connected, or Settings > Keys asked)
+    bool notice_manual = false;           // the controller page was opened from Settings, so its Continue changes nothing else
+    const auto hints_notice = [&]() { return notice_is_hints || notice_is_pad_hints; };
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
     const auto leave_news = [&]() {
@@ -1083,22 +1086,30 @@ int main(int argc, char** argv) {
     };
     std::vector<viewer::RecoverableSave> recoverable;  // what the Autosaves page lists, newest first
     bool files_recover = false;                         // the Files screen shows the Autosaves page
+    // A button for the i-th entry of `recoverable`: "Auto 2  Gallia, 12 AD" (the quicksave, an autosave or the away save).
+    const auto recover_button = [&](size_t i) {
+        const viewer::RecoverableSave& r = recoverable[i];
+        const std::string what = describe_save((saves_dir() / r.file).string());
+        const std::string name = r.kind == viewer::SaveKind::Auto ? std::string(ui::tr("Auto")) + " " + std::to_string(r.index + 1)
+                                 : r.kind == viewer::SaveKind::Away ? std::string(ui::tr("Away"))
+                                                                    : std::string(ui::tr("Quick"));
+        return ui::PanelButton{name + "  " + (what.empty() ? std::string(ui::tr("unreadable")) : what),
+                               viewer::kActionRecoverSlot + static_cast<int>(i), !what.empty()};
+    };
     auto refresh_slots = [&]() {
         slot_buttons.clear();
+        recoverable.clear();
         if (files_recover) {
             recoverable = viewer::recoverable_saves(saves_dir());
-            for (size_t i = 0; i < recoverable.size() && i < 5; ++i) {
-                const viewer::RecoverableSave& r = recoverable[i];
-                const std::string what = describe_save((saves_dir() / r.file).string());
-                const std::string name =
-                    r.kind == viewer::SaveKind::Auto ? std::string(ui::tr("Auto")) + " " + std::to_string(r.index + 1)
-                    : r.kind == viewer::SaveKind::Away ? std::string(ui::tr("Away"))
-                                                       : std::string(ui::tr("Quick"));
-                slot_buttons.push_back({name + "  " + (what.empty() ? std::string(ui::tr("unreadable")) : what),
-                                        viewer::kActionRecoverSlot + static_cast<int>(i), !what.empty()});
-            }
+            for (size_t i = 0; i < recoverable.size() && i < 5; ++i) slot_buttons.push_back(recover_button(i));
             slot_buttons.push_back({ui::tr("Back"), viewer::kActionBack});
             return;
+        }
+        // Loading: the two newest of the game's own saves lead the page, so a player who never wrote a slot still
+        // finds the autosave; the Autosaves button below lists them all.
+        if (!files_saving) {
+            recoverable = viewer::recoverable_saves(saves_dir());
+            for (size_t i = 0; i < recoverable.size() && i < 2; ++i) slot_buttons.push_back(recover_button(i));
         }
         for (int i = 0; i < viewer::kSaveSlots; ++i) {
             const std::string path = slot_path(i);
@@ -1168,7 +1179,7 @@ int main(int argc, char** argv) {
     const auto write_autosave = [&]() {
         const fs::path dir = saves_dir();
         if (write_state((dir / viewer::autosave_file_name(viewer::next_autosave(dir))).string()))
-            show_toast(ui::tr("Autosaved"));
+            show_toast(ui::tr("Autosaved (find it under Load)"), 4000);
         else
             show_toast(ui::tr("Autosave failed"));
     };
@@ -1178,6 +1189,7 @@ int main(int argc, char** argv) {
             case Screen::Forum:
                 return viewer::forum_page(state, forum_tab, sim.speed, rating_hint, have_empire_map && have_icons);
             case Screen::Notice:
+                if (notice_is_pad_hints) return viewer::controller_hints_page();
                 if (notice_is_hints) return viewer::touch_hints_page();
                 return viewer::notice_page(systems::messages::kFundsWarning.data(),
                                            systems::messages::kFundsWarning.size());
@@ -1230,13 +1242,27 @@ int main(int argc, char** argv) {
         }
         if (screen == Screen::Notice) {
             if (action == viewer::kActionContinue) {
-                screen = notice_return;
-                time_running = !notice_is_hints || (notice_return != Screen::Start && !start_paused);
-                if (notice_is_hints) {
+                const bool touch_page = notice_is_hints, pad_page = notice_is_pad_hints;
+                if (touch_page) {
                     notice_is_hints = false;
                     settings.touch_hints_seen = true;
-                    if (!settings_path.empty() && screenshot_path.empty()) ui::save_settings(settings_path, settings);
                 }
+                if (pad_page) {
+                    notice_is_pad_hints = false;
+                    settings.pad_hints_seen = true;
+                }
+                if ((touch_page || pad_page) && !settings_path.empty() && screenshot_path.empty())
+                    ui::save_settings(settings_path, settings);
+                // On a Steam Deck both pages apply: the controller page follows the touch page.
+                if (touch_page && !settings.pad_hints_seen && platform::gamepad_connected() && screenshot_path.empty()) {
+                    notice_is_pad_hints = true;
+                    return;
+                }
+                screen = notice_return;
+                if (notice_manual)
+                    notice_manual = false;  // asked for from Settings: time and the rest stay as they were
+                else
+                    time_running = !(touch_page || pad_page) || (notice_return != Screen::Start && !start_paused);
             }
             return;
         }
@@ -1265,7 +1291,7 @@ int main(int argc, char** argv) {
             }
             std::string path;
             const int recovered = action - viewer::kActionRecoverSlot;
-            if (files_recover && recovered >= 0 && recovered < static_cast<int>(recoverable.size())) {
+            if (!files_saving && recovered >= 0 && recovered < static_cast<int>(recoverable.size())) {
                 path = (saves_dir() / recoverable[static_cast<size_t>(recovered)].file).string();
             } else {
                 const int slot = action - viewer::kActionSlot;
@@ -1916,6 +1942,12 @@ int main(int argc, char** argv) {
                     viewer::store_bindings(settings);
                     save_settings_now();
                     return;
+                case viewer::kActionControllerHelp:  // Settings > Keys: the controller page again
+                    notice_return = Screen::Settings;
+                    notice_is_pad_hints = true;
+                    notice_manual = true;
+                    screen = Screen::Notice;
+                    return;
                 case viewer::kActionImportGame: platform::import_game_folder(); return;
                 case viewer::kActionRescanGame: return;  // the page looks each time it's drawn
                 default: break;
@@ -2171,7 +2203,7 @@ int main(int argc, char** argv) {
                 if (item >= 0) choose_type(viewer::kActionChoice + item);
                 return;
             }
-            if (screen == Screen::Notice && have_interface_art && !notice_is_hints) {
+            if (screen == Screen::Notice && have_interface_art && !hints_notice()) {
                 apply_page_action(viewer::kActionContinue);  // 0x084B1 waits for a click
                 return;
             }
@@ -2490,6 +2522,12 @@ int main(int argc, char** argv) {
             notice_is_hints = true;
             screen = Screen::Notice;
             time_running = false;
+        } else if (save_mode && platform::gamepad_connected() && !settings.pad_hints_seen && screenshot_path.empty()) {
+            // A gamepad and no touch screen: the controller page, once.
+            notice_return = screen;
+            notice_is_pad_hints = true;
+            screen = Screen::Notice;
+            time_running = false;
         }
 
         Uint32 last_step_ms = SDL_GetTicks();
@@ -2649,7 +2687,7 @@ int main(int argc, char** argv) {
                             choose_type(viewer::kActionBack);  // no command chosen
                             break;
                         }
-                        if (save_mode && screen == Screen::Notice && have_interface_art && !notice_is_hints) {
+                        if (save_mode && screen == Screen::Notice && have_interface_art && !hints_notice()) {
                             apply_page_action(viewer::kActionContinue);  // 0x084B1: a click of either button
                             break;
                         }
@@ -3073,7 +3111,7 @@ int main(int argc, char** argv) {
                 ui::render(page, ui::layout(page, page_metrics, kLogicalW, kLogicalH), frame, kLogicalW, kLogicalH,
                            page_metrics, font, page_hovered);
                 if (screen == Screen::NameEntry) ui::compose_name_entry(name_entry, name_art, frame);
-                if (screen == Screen::Notice && have_interface_art && !notice_is_hints)
+                if (screen == Screen::Notice && have_interface_art && !hints_notice())
                     ui::canvas_to_rgb(ui::compose_funds_warning_screen(interface_art), interface_art.palette, frame);
                 if (original_forum_screen()) {
                     // The advisors in the original's art.

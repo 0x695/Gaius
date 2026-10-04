@@ -192,6 +192,7 @@ add_library(gaius_ui STATIC
   ui/forum_screens.cpp
   ui/toolbar.cpp
   ui/panel.cpp
+  ui/pad_glyphs.cpp
   ui/settings.cpp
   ui/strings.cpp
 )

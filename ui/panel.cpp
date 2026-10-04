@@ -5,6 +5,7 @@
 
 #include "ui/font.hpp"
 #include "ui/game_font.hpp"
+#include "ui/pad_glyphs.hpp"
 
 namespace gaius::ui {
 
@@ -52,16 +53,51 @@ void bevel(std::vector<uint8_t>& rgb, int w, int h, Rect r, RGB light, RGB dark)
     }
 }
 
-int text_w(const std::string& s, const Metrics& m, const GameFont* font) {
+int run_w(const std::string& s, const Metrics& m, const GameFont* font) {
     return font ? game_text_width(s.c_str(), m.glyph_scale, *font) : text_width(s.c_str(), m.glyph_scale);
+}
+
+// A string may hold gamepad glyphs (ui/pad_glyphs.hpp): the text between them is the font's, each glyph its own picture
+// with a pixel of space after it.
+int text_w(const std::string& s, const Metrics& m, const GameFont* font) {
+    int total = 0;
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] == kPadMark && i + 1 < s.size()) {
+            total += pad_glyph_w(s[i + 1], m.glyph_scale) + m.glyph_scale;
+            i += 2;
+            continue;
+        }
+        size_t j = s.find(kPadMark, i);
+        if (j == std::string::npos) j = s.size();
+        total += run_w(s.substr(i, j - i), m, font);
+        i = j;
+    }
+    return total;
 }
 
 void text(std::vector<uint8_t>& rgb, int w, int h, int x, int y, const std::string& s, const Metrics& m,
           const GameFont* font, RGB color = kText) {
-    if (font) {
-        draw_game_text(rgb, w, h, x, y, s.c_str(), m.glyph_scale, *font);
-    } else {
-        draw_text(rgb, w, h, x, y, s.c_str(), m.glyph_scale, color);
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] == kPadMark && i + 1 < s.size()) {
+            const char code = s[i + 1];
+            // The glyph centred on the font's 8-pixel line.
+            draw_pad_glyph(rgb, w, h, x, y + (8 * m.glyph_scale - pad_glyph_h(code, m.glyph_scale)) / 2, code, m.glyph_scale);
+            x += pad_glyph_w(code, m.glyph_scale) + m.glyph_scale;
+            i += 2;
+            continue;
+        }
+        size_t j = s.find(kPadMark, i);
+        if (j == std::string::npos) j = s.size();
+        const std::string run = s.substr(i, j - i);
+        if (font) {
+            draw_game_text(rgb, w, h, x, y, run.c_str(), m.glyph_scale, *font);
+        } else {
+            draw_text(rgb, w, h, x, y, run.c_str(), m.glyph_scale, color);
+        }
+        x += run_w(run, m, font);
+        i = j;
     }
 }
 
