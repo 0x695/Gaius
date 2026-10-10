@@ -352,7 +352,7 @@ if(NOT EMSCRIPTEN)
   target_link_libraries(fuzz_formats PRIVATE Threads::Threads)
 endif()
 add_executable(playtest tools/playtest.cpp)
-target_link_libraries(playtest PRIVATE gaius_formats gaius_model gaius_systems)
+target_link_libraries(playtest PRIVATE gaius_formats gaius_model gaius_systems gaius_ui)
 
 add_executable(render_city tools/render_city.cpp)
 target_link_libraries(render_city PRIVATE gaius_render stb_image_write)

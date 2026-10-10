@@ -105,6 +105,8 @@ inline constexpr int kActionBack = 720;
 inline constexpr int kActionRecover = 721;      // the Load page's "Autosaves" button
 inline constexpr int kActionRecoverSlot = 730;  // + the entry of the recoverable list (quicksave, autosaves; at most 4)
 inline constexpr int kActionChoice = 740;  // + the option, 0-7 (the Forum type and Industry type menus)
+inline constexpr int kActionTutorialSkip = 760;    // a tutorial page's "Skip tutorial" (apps/viewer/tutorial.hpp)
+inline constexpr int kActionTutorialToggle = 761;  // the start screen's Tutorial row (both arrows)
 inline constexpr int kSaveSlots = 8;
 inline constexpr int kActionHint = 800;  // + ratings column (Peace, Culture, Prosperity, Empire)
 inline constexpr int kActionRankDown = 810, kActionRankUp = 811;
@@ -357,8 +359,10 @@ inline ui::Page promotion_page(const model::CityState& s, bool to_caesar) {
 // The start screen (0x27DDF): the funding level and the difficulty, each with
 // its arrows (0x27F54/0x27F60, 0x27F6C/0x27F78), and the governor's name, which
 // the engine keeps at DS:0x5858 ("Octavian" until the player types one).
-// The start screen (0x27DDF). `name` is the governor's 12-character name.
-inline ui::Page start_page(int funding_level, int difficulty, const std::string& name = "  Octavian  ") {
+// The start screen (0x27DDF). `name` is the governor's 12-character name. `tutorial` (0 or 1; -1 for no row) is
+// Gaius's own: whether the career begins with the tutorial (apps/viewer/tutorial.hpp).
+inline ui::Page start_page(int funding_level, int difficulty, const std::string& name = "  Octavian  ",
+                           int tutorial = -1) {
     namespace campaign = systems::campaign;
     ui::Page page;
     page.title = ui::tr("A new career");
@@ -369,6 +373,9 @@ inline ui::Page start_page(int funding_level, int difficulty, const std::string&
                          kActionFundingDown, kActionFundingUp});
     page.rows.push_back({ui::tr("Difficulty"), campaign::kDifficultyNames[static_cast<size_t>(std::clamp(difficulty, 0, 2))],
                          kActionDifficultyDown, kActionDifficultyUp});
+    if (tutorial >= 0)
+        page.rows.push_back({ui::tr("Tutorial"), ui::tr(tutorial ? "On" : "Off"), kActionTutorialToggle,
+                             kActionTutorialToggle});
     page.buttons.push_back({ui::tr("Begin"), kActionBegin});
     page.buttons.push_back({ui::tr("Choose name"), kActionChooseName});
     page.buttons.push_back({ui::tr("Load a game"), kActionOpenLoad});

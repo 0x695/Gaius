@@ -11,6 +11,7 @@
 //        playtest <game folder> play    [funding [difficulty [years]]]  the bot plays a whole career, to Caesar
 //        playtest <game folder> fuzz    [seed [months [funding [difficulty]]]]  a player who clicks at random
 //        playtest <game folder> inspect <save>   houses by grade, services and last year's accounts
+//        playtest <game folder> tutorial [funding [difficulty [years]]]  a newcomer who does what the viewer's tutorial says
 // The bot is tuned for funding 0 (8000 Dn) on Easy or Medium. Environment knobs: PT_QUIET, PT_TRACE, PT_DUTIES=<year>,
 // PT_NO_TRIBUNE (never touch the Tribune's duties or the welfare: what an unattended new game is like; with PT_ASSIST the
 // viewer's Tribune: Automatic, apps/viewer/tribune_assist.hpp, does it), PT_PROVINCE, PT_GRADES, PT_HOUSES, PT_TAX, PT_ITAX, PT_UNEMP, PT_MARGIN, PT_PROVINCE_AFTER, PT_ORACLE_AFTER, PT_RANK,
@@ -33,6 +34,7 @@
 #include "formats/save/save.hpp"
 #include "model/city_state.hpp"
 #include "apps/viewer/tribune_assist.hpp"
+#include "apps/viewer/tutorial.hpp"
 #include "systems/actors.hpp"
 #include "systems/administration.hpp"
 #include "systems/battle.hpp"
@@ -2382,6 +2384,377 @@ int run_fuzz(Game& game, unsigned seed, int months, int funding, int difficulty)
     return problems != 0;
 }
 
+// ---------------------------------------------------------------------------
+// playtest <dir> tutorial [funding [difficulty [years]]]: a newcomer who does what the viewer's tutorial pages say
+// (apps/viewer/tutorial.hpp), a step at a time and no more cleverly than the pages put it, with the Tribune left on
+// Automatic as a new player's is. It shows that each step's goal is reached by doing what its page asks, and what the
+// advice comes to: the ratings year by year, and when Rome offers the promotion.
+//
+// The city is laid out in districts, one to a Forum: a road above and below it joined beside it, houses along both
+// sides of each road within six cells of the Forum with a well every third plot, a market next to the Forum, bath
+// houses either side and room for an oracle at the road's end. The workshops stand along a street of their own just
+// below the first row of districts, with houses on its other side ("at the edge of the houses", page 5), each of the
+// goods the industry advisor rates best among those not yet made twice. PT_NOVICE_FAR=1 puts them out of the way west
+// of the city instead, to see what the page's advice is worth.
+struct Novice {
+    Game& g;
+    model::CityState& s;
+    Bot planner;  // for the province's paths only: it plays no part
+    int fx = 0, fy = 0;
+    std::vector<Pt> districts;  // each Forum's anchor, in the order they were founded
+    std::vector<Pt> towns_done;
+    int step = 0;
+    bool forum_visited = false;
+    int workshop_slot = 0, oracles = 0;
+    bool far_workshops = std::getenv("PT_NOVICE_FAR") != nullptr;
+    int reserve = std::getenv("PT_NOVICE_RESERVE") ? std::atoi(std::getenv("PT_NOVICE_RESERVE")) : 200;
+    int enough_people = std::getenv("PT_NOVICE_PEOPLE") ? std::atoi(std::getenv("PT_NOVICE_PEOPLE")) : 2400;
+
+    explicit Novice(Game& game) : g(game), s(game.state), planner(game) {
+        g.frame_hook = nullptr;  // the Legion is left to itself, as a newcomer leaves it
+        g.hook_owner = nullptr;
+    }
+
+    int funds() const { return gw(s, economy::kFunds); }
+    viewer::TutorialCensus count() const { return viewer::tutorial_census(s); }
+    viewer::TutorialGoal goal() const { return viewer::tutorial_step(step).goal; }
+    bool put(CommandId tool, int x, int y) { return grass(s, x, y) && g.place_tool(tool, x, y); }
+    void road(int x0, int x1, int y0, int y1) {
+        for (int y = y0; y <= y1; ++y)
+            for (int x = x0; x <= x1; ++x) put(CommandId::Road, x, y);
+    }
+    // The step the tutorial is at after what was just done.
+    void sync(const char* did) {
+        const int before = step;
+        step = viewer::tutorial_progress(step, count(), forum_visited);
+        if (step != before) {
+            std::printf("%d/%d  %-22s -> step %d, \"%s\" (funds %d)\n", g.sim.year, g.sim.month + 1, did, step,
+                        viewer::tutorial_step(step).title, funds());
+            forum_visited = false;
+        }
+    }
+
+    // A district's rows: the Forum's own two, a road above and below, and a row of houses beyond each road. Districts
+    // south of the first leave room for the workshops' street between them.
+    Pt district(int i, int j) const { return {fx + 18 * i, fy + (j >= 0 ? 10 : 6) * j}; }
+    // A district's plots, the nearest to the Forum first: the two rows along the road below it, then (once the road
+    // above is laid) the two along that. Every third column is left for a well.
+    static bool well_column(int dx) { return ((dx + 6) % 3 + 3) % 3 == 1; }
+    std::vector<Pt> plots(Pt f, bool wells, bool upper) const {
+        std::vector<Pt> out;
+        for (int dy : {1, 3, 0, -2}) {
+            if (!upper && (dy == 0 || dy == -2)) continue;
+            for (int k = 0; k < 14; ++k) {
+                const int dx = k % 2 ? (k + 1) / 2 : -k / 2;  // 0, 1, -1, 2, -2 ... 7, -6
+                if (dx < -6 || dx > 7 || well_column(dx) != wells) continue;
+                if ((dy == 0 || dy == 1) && dx >= -1 && dx <= 4) continue;  // the Forum, the joining roads, the market
+                if (dy == 1 && (dx == -4 || dx == 6) && !wells) continue;   // the bath houses
+                out.push_back({f.x + dx, f.y + dy});
+            }
+        }
+        return out;
+    }
+    bool is_house(int x, int y) const {
+        return x >= 0 && y >= 0 && x < model::kCityW && y < model::kCityH && s.city.tile[y][x] >= 0xC8 && s.city.tile[y][x] <= 0xD7;
+    }
+    int houses(Pt f, int want, bool upper) {
+        int n = 0;
+        for (const Pt& p : plots(f, false, upper))
+            if (n < want && put(CommandId::Housing, p.x, p.y)) ++n;
+        return n;
+    }
+    // A well on each well plot that touches a house.
+    int wells(Pt f) {
+        int n = 0;
+        for (const Pt& p : plots(f, true, true)) {
+            bool touches = false;
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dx = -1; dx <= 1; ++dx) touches = touches || is_house(p.x + dx, p.y + dy);
+            if (touches && put(CommandId::Well, p.x, p.y)) ++n;
+        }
+        return n;
+    }
+    bool found_district(Pt f) {
+        if (funds() < 300 + reserve) return false;
+        for (int dy = 0; dy < 2; ++dy)
+            for (int dx = 0; dx < 2; ++dx)
+                if (!grass(s, f.x + dx, f.y + dy)) return false;
+        g.forum_grade = 0;  // Aventine
+        if (!g.place_tool(CommandId::Forum, f.x, f.y)) return false;
+        districts.push_back(f);
+        return true;
+    }
+    void lower_road(Pt f) { road(f.x - 8, f.x + 9, f.y + 2, f.y + 2); }
+    void upper_road(Pt f) {
+        road(f.x - 8, f.x + 9, f.y - 1, f.y - 1);
+        road(f.x - 1, f.x - 1, f.y, f.y + 1);
+        road(f.x + 2, f.x + 2, f.y, f.y + 1);
+    }
+    bool market(Pt f) { return put(CommandId::Market, f.x + 3, f.y); }
+    int baths(Pt f) { return put(CommandId::BathHouses, f.x - 4, f.y + 1) + put(CommandId::BathHouses, f.x + 6, f.y + 1); }
+
+    // The goods for the next workshop: the best the industry advisor rates (page 5 sends the player to him) among
+    // those made by fewer than two workshops yet -- "different goods for each".
+    int next_goods() const {
+        const systems::forum::IndustryReport r = systems::forum::industry_report(s);
+        int best = -1;
+        for (int i = 0; i < 8; ++i) {
+            const auto& row = r.rows[static_cast<size_t>(i)];
+            if (row.factories >= 2) continue;
+            if (best < 0 || row.suitability > r.rows[static_cast<size_t>(best)].suitability) best = i;
+        }
+        return best < 0 ? 0 : best;
+    }
+    // The workshops' street: below the first row of districts (and then the second), a workshop every four columns
+    // with its road under it, joined to the district's road at its west end. A place on rough ground or under a
+    // district not founded yet is passed over.
+    bool workshop() {
+        if (gw(s, 0x6C9E) >= 30 || funds() < 50 + reserve) return false;
+        g.workshop_goods = next_goods();
+        for (int tries = 0; tries < 12 && workshop_slot < 52; ++tries) {
+            const int slot = workshop_slot++;
+            int x, y;
+            if (far_workshops) {  // out of the way, west of the first district
+                y = fy + 6 * (slot / 4) + 3;
+                x = fx - 13 - 4 * (slot % 4);
+                road(x - 1, fx - 9, y - 1, y - 1);
+                if (slot / 4 > 0) road(fx - 9, fx - 9, fy + 2, y - 1);
+                if (g.place_tool(CommandId::Workshop, x, y)) return true;
+                continue;
+            }
+            const int street = slot / 13, m = slot % 13;
+            x = fx - 8 + 4 * m;
+            y = fy + 10 * street + 4;
+            if (std::find(districts.begin(), districts.end(), district(m * 4 / 18, street)) == districts.end()) continue;
+            if (!g.place_tool(CommandId::Workshop, x, y)) continue;
+            road(fx - 9, x + 3, y + 3, y + 3);            // its street
+            road(fx - 9, fx - 9, y - 2, y + 3);           // up to the district's road
+            return true;
+        }
+        return false;
+    }
+    bool oracle() {
+        if (funds() < 200 + reserve) return false;
+        for (const Pt& f : districts)
+            for (int dx : {8, -8})
+                for (int dy : {0, 1})
+                    if (grass(s, f.x + dx, f.y + dy) && grass(s, f.x + dx + 1, f.y + dy) &&
+                        g.place_tool(CommandId::Oracle, f.x + dx, f.y + dy)) {
+                        ++oracles;
+                        return true;
+                    }
+        return false;
+    }
+    // The next district: east of the first, then below, then above, wherever the Forum's ground is open.
+    bool next_district() {
+        static const Pt kOrder[] = {{1, 0}, {0, 1}, {1, 1}, {0, -1}, {1, -1}, {2, 0}, {2, 1}, {2, -1},
+                                    {0, 2}, {1, 2}, {2, 2}, {0, -2}, {1, -2}, {2, -2}};
+        for (const Pt& o : kOrder) {
+            const Pt f = district(o.x, o.y);
+            if (f.x + 10 >= model::kCityW || f.x - 9 < 0 || f.y - 3 < 0 || f.y + 9 >= model::kCityH) continue;
+            if (std::find(districts.begin(), districts.end(), f) != districts.end()) continue;
+            if (!found_district(f)) continue;
+            lower_road(f);
+            upper_road(f);
+            road(fx - 9, fx - 9, std::min(fy, f.y) - 1, std::max(fy, f.y) + 2);  // one street joins the rows of districts
+            road(fx - 9, fx - 8, f.y + 2, f.y + 2);
+            market(f);
+            baths(f);
+            return true;
+        }
+        return false;
+    }
+
+    // What the pages give as the work each building offers.
+    int jobs(const viewer::TutorialCensus& c) const { return 80 * c.workshops + 48 * c.markets + 120 * c.forums; }
+
+    // The province: the highway, then a road for each town, laid a cell at a time as far as the month's funds go above
+    // the reserve ("as the funds allow"). A town's road runs to the city or, where that is shorter, onto the Highway,
+    // which it crosses to share (page 11).
+    int laying = 0;           // the command of the road being laid: 42 the highway, 36 a town's, 0 none
+    std::vector<Pt> route;    // its cells
+    size_t route_next = 0;
+    int cell_cost(int command, Pt p) const {
+        const uint8_t tile = planner.ptile(p.x, p.y);
+        if ((tile >= 0x36 && tile <= 0x41) || tile == 0x7B || tile == 0x7C) return 0;  // a road already
+        if (command == 42 && tile >= 0x6D && tile <= 0x77) return 0;
+        return economy::kConstructionCost[static_cast<size_t>(command)] << economy::province_cost_shift(command, tile);
+    }
+    // Lays what the funds allow of the route. True once it is whole.
+    std::vector<std::pair<int, Pt>> laid;  // every piece laid, with its command: what a worn piece is laid again from
+    int relaid = 0;
+    bool lay_route() {
+        while (route_next < route.size()) {
+            const Pt p = route[route_next];
+            if (funds() < cell_cost(laying, p) + reserve) return false;
+            g.province_place(laying, p.x, p.y);
+            laid.push_back({laying, p});
+            ++route_next;
+        }
+        laying = 0;
+        return true;
+    }
+    // Page 10: a piece that has worn away (open ground again) is laid again.
+    void repair() {
+        for (const auto& [command, p] : laid) {
+            const uint8_t tile = planner.ptile(p.x, p.y);
+            if (tile < 0x1D || tile > 0x35 || funds() < cell_cost(command, p) + 50) continue;
+            if (g.province_place(command, p.x, p.y)) ++relaid;
+        }
+    }
+    bool highway() {
+        if (laying != 42) {
+            route = planner.province_path({0x78}, {0x4A, 0x4B}, true);
+            if (route.empty()) return false;
+            laying = 42;
+            route_next = 0;
+        }
+        return lay_route();
+    }
+    bool town_road() {
+        if (laying != 36) {
+            static const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
+            route = planner.province_path({0x4A, 0x4B}, {0x61}, false, towns_done);
+            // Onto the Highway instead: from a cell beside one of its straight pieces, with the piece itself as the
+            // road's first cell (laid over it, a road makes a crossing).
+            auto spur = planner.province_path({0x6D, 0x6E}, {0x61}, false, towns_done);
+            if (!spur.empty() && !std::getenv("PT_NOVICE_NO_SPUR") &&
+                (route.empty() || planner.path_cost(spur, 36) + 30 < planner.path_cost(route, 36))) {
+                for (int d = 0; d < 4; ++d) {
+                    const Pt h{spur.front().x + dx[d], spur.front().y + dy[d]};
+                    if (Bot::in_map(h.x, h.y) && (planner.ptile(h.x, h.y) == 0x6D || planner.ptile(h.x, h.y) == 0x6E)) {
+                        spur.insert(spur.begin(), h);
+                        route = spur;
+                        break;
+                    }
+                }
+            }
+            if (route.empty()) return false;
+            for (int d = 0; d < 4; ++d) {
+                const Pt town{route.back().x + dx[d], route.back().y + dy[d]};
+                if (Bot::in_map(town.x, town.y) && planner.ptile(town.x, town.y) == 0x61) towns_done.push_back(town);
+            }
+            laying = 36;
+            route_next = 0;
+            std::printf("%d/%d  a town's road planned, %zu cells, %d Dn\n", g.sim.year, g.sim.month + 1, route.size(),
+                        planner.path_cost(route, 36));
+        }
+        return lay_route();
+    }
+    // A dozen more plots where there is room, with their wells; a new district when there is none.
+    void more_houses() {
+        int placed = 0;
+        for (const Pt& f : districts) {
+            if (placed >= 12) break;
+            placed += houses(f, 12 - placed, false);
+            if (placed < 12) {
+                upper_road(f);
+                placed += houses(f, 12 - placed, true);
+            }
+            wells(f);
+        }
+        if (placed == 0) next_district();
+    }
+
+    // One month's play: the step's own task, then what the pages say to keep doing.
+    void act() {
+        using viewer::TutorialGoal;
+        const Pt first{fx, fy};
+        switch (goal()) {
+            case TutorialGoal::Read:
+                if (step == 0) step = 1;  // Continue
+                break;
+            case TutorialGoal::Forum: found_district(first); break;
+            case TutorialGoal::Roads: lower_road(first); break;
+            case TutorialGoal::Housing: houses(first, 12, false); break;
+            case TutorialGoal::Water: wells(first); break;
+            case TutorialGoal::Work:
+                market(first);
+                while (count().workshops < viewer::kTutorialWorkshops && workshop()) {
+                }
+                break;
+            case TutorialGoal::BathHouse: baths(first); break;
+            case TutorialGoal::VisitForum:
+                forum_visited = true;
+                // Page 7: the people's tax from 5 to 6 percent.
+                while (gw(s, 0x6C04) < 6) systems::forum::adjust(s, systems::forum::Control::PopulationTax, 1);
+                break;
+            case TutorialGoal::Highway: highway(); break;
+            case TutorialGoal::Town: town_road(); break;
+            case TutorialGoal::Oracle: oracle(); break;
+            default: break;
+        }
+        sync("the step's task");
+        if (step < 8) return;
+        repair();
+        // Pages 8 and 9, from then on: work for the people there are, an oracle for every 2000, houses while there is
+        // work -- and (page 12) once the city stands and the towns are linked, nothing more, so the years close in profit.
+        viewer::TutorialCensus c = count();
+        const bool standing = c.population >= enough_people && c.highway_linked && c.towns_linked >= c.towns;
+        if (!standing) {
+            for (int guard = 0; guard < 4 && c.population > jobs(c) && workshop(); ++guard) c = count();
+            if (step > 9 && oracles < (c.population + 1999) / 2000) oracle();
+            if (c.population < enough_people && funds() > 50 + reserve && jobs(c) >= c.population &&
+                c.population * 11 >= c.house_cells * 100)
+                more_houses();
+            if (step > 11 && c.highway_linked && (laying == 36 || static_cast<int>(towns_done.size()) < c.towns)) town_road();
+        }
+        sync("keeping the city");
+    }
+};
+
+int run_tutorial(Game& game, int funding, int difficulty, int years) {
+    game.verbose = false;
+    if (!game.start(funding, difficulty)) return 1;
+    Novice novice(game);
+    if (!novice.planner.choose_site()) return 1;
+    novice.fx = novice.planner.fx;
+    novice.fy = novice.planner.fy;
+    const int first_year = game.sim.year;
+    int last_year = game.sim.year;
+    std::puts("  year  step  people  houses  wksp forums  funds   peace culture prosperity empire average  towns highway");
+    while (game.sim.year < first_year + years && !game.dismissed && !game.promotion_pending) {
+        viewer::tribune_assist(game.state, game.sim.difficulty);  // Settings > Game > Tribune: Automatic, each month
+        novice.act();
+        if (!game.month()) break;
+        if (game.sim.year == last_year) continue;
+        last_year = game.sim.year;
+        const viewer::TutorialCensus c = novice.count();
+        std::printf("  %-5d %-5d %-7d %-7d %-4d %-6d  %-7d %-5d %-7d %-10d %-6d %-7d  %d/%d   %d\n", game.sim.year, novice.step,
+                    c.population, c.house_cells, c.workshops, c.forums, novice.funds(), gw(game.state, admin::kPeace),
+                    gw(game.state, admin::kCulture), gw(game.state, admin::kProsperity), gw(game.state, admin::kEmpire),
+                    gw(game.state, admin::kAverage), c.towns_linked, c.towns, static_cast<int>(c.highway_linked));
+        if (std::getenv("PT_ACCOUNTS")) {
+            print_accounts(game.state);
+            std::printf("      workshops' average level %d, without work %d%%\n", economy::average_workshop_level(game.state),
+                        gw(game.state, 0x6BCC));
+            namespace plebs = systems::plebs;
+            std::printf("      plebs %d (unassigned %d, welfare %d): fire %d/%d building %d/%d road %d/%d province %d/%d army %d"
+                        " | province pieces %d, wear threshold %d\n",
+                        gw(game.state, plebs::kPlebs), gw(game.state, plebs::kUnassigned), gw(game.state, plebs::kWelfare),
+                        gw(game.state, plebs::kFirePrevention), gw(game.state, plebs::kFireNeed),
+                        gw(game.state, plebs::kBuildingMaintenance), gw(game.state, plebs::kBuildingNeed),
+                        gw(game.state, plebs::kRoadMaintenance), gw(game.state, plebs::kRoadNeed),
+                        gw(game.state, plebs::kConstruction), plebs::set_needs(game.state, game.sim.difficulty),
+                        gw(game.state, plebs::kArmyDuty), gw(game.state, 0x6C8A), game.sim.province_wear_threshold);
+        }
+    }
+    if (std::getenv("PT_MAP")) print_city(game.state, novice.fx - 30, novice.fy - 16, novice.fx + 50, novice.fy + 28);
+    for (const auto& [k, v] : game.refusals) std::printf("refusal: %s x%d\n", k.c_str(), v);
+    if (novice.relaid) std::printf("province pieces laid again after wearing away: %d\n", novice.relaid);
+    if (game.promotion_pending) {
+        int difficulty_now = game.sim.difficulty;
+        admin::accept_promotion(game.state, difficulty_now);
+        novice.sync("the promotion accepted");
+        std::printf("PROMOTED after %d years: the tutorial is at its last page (%s)\n", game.sim.year - first_year,
+                    novice.step == viewer::kTutorialFinal ? "yes" : "NO");
+        return novice.step == viewer::kTutorialFinal ? 0 : 1;
+    }
+    std::printf("no promotion in %d years%s; the tutorial stands at step %d\n", years, game.dismissed ? " (dismissed)" : "",
+                novice.step);
+    return 1;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::fprintf(stderr,
@@ -2455,6 +2828,10 @@ int main(int argc, char** argv) {
                     100.0 * wear / std::max(1, months), before.houses_cells, after.houses_cells, after.rubble,
                     gw(game.state, 0x6C56), gw(game.state, 0x6C46), gw(game.state, economy::kFunds));
         return 0;
+    }
+    if (command == "tutorial") {
+        // playtest <dir> tutorial [funding [difficulty [years]]]: a newcomer following the viewer's tutorial (Novice, above)
+        return run_tutorial(game, funding, difficulty, argc > 5 ? std::atoi(argv[5]) : 20);
     }
     if (command == "inspect" && argc > 3) {
         // a real save, through the same houses report: usage `playtest <dir> inspect <save>`

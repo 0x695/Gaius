@@ -4,8 +4,8 @@
 // The Settings screen (Phase 9). It takes the place of the original's Options
 // screen (findings section 42) and holds everything the player can set:
 //   Game    the original's game and scroll speeds and messages option, Gaius's
-//           autosave and pause-when-away, and the original's menu: resume,
-//           pause, load, save, restart, exit
+//           autosave, pause-when-away, Tribune and tutorial switches, and the
+//           original's menu: resume, pause, load, save, restart, exit
 //   Sound   the original's tunes, effects and city sounds switches, and
 //           Gaius's music and effects volumes
 //   Video   the window, the UI scale, the frame rate, and the original's
@@ -50,7 +50,7 @@ enum class SettingRow {
     Tunes, Effects, CitySounds, MusicVolume, EffectsVolume,
     WindowMode, UiScale, FrameRate, PositionIndicator, IconNames,
     GamepadPointer, EdgeScroll, Cursor, Language,
-    Autosave, PauseUnfocused, TribuneAuto,
+    Autosave, PauseUnfocused, TribuneAuto, Tutorial,
     Binding,  // + the index into platform::kBindable
 };
 
@@ -162,6 +162,7 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
                                     row_id(SettingRow::PauseUnfocused)));
             page.rows.push_back(row(ui::tr("Tribune"), ui::tr(s.tribune_auto ? "Automatic" : "By hand"),
                                     row_id(SettingRow::TribuneAuto)));
+            page.rows.push_back(row(ui::tr("Tutorial"), on_off(s.tutorial), row_id(SettingRow::Tutorial)));
             // Always a way out: back into the game, or to the start screen when Settings was opened from there.
             page.buttons.push_back({ui::tr(v.in_game ? "Resume" : "Back"), kActionResume});
             page.buttons.push_back({ui::tr("Pause"), kActionPause, v.in_game});
@@ -355,6 +356,11 @@ inline bool adjust_setting(int action, ui::Settings& s, ui::GameOptions& o, bool
         }
         case SettingRow::PauseUnfocused: s.pause_unfocused = !s.pause_unfocused; break;
         case SettingRow::TribuneAuto: s.tribune_auto = !s.tribune_auto; break;
+        case SettingRow::Tutorial:
+            // Switched on again it starts over; what the city already has is passed by (tutorial_progress).
+            s.tutorial = !s.tutorial;
+            if (s.tutorial) s.tutorial_step = 0;
+            break;
         case SettingRow::Binding: break;
     }
     return true;

@@ -45,6 +45,7 @@
 #include "apps/viewer/screens.hpp"
 #include "apps/viewer/settings_page.hpp"
 #include "apps/viewer/tribune_assist.hpp"
+#include "apps/viewer/tutorial.hpp"
 #include "apps/viewer/cursor.hpp"
 #include "apps/viewer/original_intro.hpp"
 #include "gaius_version.hpp"
@@ -4332,6 +4333,256 @@ void test_tribune_assist() {
     plebs::assign(*st);
     plebs::set_thresholds(*st, 1);
     CHECK(word(0x6BE4) == 100 && word(0x6BE2) == 100 && word(0x6BE0) == 100);
+
+    // The province's roads: the construction duty is staffed ahead of the need, for forty pieces not laid yet, because
+    // a road laid this month is counted and rolled against before the assistant runs again. 80 pieces at rank 1 need
+    // 10 groups; the duty goes to 10 + a fifth + 1, and 5 more.
+    CHECK(gaius::viewer::tribune_roads_ahead(*st, 0) == 5 && gaius::viewer::tribune_roads_ahead(*st, 2) == 40);
+    set(0x6C8A, 80);
+    const int idle = word(plebs::kUnassigned);
+    gaius::viewer::tribune_assist(*st, 0);
+    CHECK(word(plebs::kConstruction) == 18 && word(plebs::kUnassigned) == idle - 8);
+    // Forty more pieces laid in one month are covered when the month's roll comes.
+    set(0x6C8A, 120);
+    CHECK(plebs::set_needs(*st, 0) == 15 && word(plebs::kConstruction) >= 15);
+    set(0x6C30, 2);  // a group for every four pieces from rank 2
+    CHECK(gaius::viewer::tribune_roads_ahead(*st, 0) == 10);
+    set(0x6C30, 5);
+    CHECK(gaius::viewer::tribune_roads_ahead(*st, 0) == 20);
+}
+
+// The tutorial (apps/viewer/tutorial.hpp): the goals it reads off the city and the province, the rule it teaches about
+// roads and the Highway, the button it points at, and its pages in every language.
+void test_tutorial() {
+    std::printf("test_tutorial (steps and goals, a road across the Highway links a town, pages fit in every language)\n");
+    using namespace gaius::systems;
+    namespace viewer = gaius::viewer;
+    namespace ui = gaius::ui;
+    using construction::CommandId;
+    using viewer::TutorialGoal;
+    const auto step_of = [](TutorialGoal goal) {
+        for (int i = 0; i < viewer::kTutorialStepCount; ++i)
+            if (viewer::kTutorialSteps[i].goal == goal) return i;
+        return -1;
+    };
+
+    // The numbers the texts quote are the game's and the goals'.
+    CHECK(administration::kPromotion[1].average == 35 && administration::kPromotion[1].each == 12);
+    const std::string welcome = viewer::kTutorialSteps[0].text[1];
+    CHECK(welcome.find(administration::kRankNames[1]) != std::string::npos &&
+          welcome.find(administration::kRankNames[2]) != std::string::npos &&
+          welcome.find(" 12 ") != std::string::npos && welcome.find(" 35.") != std::string::npos);
+    const auto line_has = [&](TutorialGoal goal, int number) {
+        return std::string(viewer::kTutorialSteps[step_of(goal)].line).find(std::to_string(number)) != std::string::npos;
+    };
+    CHECK(line_has(TutorialGoal::Roads, viewer::kTutorialRoadCells) &&
+          line_has(TutorialGoal::Housing, viewer::kTutorialHouses) && line_has(TutorialGoal::Water, viewer::kTutorialWells) &&
+          line_has(TutorialGoal::Work, viewer::kTutorialWorkshops) &&
+          line_has(TutorialGoal::People, viewer::kTutorialPeople) && line_has(TutorialGoal::Town, viewer::kTutorialTowns));
+    // First and last are pages only read; the city and its income come before the province's roads.
+    CHECK(viewer::kTutorialSteps[0].goal == TutorialGoal::Read &&
+          viewer::kTutorialSteps[viewer::kTutorialFinal].goal == TutorialGoal::Read);
+    CHECK(step_of(TutorialGoal::People) < step_of(TutorialGoal::Highway) &&
+          step_of(TutorialGoal::Highway) < step_of(TutorialGoal::Town) &&
+          step_of(TutorialGoal::Promotion) == viewer::kTutorialFinal - 1);
+
+    // The census of an empty site: after the welcome the tutorial waits at the Forum step.
+    auto st = std::make_unique<CityState>(gaius::model::blank_state());
+    for (auto& row : st->city.tile) row.fill(0x1D);
+    st->empire.cells.fill(0x1D);
+    set_global_word(*st, 0x6C30, 1);
+    viewer::TutorialCensus c = viewer::tutorial_census(*st);
+    CHECK(c.rank == 1 && c.forums == 0 && c.road_cells == 0 && c.population == 0 && !c.highway_junction && c.towns == 0);
+    CHECK(viewer::tutorial_progress(0, c, false) == 0);  // a page that is only read is left by its Continue
+    CHECK(viewer::tutorial_progress(1, c, false) == step_of(TutorialGoal::Forum));
+
+    // A Forum, a road, houses and wells, built with the game's own routines: the steps they answer are passed.
+    CHECK(construction::place_forum(*st, 0, 50, 50));
+    construction::DragState drag;
+    for (int x = 44; x < 58; ++x) construction::place_road(st->city, drag, x, 52);
+    c = viewer::tutorial_census(*st);
+    CHECK(c.forums == 1 && c.road_cells == 14);
+    CHECK(viewer::tutorial_progress(1, c, false) == step_of(TutorialGoal::Housing));
+    CHECK(viewer::tutorial_line(step_of(TutorialGoal::Roads), c) == "Lay 12 cells of road (14)");
+    CHECK(viewer::tutorial_line(0, c).empty());
+    for (int x = 44; x < 58; ++x) construction::place(st->city, x % 3 == 0 ? CommandId::Well : CommandId::Housing, x, 53);
+    for (int x = 44; x < 50; ++x) construction::place(st->city, CommandId::Housing, x, 51);
+    c = viewer::tutorial_census(*st);
+    CHECK(c.house_cells == 15 && c.wells == 5 && c.population == 4 * 15);  // tents: a unit, four people each
+    CHECK(viewer::tutorial_progress(1, c, false) == step_of(TutorialGoal::Work));
+    // The Work step points at the Market until there is one, then at the Workshop.
+    CHECK(viewer::tutorial_city_command(step_of(TutorialGoal::Work), c) == CommandId::Market);
+    CHECK(construction::place(st->city, CommandId::Market, 52, 50));
+    c = viewer::tutorial_census(*st);
+    CHECK(c.markets == 1 && viewer::tutorial_city_command(step_of(TutorialGoal::Work), c) == CommandId::Workshop);
+    CHECK(construction::place_workshop(*st, 0, 60, 53) && construction::place_workshop(*st, 4, 64, 53));
+    CHECK(construction::place(st->city, CommandId::BathHouses, 58, 53));
+    CHECK(construction::place(st->city, CommandId::Oracle, 40, 50));
+    c = viewer::tutorial_census(*st);
+    CHECK(c.workshops == 2 && c.bath_houses == 1 && c.oracles == 1);
+    // The visit to the Forum is the player's to make; then the city has to grow.
+    CHECK(viewer::tutorial_progress(1, c, false) == step_of(TutorialGoal::VisitForum));
+    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::VisitForum), c, true) == step_of(TutorialGoal::People));
+
+    // The province. The Imperial Highway from its junction to the city, laid as the viewer lays it.
+    auto at = [&](int x, int y) -> uint8_t& { return st->empire.cells[static_cast<size_t>(y * 40 + x)]; };
+    at(20, 10) = province::kCityTile;
+    at(0, 10) = 0x78;
+    set_global_word(*st, 0x6C90, 0);
+    set_global_word(*st, 0x6C8E, 10);
+    at(5, 6) = 0x61;   // a town north of where the Highway will run
+    at(12, 14) = 0x61; // and one south of it
+    c = viewer::tutorial_census(*st);
+    CHECK(c.highway_junction && !c.highway_linked && c.towns == 2 && c.towns_linked == 0);
+    CHECK(viewer::tutorial_province_command(step_of(TutorialGoal::Highway)) == 42 &&
+          viewer::tutorial_province_command(step_of(TutorialGoal::Town)) == 36 &&
+          viewer::tutorial_province_command(step_of(TutorialGoal::Forum)) == 0);
+    // The Highway step points at the junction and the city, the towns' step at each town not linked.
+    auto marks = viewer::tutorial_province_marks(*st, step_of(TutorialGoal::Highway));
+    CHECK(marks.size() == 2 && marks[0] == std::make_pair(0, 10) && marks[1] == std::make_pair(20, 10));
+    CHECK(viewer::tutorial_province_marks(*st, step_of(TutorialGoal::Town)).size() == 2);
+    construction::DragState province_drag;
+    for (int x = 1; x < 20; ++x) CHECK(province::place_highway(*st, province_drag, x, 10) != province::Built::Refused);
+    c = viewer::tutorial_census(*st);
+    CHECK(c.highway_linked);
+    // What the towns' page says: a road that crosses the Highway shares it. One town's road is dragged from the town
+    // onto the Highway, the other's from the Highway to the town; neither goes near the city.
+    for (int y = 7; y <= 10; ++y) CHECK(province::place_province_road(*st, province_drag, 5, y) != province::Built::Refused);
+    c = viewer::tutorial_census(*st);
+    CHECK(c.towns_linked == 1 && c.highway_linked);
+    CHECK(at(5, 10) == 0x7B || at(5, 10) == 0x7C);  // the crossing
+    for (int y = 10; y <= 13; ++y) CHECK(province::place_province_road(*st, province_drag, 12, y) != province::Built::Refused);
+    c = viewer::tutorial_census(*st);
+    CHECK(c.towns_linked == 2 && c.highway_linked);
+    CHECK(viewer::tutorial_province_marks(*st, step_of(TutorialGoal::Town)).empty());
+    // A gap in the Highway unlinks the towns that share it, and the Highway itself.
+    const uint8_t piece = at(15, 10);
+    at(15, 10) = 0x1D;
+    c = viewer::tutorial_census(*st);
+    CHECK(!c.highway_linked && c.towns_linked == 0);
+    at(15, 10) = piece;
+
+    // The goals, on counts alone.
+    viewer::TutorialCensus done;
+    done.rank = 1;
+    done.forums = 1;
+    done.road_cells = done.house_cells = 20;
+    done.wells = 3;
+    done.markets = done.bath_houses = done.oracles = 1;
+    done.workshops = 2;
+    done.population = 2400;
+    done.highway_junction = done.highway_linked = true;
+    done.towns = 4;
+    done.towns_linked = 2;
+    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::VisitForum), done, true) == step_of(TutorialGoal::Promotion));
+    done.towns_linked = 1;
+    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::People), done, false) == step_of(TutorialGoal::Town));
+    done.population = 1999;
+    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::People), done, false) == step_of(TutorialGoal::People));
+    done.population = 2400;
+    done.towns_linked = 2;
+    done.rank = 2;  // promoted: the last page
+    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::Promotion), done, false) == viewer::kTutorialFinal);
+    CHECK(viewer::tutorial_progress(viewer::kTutorialFinal, done, false) == viewer::kTutorialFinal);
+    // A fountain is water too; a province with one town, or without a junction, does not hold the tutorial up.
+    viewer::TutorialCensus odd;
+    odd.fountains = 1;
+    odd.towns = odd.towns_linked = 1;
+    CHECK(viewer::tutorial_goal_met(TutorialGoal::Water, odd, false) && viewer::tutorial_goal_met(TutorialGoal::Town, odd, false) &&
+          viewer::tutorial_goal_met(TutorialGoal::Highway, odd, false));
+    odd.towns_linked = 0;
+    CHECK(!viewer::tutorial_goal_met(TutorialGoal::Town, odd, false));
+
+    // The button to press on the original's paged bar: the tool's own when its page shows, else the way to it.
+    const CommandId ring[] = {CommandId::Road, CommandId::Forum, CommandId::Housing};
+    ui::Toolbar bar(ring, 3, ui::metrics_for_scale(1), 320, 200, true);
+    CHECK(bar.original_bar());
+    int button = viewer::tutorial_bar_button(bar, CommandId::Forum);  // on the Infrastructure page
+    CHECK(button >= 0 && bar.entry(button).kind == ui::BarKind::Page && bar.entry(button).page == 1);
+    bar.set_bar_page(1);
+    button = viewer::tutorial_bar_button(bar, CommandId::Forum);
+    CHECK(button >= 0 && bar.entry(button).kind == ui::BarKind::Tool && bar.entry(button).command == CommandId::Forum);
+    bar.set_bar_page(2);
+    button = viewer::tutorial_bar_button(bar, CommandId::Forum);
+    CHECK(button >= 0 && bar.entry(button).kind == ui::BarKind::Back);
+    button = viewer::tutorial_bar_button(bar, CommandId::Oracle);  // this page's own
+    CHECK(button >= 0 && bar.entry(button).command == CommandId::Oracle);
+    bar.set_bar_page(0);
+    button = viewer::tutorial_bar_button(bar, CommandId::GoToProvince);
+    CHECK(button >= 0 && bar.entry(button).kind == ui::BarKind::Go && bar.entry(button).command == CommandId::GoToProvince);
+    CHECK(viewer::tutorial_bar_button(bar, CommandId::Housing) >= 0 && viewer::tutorial_bar_button(bar, CommandId::NoAction) == -1);
+    // The flat list: the tool's button, and none for a command the list does not hold.
+    const ui::Toolbar flat(ring, 3, ui::metrics_for_scale(1), 320, 200, false);
+    CHECK(viewer::tutorial_bar_button(flat, CommandId::Housing) == 2 && viewer::tutorial_bar_button(flat, CommandId::Oracle) == -1);
+
+    // Every page fits the screen -- its rows, their width, and the goal line with a count as long as it gets -- in
+    // English and in each language built in. The ratings are at their widest for the promotion page.
+    for (uint16_t rating : {administration::kPeace, administration::kCulture, administration::kProsperity,
+                            administration::kEmpire, administration::kAverage})
+        set_global_word(*st, rating, 100);
+    const auto pages_fit = [&](const char* language) {
+        bool ok = true;
+        viewer::TutorialCensus big;
+        big.road_cells = big.house_cells = big.wells = 999;
+        big.population = 99999;
+        big.towns_linked = 4;
+        for (int step = 0; step < viewer::kTutorialStepCount; ++step) {
+            for (int variant = 0; variant < 4; ++variant) {
+                const ui::Page page = viewer::tutorial_page(step, *st, (variant & 1) != 0, (variant & 2) == 0);
+                size_t widest = page.title.size();
+                for (const ui::PanelRow& row : page.rows)
+                    widest = std::max(widest, row.label.size() + (row.value.empty() ? 0 : row.value.size() + 1));
+                if (static_cast<int>(page.rows.size()) > viewer::kTutorialRows || widest > viewer::kTutorialWidth) {
+                    std::printf("  %s, step %d (variant %d): %zu rows, widest %zu\n", language, step, variant,
+                                page.rows.size(), widest);
+                    ok = false;
+                }
+                ok = ok && page.buttons.size() == (step == viewer::kTutorialFinal ? 1u : 2u);
+            }
+            if (viewer::tutorial_line(step, big).size() > 37) {
+                std::printf("  %s, step %d: the goal line is %zu long\n", language, step, viewer::tutorial_line(step, big).size());
+                ok = false;
+            }
+        }
+        return ok;
+    };
+    CHECK(pages_fit("en"));
+    CHECK(viewer::tutorial_page(1, *st).title == "1. A Forum" && viewer::tutorial_page(0, *st).title == "Welcome, governor");
+    // On a touch screen, and with the Tribune left to the player, the step's last paragraph is another.
+    const auto last_row = [&](int step, bool touch, bool tribune_auto) {
+        return viewer::tutorial_page(step, *st, touch, tribune_auto).rows.back().label;
+    };
+    CHECK(last_row(1, true, true) != last_row(1, false, true) && last_row(3, true, true) == last_row(3, false, true));
+    CHECK(last_row(step_of(TutorialGoal::VisitForum), false, true) != last_row(step_of(TutorialGoal::VisitForum), false, false));
+    // The promotion page leads with the ratings, each with what the next rank asks.
+    const ui::Page promotion = viewer::tutorial_page(step_of(TutorialGoal::Promotion), *st);
+    CHECK(promotion.rows.size() > 5 && promotion.rows[0].label == "Peace 100 (12)" && promotion.rows[4].label == "Average 100 (35)");
+    for (const char* code : {"de", "fr"}) {
+        ui::set_catalog(ui::parse_catalog(code, ui::embedded_language_file(std::string(code) + ".txt")));
+        CHECK(pages_fit(code));
+        CHECK(viewer::tutorial_page(1, *st).title != "1. A Forum");
+        CHECK(viewer::tutorial_line(step_of(TutorialGoal::Forum), c) != "Build a Forum");
+    }
+    ui::set_catalog(ui::Catalog{"en", "English", {}});
+
+    // The switch and the step reached are kept in gaius.cfg; the start screen and Settings > Game turn it on again,
+    // from the start.
+    ui::Settings settings;
+    CHECK(settings.tutorial && settings.tutorial_step == 0);
+    settings.tutorial = false;
+    settings.tutorial_step = 7;
+    const ui::Settings read = ui::parse_settings(ui::settings_text(settings));
+    CHECK(!read.tutorial && read.tutorial_step == 7 && read.unknown.empty());
+    CHECK(ui::parse_settings("tutorial_step = -3\n").tutorial_step == 0 && ui::parse_settings("ui_scale = 2\n").tutorial);
+    ui::GameOptions options = ui::default_options();
+    bool messages = true;
+    viewer::adjust_setting(viewer::kActionSettingDown + 2 * viewer::row_id(viewer::SettingRow::Tutorial), settings, options,
+                           messages, {});
+    CHECK(settings.tutorial && settings.tutorial_step == 0);
+    const ui::Page start = viewer::start_page(0, 0, "  Octavian  ", 1);
+    CHECK(start.rows.size() == viewer::start_page(0, 0).rows.size() + 1 &&
+          start.rows.back().up_action == viewer::kActionTutorialToggle && start.rows.back().value == "On");
+    CHECK(viewer::start_page(0, 0, "  Octavian  ", 0).rows.back().value == "Off");
 }
 
 // Every save's pleb figures are what the routines give from its own counts.
@@ -7636,6 +7887,7 @@ int main() {
     test_province_construction();
     test_plebs_duties();
     test_tribune_assist();
+    test_tutorial();
     test_plebs_match_saves();
     test_economy_province_costs();
     test_administration_ratings();

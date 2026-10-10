@@ -59,6 +59,11 @@ struct Settings {
     // collapses and road wear away are staffed to what the city needs, and welfare keeps the plebs coming. Off is the
     // original's rule, where the player does it by hand on the Tribune's page.
     bool tribune_auto = true;
+    // The tutorial (apps/viewer/tutorial.hpp) guides a career's first rank: on until it has been played through or
+    // skipped, and the start screen and Settings > Game turn it on again. tutorial_step is the step it has reached,
+    // kept here because the save file is the original's and has no room for it.
+    bool tutorial = true;
+    int tutorial_step = 0;
     // The config_version the file carried when it was read (0: a file from before versions, or none). Settings made
     // by the program always have kConfigVersion.
     int file_version = kConfigVersion;

@@ -20,6 +20,7 @@ that holds `CSR.EXE`.
 | [`render_saves.py`](render_saves.py) | the city in each save, drawn with the game's sprites |
 | [`compare_saves.py`](compare_saves.py) | what differs between two saves, briefly or cell by cell |
 | [`check_saves.py`](check_saves.py) | Gaius's simulation against saves; for contributors |
+| [`record_session.py`](record_session.py) | while you play: every save either game writes, and what was on screen |
 | [`extract_strings.py`](extract_strings.py) | Gaius's own texts for translation (`lang/template.txt`) |
 
 ## Exporting the game's files
@@ -89,6 +90,51 @@ python scripts/check_saves.py "/path/to/saves"
 Both are also the tools underneath: `sim_check` and `month_check` (exit 0 on a
 match, 1 on a difference, 2 if a file can't be read), `save_inspect --summary`
 (one `key: value` line a fact) and `save_diff`.
+
+## Recording a play session
+
+```sh
+python scripts/record_session.py "/path/outside/the/repository/sessions"
+python scripts/record_session.py --play-gaius
+```
+
+Start it, play the original in its DOSBox or Gaius (or one after the other),
+and stop it with Ctrl+C. It keeps, in a folder a day:
+
+| Folder | Holds |
+|---|---|
+| `original/saves/`, `gaius/saves/` | a copy of every save as it was written, named by the time (`213045_CAESARXX.SAV`). The original has few save names and Gaius's automatic saves rotate; here nothing is overwritten |
+| `original/screens/` | the original's frame, 320 x 200, every five seconds and after each save: DOSBox's own screenshots (its Ctrl+F5, pressed for you while DOSBox is the window in front; Windows only) |
+| `gaius/screens/` | Gaius's frame every five seconds, when it was started with `--capture-dir` (`--play-gaius` does) |
+| `session.csv` | each save: the time, the game, and with the tools built its date, people and funds |
+| `video/` | with `--video`: the session filmed by [OBS Studio](https://obsproject.com) (Windows), as `.mkv` |
+
+The original's folder is `--original FOLDER`, else `$GAIUS_ORIGINAL`, else
+where GOG installs it; its saves are looked for under `cloud_saves/US` first
+(GOG's DOSBox writes them there) and then in the game's own folders. `--every
+SECONDS` changes the pace of the pictures (0: the original's only after a
+save).
+
+The screenshot key is only ever sent to DOSBox, and not while you hold a key.
+It reaches the game as a tap on Ctrl, which Caesar ignores. It is not sent
+until DOSBox's title names the game (`Program: CSR`): DOSBox 0.74 ends with a
+libpng error if it is asked for a screenshot before it has drawn its first
+frame, so don't press Ctrl+F5 yourself while DOSBox is starting either.
+
+`--video` runs OBS Studio for the length of the session, on a profile and a
+scene collection of its own (`Gaius-recorder`, written again at each start):
+the two games' windows and nothing else of the desktop, 1920 x 1080 at 30
+frames a second, with the sound the PC plays and no microphone. OBS starts
+already recording, in the tray, and is stopped and closed when the script is.
+Eight seconds after a game first comes to the front the script asks OBS for a
+still and says whether it has the game's picture (three beeps if it has not).
+OBS films DOSBox both full screen and in a window; it films Gaius while Gaius
+is the window in front.
+
+Saves seconds apart are what `check_saves.py`'s month check wants, and the
+pictures are the ground truth Gaius's screens are compared with. Like exports,
+**a session is the original game's property**: the default folder,
+`export/sessions`, is ignored by git, and a folder git would commit is refused.
 
 ## The tools behind them
 

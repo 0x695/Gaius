@@ -37,6 +37,10 @@
 // time stops while the window or tab is not in front (Settings > Game > Pause when away). The Load page's Autosaves
 // button reaches the quick and automatic saves; the eight slots are only ever written by the player.
 //
+// The tutorial (apps/viewer/tutorial.hpp) guides a new career's first rank: a page for each step, its goal on a line
+// above the control bar (a click opens the page again), a gold frame on the button to press, and a last page as the
+// second province begins. The start screen's Tutorial row and Settings > Game switch it.
+//
 // Usage:
 //   gaius_viewer --version
 //   gaius_viewer [<game folder> | <EMPIRE2.0xx | CAESARxx.SAV>]
@@ -47,6 +51,7 @@
 //   gaius_viewer <CAESARxx.SAV> --test-build T X Y        (headless: place tool T at cell X,Y)
 //   --no-intro  --cursor original|gaius  --mute  --ui-scale N  --speed N  --save-dir DIR  (see the README; the
 //   other --test-* and --screen options are headless hooks for the tests and for screenshots)
+//   gaius_viewer --capture-dir DIR [--capture-every SECONDS]   (while playing: the picture as a PNG every few seconds)
 
 #include <SDL.h>
 
@@ -57,6 +62,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -72,6 +78,7 @@
 #include "apps/viewer/settings_page.hpp"
 #include "apps/viewer/setup_screen.hpp"
 #include "apps/viewer/tribune_assist.hpp"
+#include "apps/viewer/tutorial.hpp"
 #include "formats/common/game_files.hpp"
 #include "formats/pal256/pal256.hpp"
 #include "formats/pl8/pl8.hpp"
@@ -441,7 +448,21 @@ int main(int argc, char** argv) {
     std::string cohort_command;     // --cohort-command: runs Cohort 2 for a battle (findings section 44)
     int start_speed = -1;           // --speed 0-100: DS:0x5292 (default: the options' CAESAR.INF)
     int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
+    int test_tutorial = -1;         // --test-tutorial N: the tutorial at step N with its page open (headless captures)
+    bool test_tutorial_goal = false;  // --test-tutorial-goal N: at step N with the page read, the goal line on the map
+    // --capture-dir DIR [--capture-every SECONDS]: while playing, the game's 320 x 200 picture as a PNG in DIR every few
+    // seconds (5 unless said), named by the time of day; a picture the same as the last one is not written again.
+    // scripts/record_session.py gathers them beside the saves of a play session.
+    std::string capture_dir;
+    double capture_every = 5.0;
     for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--capture-dir") == 0 && i + 1 < argc) capture_dir = argv[++i];
+        if (std::strcmp(argv[i], "--capture-every") == 0 && i + 1 < argc) capture_every = std::atof(argv[++i]);
+        if ((std::strcmp(argv[i], "--test-tutorial") == 0 || std::strcmp(argv[i], "--test-tutorial-goal") == 0) &&
+            i + 1 < argc) {
+            test_tutorial_goal = std::strcmp(argv[i], "--test-tutorial-goal") == 0;
+            test_tutorial = std::atoi(argv[++i]);
+        }
         if (std::strcmp(argv[i], "--assets") == 0 && i + 1 < argc) assets_dir = argv[++i];
         if (std::strcmp(argv[i], "--months") == 0 && i + 1 < argc) run_months = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--paused") == 0) start_paused = true;
@@ -919,7 +940,7 @@ int main(int argc, char** argv) {
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
     enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap,
-                        NameEntry, Settings, Choice, News };
+                        NameEntry, Settings, Choice, News, Tutorial };
     Screen settings_return = Screen::City;  // where Resume goes back to
     bool choice_forum = true;               // the Choice screen: the Forum type menu, or the Industry type menu
     bool choice_time = false;               // whether time was running when the menu opened
@@ -947,6 +968,36 @@ int main(int argc, char** argv) {
     const auto hints_notice = [&]() { return notice_is_hints || notice_is_pad_hints; };
     int hall_hover = 0;  // the CONTFRM.GD8 region under the pointer
     Screen screen = Screen::City;
+    // The tutorial (apps/viewer/tutorial.hpp). The step it has reached is settings.tutorial_step; the rest is this
+    // session's.
+    Screen tutorial_return = Screen::City;   // where a tutorial page goes back to
+    bool tutorial_time = false;              // whether time was running when the page opened
+    bool tutorial_page_seen = false;         // the step's page has been shown, so its goal is on the map
+    bool tutorial_forum_visited = false;     // the Forum was opened while the step asked for it
+    bool tutorial_touch = false;             // a touch screen: the pages' wording
+    Uint32 tutorial_due = 0;                 // when the step's page opens (a moment after the step before was done)
+    viewer::TutorialCensus tutorial_census;  // what the city and the province hold, counted every few frames
+    std::vector<std::pair<int, int>> tutorial_marks;  // the province cells the step points at
+    // Running: switched on and at rank 1, or at rank 2 with only the last page left to show. A headless capture has
+    // none unless it asks (--test-tutorial).
+    const auto tutorial_running = [&]() {
+        if (!save_mode || !settings.tutorial) return false;
+        if (test_tutorial >= 0) return true;
+        if (!screenshot_path.empty()) return false;
+        const int rank = model::global_word(state, systems::administration::kRank);
+        return rank == 1 ? settings.tutorial_step < viewer::kTutorialFinal
+                         : rank == 2 && settings.tutorial_step == viewer::kTutorialFinal;
+    };
+    const auto store_tutorial = [&]() {
+        if (!settings_path.empty() && screenshot_path.empty()) ui::save_settings(settings_path, settings);
+    };
+    const auto open_tutorial_page = [&]() {
+        tutorial_return = screen;
+        tutorial_time = time_running;
+        time_running = false;
+        tutorial_page_seen = true;
+        screen = Screen::Tutorial;
+    };
     const auto leave_news = [&]() {
         screen = news_return;
         time_running = news_time;
@@ -1202,7 +1253,10 @@ int main(int argc, char** argv) {
             case Screen::Start:
             case Screen::NameEntry:
                 return name_return_to_forum ? viewer::forum_page(state, forum_tab, sim.speed, rating_hint)
-                                            : viewer::start_page(funding_level, start_difficulty, governor_name);
+                                            : viewer::start_page(funding_level, start_difficulty, governor_name,
+                                                                 settings.tutorial ? 1 : 0);
+            case Screen::Tutorial:
+                return viewer::tutorial_page(settings.tutorial_step, state, tutorial_touch, settings.tribune_auto);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons, files_recover);
             case Screen::Choice: return viewer::choice_page(choice_forum, choice_forum ? forum_grade : workshop_goods);
             case Screen::Settings: {
@@ -1233,7 +1287,8 @@ int main(int argc, char** argv) {
         return screen == Screen::Forum || screen == Screen::Promotion ||
                (screen == Screen::Battle && !have_battle_art) ||
                screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files ||
-               screen == Screen::Notice || screen == Screen::Settings || screen == Screen::Choice;
+               screen == Screen::Notice || screen == Screen::Settings || screen == Screen::Choice ||
+               screen == Screen::Tutorial;
     };
     auto apply_page_action = [&](int action) {
         namespace admin = systems::administration;
@@ -1267,6 +1322,22 @@ int main(int argc, char** argv) {
                 else
                     time_running = !(touch_page || pad_page) || (notice_return != Screen::Start && !start_paused);
             }
+            return;
+        }
+        if (screen == Screen::Tutorial) {
+            if (action != viewer::kActionContinue && action != viewer::kActionTutorialSkip) return;
+            screen = tutorial_return;
+            time_running = tutorial_time;
+            if (action == viewer::kActionTutorialSkip || settings.tutorial_step >= viewer::kTutorialFinal) {
+                // Skipped, or the last page read: no tutorial until it is switched on again.
+                settings.tutorial = false;
+                settings.tutorial_step = 0;
+            } else if (viewer::tutorial_step(settings.tutorial_step).goal == viewer::TutorialGoal::Read) {
+                ++settings.tutorial_step;  // a page that is only read: the next step's follows
+                tutorial_page_seen = false;
+                tutorial_due = 0;
+            }
+            store_tutorial();
             return;
         }
         if (action == viewer::kActionOpenSave || action == viewer::kActionOpenLoad) {
@@ -1315,6 +1386,10 @@ int main(int argc, char** argv) {
             if (action == viewer::kActionFundingUp && funding_level < 9) ++funding_level;
             if (action == viewer::kActionDifficultyDown && start_difficulty > 0) --start_difficulty;
             if (action == viewer::kActionDifficultyUp && start_difficulty < 2) ++start_difficulty;
+            if (action == viewer::kActionTutorialToggle) {
+                settings.tutorial = !settings.tutorial;
+                store_tutorial();
+            }
             if (action == viewer::kActionChooseName && have_name_art) {
                 // 0x27F84: the name dialog.
                 name_entry = ui::begin_name_entry(governor_name);
@@ -1336,6 +1411,12 @@ int main(int argc, char** argv) {
                     sim.messages.timer = 0x4E;
                     screen = Screen::City;
                     time_running = true;
+                    if (settings.tutorial) {  // the tutorial begins with the career
+                        settings.tutorial_step = 0;
+                        tutorial_page_seen = tutorial_forum_visited = false;
+                        tutorial_due = 0;
+                        store_tutorial();
+                    }
                 }
             }
             return;
@@ -1371,9 +1452,17 @@ int main(int argc, char** argv) {
                     screen = Screen::Ending;
                     return;
                 } else {
+                    const bool tutorial_rank = tutorial_running() && model::global_word(state, admin::kRank) == 1;
                     admin::accept_promotion(state, sim.difficulty);
                     std::printf("promotion accepted: %s\n", viewer::rank_name(model::global_word(state, admin::kRank)));
                     if (model::global_word(state, 0x6C26) == 1) start_new_province();
+                    if (tutorial_rank) {
+                        // The tutorial's rank is done: its last page opens over the new province's site.
+                        settings.tutorial_step = viewer::kTutorialFinal;
+                        tutorial_page_seen = false;
+                        tutorial_due = 0;
+                        store_tutorial();
+                    }
                 }
             } else if (action == viewer::kActionWait9 || action == viewer::kActionWait24) {
                 admin::defer_promotion(state, action == viewer::kActionWait9 ? 9 : 24);
@@ -1632,6 +1721,12 @@ int main(int argc, char** argv) {
             return m;
         };
         ui::Metrics metrics = toolbar_metrics();
+        tutorial_touch = has_touch;
+        if (test_tutorial >= 0) {
+            settings.tutorial = true;
+            settings.tutorial_step = std::clamp(test_tutorial, 0, viewer::kTutorialFinal);
+            tutorial_page_seen = test_tutorial_goal;
+        }
         ui::Toolbar toolbar(kBuildTools, kBuildToolCount, metrics, kLogicalW, kLogicalH, have_icons);
         if (toolbar.original_bar()) tool_armed = tool_remembered = false;
         int hovered = -1;
@@ -1691,6 +1786,18 @@ int main(int argc, char** argv) {
             for (size_t i = 0; i < strip.tabs.size(); ++i)
                 if (strip.tabs[i].contains(lx, ly)) return static_cast<int>(i);
             return -1;
+        };
+        // The tutorial's goal, a line above the control bar at the left of the city and province views once the step's
+        // page has been read (empty when there is none to show), and its box.
+        const auto tutorial_goal_text = [&]() -> std::string {
+            if (!tutorial_running() || !tutorial_page_seen || (screen != Screen::City && screen != Screen::Province))
+                return std::string();
+            return viewer::tutorial_line(settings.tutorial_step, tutorial_census);
+        };
+        const auto tutorial_goal_box = [&](const std::string& line) {
+            const int text_w = have_font ? ui::game_text_width(line.c_str(), 1, game_font) : ui::text_width(line.c_str(), 1);
+            const int floor_y = static_cast<int>((screen == Screen::Province ? pcam : cam).visible_h);
+            return ui::Rect{4, floor_y - 14, text_w + 10, 12};
         };
         // The message box, and whether it shows on this screen (the city,
         // province and maps views; the messages option DS:0x6C78 on).
@@ -1958,9 +2065,14 @@ int main(int argc, char** argv) {
             bool messages_on = model::global_word(state, 0x6C78) != 0;
             int capture = -1;
             const ui::GameOptions before = game_options;
+            const bool tutorial_before = settings.tutorial;
             if (viewer::adjust_setting(action, settings, game_options, messages_on, languages, &capture)) {
                 model::set_global_word(state, 0x6C78, messages_on ? 1 : 0);
                 if (game_options.words != before.words) options_changed();
+                if (settings.tutorial && !tutorial_before) {  // switched on again: from its first page
+                    tutorial_page_seen = tutorial_forum_visited = false;
+                    tutorial_due = 0;
+                }
                 apply_settings();
             } else if (capture >= 0) {
                 settings_view.capturing = capture;
@@ -2167,6 +2279,10 @@ int main(int argc, char** argv) {
             province_drag_x = province_drag_y = -1;
             drag_undo.clear();
             drag_refund = 0;
+            if (const std::string goal = tutorial_goal_text(); !goal.empty() && tutorial_goal_box(goal).contains(lx, ly)) {
+                open_tutorial_page();  // the step's page again
+                return;
+            }
             if (buttons_key() >= 0 && ui::button_at(buttons_for(buttons_key()), lx, ly) >= 0) {
                 // The screen's buttons answer the mouse once a frame (the
                 // per-frame pass below); a headless --test-click presses and
@@ -2538,6 +2654,14 @@ int main(int argc, char** argv) {
         Uint32 last_scroll_ms = SDL_GetTicks();
         Uint32 edge_since = 0;  // when the pointer reached the window's edge, 0 while it is not there
         Uint32 last_frame_ms = SDL_GetTicks();
+        Uint32 last_capture_ms = 0;          // --capture-dir: when the last picture was written
+        std::vector<uint8_t> last_capture;   // ... and what it showed
+        int capture_count = 0;
+        if (!capture_dir.empty()) {
+            std::error_code capture_error;
+            fs::create_directories(capture_dir, capture_error);
+            std::printf("capture: a picture every %.1f s into %s\n", capture_every, capture_dir.c_str());
+        }
         double pad_pointer_x = 0, pad_pointer_y = 0;
         bool pad_pointer_moved = false;
         bool click_latched = false;  // a left press this frame, even if the button is up again by the time it is polled
@@ -2622,6 +2746,8 @@ int main(int argc, char** argv) {
                             leave_news();
                         } else if (screen == Screen::Choice) {
                             choose_type(viewer::kActionBack);
+                        } else if (screen == Screen::Tutorial) {
+                            apply_page_action(viewer::kActionContinue);
                         } else if (screen == Screen::Settings) {
                             if (settings_view.confirm != viewer::SettingsView::Confirm::None)
                                 settings_view.confirm = viewer::SettingsView::Confirm::None;
@@ -2688,6 +2814,10 @@ int main(int argc, char** argv) {
                         }
                         if (save_mode && screen == Screen::Choice) {
                             choose_type(viewer::kActionBack);  // no command chosen
+                            break;
+                        }
+                        if (save_mode && screen == Screen::Tutorial) {
+                            apply_page_action(viewer::kActionContinue);  // read: back to the game
                             break;
                         }
                         if (save_mode && screen == Screen::Notice && have_interface_art && !hints_notice()) {
@@ -3098,6 +3228,34 @@ int main(int argc, char** argv) {
                     settings.autosave_years > 0)
                     write_autosave();
             }
+            // The tutorial: what the city and the province hold decides the step, whatever order the player builds in.
+            // A new step's page opens a moment later, on a map view and with no button held, so it never cuts a drag
+            // short.
+            if (save_mode && settings.tutorial && settings.tutorial_step >= viewer::kTutorialFinal && test_tutorial < 0 &&
+                model::global_word(state, systems::administration::kRank) == 1)
+                settings.tutorial_step = 0;  // a first rank again (an older save loaded): from the start
+            if (tutorial_running()) {
+                if ((screen == Screen::ForumHall || screen == Screen::Forum) &&
+                    viewer::tutorial_step(settings.tutorial_step).goal == viewer::TutorialGoal::VisitForum)
+                    tutorial_forum_visited = true;
+                if (frame_count % 8 == 0) {
+                    tutorial_census = viewer::tutorial_census(state);
+                    // A capture stays on the step it asked for.
+                    const int step = test_tutorial >= 0 ? settings.tutorial_step
+                                                        : viewer::tutorial_progress(settings.tutorial_step, tutorial_census,
+                                                                                    tutorial_forum_visited);
+                    if (step != settings.tutorial_step) {
+                        settings.tutorial_step = step;
+                        tutorial_page_seen = tutorial_forum_visited = false;
+                        tutorial_due = SDL_GetTicks() + 900;
+                        store_tutorial();
+                    }
+                    tutorial_marks = viewer::tutorial_province_marks(state, settings.tutorial_step);
+                }
+                if (!tutorial_page_seen && (screen == Screen::City || screen == Screen::Province) &&
+                    SDL_GetTicks() >= tutorial_due && !pointer.left_held && !touch_building)
+                    open_tutorial_page();
+            }
             // The effects this frame asked for, in order: one sound at a time,
             // so the last is the one heard.
             for (const int effect : systems::sounds::take()) play_effect(effect);
@@ -3360,6 +3518,69 @@ int main(int argc, char** argv) {
             if (save_mode && touch_undo && !drag_undo.empty() && (screen == Screen::City || screen == Screen::Province))
                 ui::render_strip({{ui::tr("Undo"), 950}}, -1, undo_strip, frame, kLogicalW, kLogicalH, page_metrics,
                                  font);
+            // The tutorial: a gold frame on the button to press next and on the province cells the step points at, and
+            // the step's goal on a line above the bar.
+            const std::string tutorial_goal = save_mode ? tutorial_goal_text() : std::string();
+            if (!tutorial_goal.empty()) {
+                using Command = systems::construction::CommandId;
+                const bool bright = (SDL_GetTicks() / 400) % 2 == 0;
+                const Command want = viewer::tutorial_city_command(settings.tutorial_step, tutorial_census);
+                const int province_want = viewer::tutorial_province_command(settings.tutorial_step);
+                ui::Rect target{};
+                if (screen == Screen::City) {
+                    // Not once the command is the one in hand.
+                    const bool chosen = tool_armed && kBuildTools[tool_index] == want;
+                    const int button = chosen ? -1 : viewer::tutorial_bar_button(toolbar, want);
+                    if (button >= 0)
+                        target = toolbar.button(button);
+                    else if (!toolbar.original_bar() && (want == Command::GoToProvince || want == Command::GoToForum) &&
+                             strip.tabs.size() > 3)
+                        target = strip.tabs[want == Command::GoToProvince ? 1 : 3];
+                } else {
+                    // The province view: the step's own command there, else the way to where the step is done.
+                    const bool chosen = province_want != 0 && province_armed &&
+                                        kProvinceCommands[province_command].id == province_want;
+                    const bool wanted = !chosen && (province_want != 0 || want != Command::NoAction);
+                    if (wanted && province_orig()) {
+                        for (int i = 0; i < province_toolbar.count(); ++i) {
+                            const ui::BarButton b = province_toolbar.entry(i);
+                            const bool match = province_want != 0 ? b.kind == ui::BarKind::Province && b.province == province_want
+                                               : want == Command::GoToForum ? b.kind == ui::BarKind::Go
+                                                                            : b.kind == ui::BarKind::Back;
+                            if (match) target = province_toolbar.button(i);
+                        }
+                    } else if (wanted && province_want != 0) {
+                        for (int i = 0; i < kProvinceCommandCount && i < static_cast<int>(province_bar.buttons.size()); ++i)
+                            if (kProvinceCommands[i].id == province_want) target = province_bar.buttons[static_cast<size_t>(i)];
+                    } else if (wanted && strip.tabs.size() > 3) {
+                        target = strip.tabs[want == Command::GoToForum ? 3 : 0];
+                    }
+                    const int cell = static_cast<int>(render::kProvincePx * pcam.zoom);
+                    for (const auto& [cx, cy] : tutorial_marks)
+                        viewer::draw_tutorial_frame(frame, kLogicalW, kLogicalH,
+                                                    ui::Rect{static_cast<int>((cx * render::kProvincePx - pcam.x) * pcam.zoom),
+                                                             static_cast<int>((cy * render::kProvincePx - pcam.y) * pcam.zoom), cell, cell},
+                                                    bright, 2, static_cast<int>(pcam.visible_h));
+                }
+                if (target.w > 0) viewer::draw_tutorial_frame(frame, kLogicalW, kLogicalH, target, bright);
+                const ui::Rect box = tutorial_goal_box(tutorial_goal);
+                const bool over = pointer_lx >= 0 && box.contains(pointer_lx, pointer_ly);
+                for (int y = box.y; y < box.y + box.h; ++y)
+                    for (int x = box.x; x < box.x + box.w; ++x) {
+                        if (x < 0 || y < 0 || x >= kLogicalW || y >= kLogicalH) continue;
+                        const bool edge = y == box.y || x == box.x || y == box.y + box.h - 1 || x == box.x + box.w - 1;
+                        const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
+                        // The pages' own ground under the game's font, which is drawn for it.
+                        frame[i] = edge ? (over ? 255 : 212) : 74;
+                        frame[i + 1] = edge ? (over ? 226 : 165) : 70;
+                        frame[i + 2] = edge ? (over ? 110 : 55) : 52;
+                    }
+                if (font)
+                    ui::draw_game_text(frame, kLogicalW, kLogicalH, box.x + 5, box.y + 2, tutorial_goal.c_str(), 1, *font);
+                else
+                    ui::draw_text(frame, kLogicalW, kLogicalH, box.x + 5, box.y + 2, tutorial_goal.c_str(), 1,
+                                  formats::RGB{242, 210, 122});
+            }
             if (save_mode && message_visible()) {
                 // 0x279AC: the message's two 28-character lines.
                 const std::string& t = sim.messages.current.text;
@@ -3393,7 +3614,8 @@ int main(int argc, char** argv) {
                 const int text_w = font ? ui::game_text_width(line.c_str(), 1, *font) : ui::text_width(line.c_str(), 1);
                 const bool on_map = screen == Screen::City || screen == Screen::Province;
                 const int floor_y = on_map ? static_cast<int>((screen == Screen::Province ? pcam : cam).visible_h) : kLogicalH;
-                const ui::Rect box{4, floor_y - 14, text_w + 10, 12};
+                // Above the tutorial's goal line when that is showing.
+                const ui::Rect box{4, floor_y - 14 - (tutorial_goal.empty() ? 0 : 14), text_w + 10, 12};
                 for (int y = box.y; y < box.y + box.h; ++y)
                     for (int x = box.x; x < box.x + box.w; ++x) {
                         if (x < 0 || y < 0 || x >= kLogicalW || y >= kLogicalH) continue;
@@ -3450,6 +3672,20 @@ int main(int argc, char** argv) {
                     }
             }
             window.present_rgb24(frame);
+            // --capture-dir: the picture just shown, every few seconds and only when it has changed.
+            if (!capture_dir.empty() && !focus_paused && frame.size() == static_cast<size_t>(kLogicalW) * kLogicalH * 3 &&
+                (capture_count == 0 || SDL_GetTicks() - last_capture_ms >= static_cast<Uint32>(capture_every * 1000.0)) &&
+                frame != last_capture) {
+                last_capture_ms = SDL_GetTicks();
+                last_capture = frame;
+                const std::time_t now = std::time(nullptr);
+                char stamp[32];
+                std::strftime(stamp, sizeof stamp, "%H%M%S", std::localtime(&now));
+                char name[64];
+                std::snprintf(name, sizeof name, "%s_%05d.png", stamp, capture_count++);
+                stbi_write_png((fs::path(capture_dir) / name).string().c_str(), kLogicalW, kLogicalH, 3, frame.data(),
+                               kLogicalW * 3);
+            }
             platform::web::tick();  // the browser build: write the player's files and saves back now and then
             // Stopped because the player is away: no need to draw at the display's rate.
             if (focus_paused && screenshot_path.empty()) SDL_Delay(30);

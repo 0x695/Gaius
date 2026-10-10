@@ -9,7 +9,8 @@
 //
 // This does what a careful player does with that page, once a month, with the page's own arrows (systems::forum):
 //   * the fire, building-maintenance and road duties, then the province construction duty, are raised from the plebs
-//     nobody has been given work, to what the city needs plus a fifth (the city grows between two months);
+//     nobody has been given work, to what the city needs plus a fifth (the city grows between two months), the
+//     construction duty also for a road's worth of pieces not laid yet;
 //   * welfare is set so the plebs keep coming until the duties, army duty and the 50 kept back are all covered, and then
 //     so they stay where they are.
 // It never lowers a duty and never takes plebs from army duty (the auxiliaries are the player's choice), and it changes
@@ -28,6 +29,21 @@ inline constexpr int kTribuneSpare = 20;
 
 inline int tribune_target(int need) { return need + need / 5 + 1; }
 
+// The province's roads are counted and rolled against in one step of the month (step 105: the count, the needs, the
+// assignment, the thresholds, the rolls), so a road laid this month is in the need its own month's roll uses, before
+// this assistant can answer. The construction duty is therefore staffed ahead, for this many more pieces than stand
+// (a long road's worth): without it every new stretch left one month short, and a short month can wear a piece of the
+// Imperial Highway away (seen in `playtest tutorial`, 2026-10-09).
+inline constexpr int kTribuneRoadsAhead = 40;
+
+// plebs::set_needs' divisor for the construction duty: a pleb group for every 8 pieces at rank 1, every 4 at ranks 2
+// and 3, every 2 above, and one for each on the hard difficulty.
+inline int tribune_roads_ahead(const model::CityState& state, int difficulty) {
+    const int rank = model::global_word(state, 0x6C30);
+    const int shift = difficulty == 2 ? 1 : rank <= 1 ? 4 : rank <= 3 ? 3 : 2;
+    return kTribuneRoadsAhead >> (shift - 1);
+}
+
 inline void tribune_assist(model::CityState& state, int difficulty) {
     namespace plebs = systems::plebs;
     using systems::forum::Duty;
@@ -42,7 +58,8 @@ inline void tribune_assist(model::CityState& state, int difficulty) {
     const Target targets[] = {{Duty::FirePrevention, tribune_target(word(plebs::kFireNeed))},
                               {Duty::BuildingMaintenance, tribune_target(word(plebs::kBuildingNeed))},
                               {Duty::RoadMaintenance, tribune_target(word(plebs::kRoadNeed))},
-                              {Duty::Construction, construction_need}};
+                              {Duty::Construction,
+                               tribune_target(construction_need) + tribune_roads_ahead(state, difficulty)}};
     int wanted = 0;
     for (const Target& t : targets) {
         wanted += t.want;

@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -22,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _gaius  # noqa: E402
 import check_saves  # noqa: E402
 import export_assets  # noqa: E402
+import record_session  # noqa: E402
 import release_notes  # noqa: E402
 
 SAVE_SIZE = 57126  # formats::save::kSaveSize
@@ -121,6 +123,95 @@ class Logic(unittest.TestCase):
             self.assertTrue(confidence, picture)
         # Every picture's palette is a palette some picture is named after, or the shared ones.
         self.assertEqual(len(export_assets.PICTURES), 20)
+
+    def test_a_session_keeps_every_save_written(self):
+        with tempfile.TemporaryDirectory() as folder:
+            saves, archive = Path(folder, "saves"), Path(folder, "archive")
+            saves.mkdir()
+            blank_save(saves, "OLD.SAV")
+            watcher = record_session.SaveWatcher([saves, Path(folder, "not there yet")], archive)
+            self.assertEqual(watcher.poll(), [])  # what was there at the start is not a new save
+            # A save caught half written waits; whole, it is taken at the look after the one that found it.
+            partial = saves / "CAESARXX.SAV"
+            partial.write_bytes(bytes(1000))
+            self.assertEqual(watcher.poll(), [])
+            self.assertEqual(watcher.poll(), [])
+            blank_save(saves, "CAESARXX.SAV")
+            self.assertEqual(watcher.poll(), [])
+            copied = watcher.poll()
+            self.assertEqual([source.name for source, _ in copied], ["CAESARXX.SAV"])
+            self.assertTrue(copied[0][1].name.endswith("_CAESARXX.SAV"))
+            self.assertEqual(copied[0][1].stat().st_size, SAVE_SIZE)
+            self.assertEqual(watcher.poll(), [])
+            # The same name saved over: a second copy, the first kept.
+            blank_save(saves, "CAESARXX.SAV", [(100, 7)])
+            status = partial.stat()
+            os.utime(str(partial), ns=(status.st_atime_ns, status.st_mtime_ns + 2_000_000_000))
+            watcher.poll()
+            again = watcher.poll()
+            self.assertEqual(len(again), 1)
+            self.assertEqual(len(list(archive.iterdir())), 2)
+            self.assertEqual(again[0][1].read_bytes()[100], 7)
+
+    def test_a_session_gathers_the_pictures(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source, target = Path(folder, "capture"), Path(folder, "screens")
+            mover = record_session.PictureMover([Path(folder, "nowhere"), source], target)
+            self.assertEqual(mover.poll(), 0)  # no capture folder yet
+            source.mkdir()
+            old = time.time() - 5
+            for name in ("csr_000.png", "csr_001.png", "csr_000.avi"):
+                Path(source, name).write_bytes(b"x")
+                os.utime(str(Path(source, name)), (old, old))
+            Path(source, "csr_002.png").write_bytes(b"x")  # just written: left for the next look
+            self.assertEqual(mover.poll(), 2)
+            self.assertEqual(sorted(p.name for p in source.iterdir()), ["csr_000.avi", "csr_002.png"])
+            names = sorted(p.name for p in target.iterdir())
+            self.assertEqual(len(names), 2)  # the same second: the second takes a number
+            self.assertTrue(names[0].endswith("_screen.png") and names[1].endswith("_screen_2.png"), names)
+
+    def test_dosbox_is_asked_for_a_picture_only_once_the_game_runs(self):
+        # DOSBox 0.74 dies when asked for a screenshot before its first frame; its title says when a program runs.
+        program = record_session.DosboxKey.program_in_title
+        self.assertEqual(program("DOSBox"), "")  # the splash
+        self.assertEqual(program("DOSBox 0.74-2.1, Cpu speed:     3000 cycles, Frameskip  0, Program:   DOSBOX"), "")
+        self.assertEqual(program("DOSBox 0.74-2.1, Cpu speed:     3000 cycles, Frameskip  0, Program:      CSR"), "CSR")
+        self.assertEqual(program("DOSBox 0.74-2.1, Cpu speed: max 100% cycles, Frameskip  0, Program:      CSR"), "CSR")
+        self.assertEqual(program(""), "")
+
+    def test_a_picture_the_game_still_holds_is_not_taken_twice(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source, target = Path(folder, "capture"), Path(folder, "screens")
+            source.mkdir()
+            old = time.time() - 5
+            Path(source, "csr_000.png").write_bytes(b"")  # DOSBox's failed screenshot: empty, and left open
+            os.utime(str(Path(source, "csr_000.png")), (old, old))
+            mover = record_session.PictureMover([source], target)
+            for _ in range(3):
+                self.assertEqual(mover.poll(), 0)
+            self.assertFalse(target.exists() and list(target.iterdir()))
+
+    def test_the_video_films_the_games_windows_and_no_microphone(self):
+        import json
+        profile = record_session.obs_profile(Path("E:/sessions/2026-10-09/video"))
+        self.assertIn("FilePath=E:/sessions/2026-10-09/video", profile)  # forward slashes: OBS's own form
+        self.assertIn("RecFormat2=mkv", profile)
+        self.assertIn('OBSBasic.StopRecording={"bindings":[{"key":"OBS_KEY_F23"}]}', profile)
+        scenes = json.loads(record_session.obs_scenes())
+        captures = [s for s in scenes["sources"] if s["id"] == "window_capture"]
+        self.assertEqual(sorted(s["settings"]["window"].split(":")[2] for s in captures),
+                         ["DOSBox.exe", "gaius_viewer.exe"])
+        self.assertTrue(all(s["settings"]["priority"] == 2 for s in captures))  # found by program, not title
+        # The desktop's sound is the only audio: no source records the microphone, and none films the screen.
+        kinds = {s["id"] for s in scenes["sources"]} | {v["id"] for v in scenes.values() if isinstance(v, dict)}
+        self.assertEqual(kinds, {"window_capture", "scene", "wasapi_output_capture"})
+        items = next(s for s in scenes["sources"] if s["id"] == "scene")["settings"]["items"]
+        self.assertEqual([i["name"] for i in items], [s["name"] for s in captures])
+
+    def test_the_originals_saves_are_looked_for_under_the_overlay_first(self):
+        folders = record_session.original_save_folders(Path("C:/Caesar"))
+        self.assertEqual(folders[0], Path("C:/Caesar/cloud_saves/US"))
+        self.assertIn(Path("C:/Caesar/US"), folders)
 
 
 @unittest.skipUnless(tools_built(), "the tools aren't built")
