@@ -19,7 +19,7 @@
 //   - a town counts as linked through the Imperial Highway too, which a road joins by crossing it
 //     (province::kTownRoads); a province road wears away in a month whose construction duty is short.
 // `playtest <game> tutorial` plays the pages as a newcomer would, to check that doing what they say reaches the
-// promotion (after 9 game years at the easiest funding, 16 at 5000 Dn).
+// promotion (after 8 game years at the easiest funding, 17 at 5000 Dn).
 //   - Citizen to Equitus asks 12 of each rating and an average of 35 (administration::kPromotion[1]).
 //
 // A step is a page of text (ui::Page, time stopped while it is read) and a goal. The goal is read off the city and the
@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
@@ -63,16 +64,17 @@ enum class TutorialGoal {
     Work,        // a market and kTutorialWorkshops workshops
     BathHouse,   // bath houses
     VisitForum,  // the Forum screen was opened during the step
+    Settled,     // kTutorialSettled people
+    Highway,     // the Imperial Highway reaches the city
     People,      // kTutorialPeople people
     Oracle,      // an oracle
-    Highway,     // the Imperial Highway reaches the city
     Town,        // kTutorialTowns towns are linked to the city
     Promotion,   // rank 2
 };
 
 // The numbers the goals ask for. The steps' lines name them, and test_tutorial checks that they agree.
 inline constexpr int kTutorialRoadCells = 12, kTutorialHouses = 12, kTutorialWells = 3, kTutorialWorkshops = 2,
-                     kTutorialPeople = 2000, kTutorialTowns = 2;
+                     kTutorialSettled = 500, kTutorialPeople = 2000, kTutorialTowns = 2;
 
 // When a step's last paragraph is replaced by `alt`.
 enum class TutorialAlt { None, Touch, TribuneByHand };
@@ -87,7 +89,9 @@ struct TutorialStep {
 };
 
 // FONT1 draws no colon, semicolon or slash (lang files are checked for them: scripts/extract_strings.py --check).
-// The order is the order money allows: the city and its income first, the province's roads out of that income.
+// The order is the order money allows: a city that pays its way first, then the Imperial Highway while the starting
+// funds still cover it, then the city's growth and the towns' roads out of what is left and what comes in. (Until
+// 2026-10-11 the Highway came after 2000 people; the first person to play it reached that step with 23 Dn.)
 inline constexpr TutorialStep kTutorialSteps[] = {
     {TutorialGoal::Read, "", "Welcome, governor",
      {"Rome has given you a province. Build its capital, keep the peace, and Rome will promote you.",
@@ -112,11 +116,11 @@ inline constexpr TutorialStep kTutorialSteps[] = {
     {TutorialGoal::Water, "Dig 3 wells", "Water",
      {"No house grows past a pair of tents without water.",
       "Choose Well and dig one among the houses. A well serves only the plots that touch it, so dig one for every few houses.",
-      "Later a reservoir on the water's edge, a pipe and a Fountain will water a whole district."}},
+      "Later a reservoir on the water's edge, a pipe and a Fountain water a whole district. Pipe each Fountain to a reservoir - one fed through another runs dry every other month."}},
     {TutorialGoal::Work, "Build a Market and 2 Workshops", "Work",
      {"People need work. Where many are idle, the houses decay.",
       "Build a Market beside the road among the houses. Then two Workshops at the edge of the houses - they want people living within three cells, and a Market along their road.",
-      "Choose different goods for each. The Forum's industry advisor knows which suit this province."}},
+      "Give each different goods - a second Workshop of the same goods earns less for both. The Forum's industry advisor ranks the goods for this province."}},
     {TutorialGoal::BathHouse, "Build Bath Houses", "Bath Houses",
      {"Houses ask for more as they grow - water, then a market, then baths, later a school and a theater.",
       "Choose Bath Houses and build them beside the road among the houses. They serve the plots within three cells.",
@@ -127,18 +131,22 @@ inline constexpr TutorialStep kTutorialSteps[] = {
       "The Tribune's plebs fight fires and mend buildings and roads. He staffs them by himself."},
      "The Tribune's plebs fight fires and mend buildings and roads. Give each duty the number in brackets.",
      TutorialAlt::TribuneByHand},
-    {TutorialGoal::People, "Grow to 2000 people", "A bigger city",
-     {"Taxes are your income, and Prosperity and Culture rise no higher than the city's size allows. Rome wants 2000 people at the least.",
-      "Add houses along new roads, with water, a market and baths in reach, and work for the newcomers - a Workshop employs 80 people, a Market 50, a Forum 120.",
-      "A second Forum further along carries the taxes and the citizens to new streets."}},
-    {TutorialGoal::Oracle, "Build an Oracle", "Culture",
-     {"Culture is counted per head - temples, oracles, schools and shows for the people you have.",
-      "An Oracle (200 Dn) is the quickest way. One is enough for about 2000 people, so build more as the city grows.",
-      "Temples are cheap, calm the streets and add a little."}},
+    {TutorialGoal::Settled, "Grow to 500 people", "A growing city",
+     {"Taxes are your income. Add houses along new roads, with water, a market and baths in reach, and work for the newcomers - a Workshop employs 80 people, a Market 50, a Forum 120.",
+      "A second Forum further along carries the taxes and the citizens to new streets.",
+      "Mind the treasury - the province's roads are still to pay for. A line above the goal says how much to keep."}},
     {TutorialGoal::Highway, "Link the Imperial Highway", "The province",
      {"Go to Province shows the land you govern - your city, four towns and, at one edge, the junction of the Imperial Highway, marked in gold.",
       "Choose Highway and drag it from the junction to the city (50 Dn a cell, more on rough ground). It is worth 20 to your Empire rating, and straight roads add more.",
       "Should a piece of road wear away, lay it again - a gap breaks the link."}},
+    {TutorialGoal::People, "Grow to 2000 people", "A bigger city",
+     {"Prosperity and Culture rise no higher than the city's size allows. Rome wants 2000 people at the least.",
+      "Build what pays - houses with water, a market and baths in reach, and work for them. Schools and shows can wait.",
+      "A year costs some 200 Dn in welfare, wages and tribute whatever you build, so every slow year is paid from the treasury."}},
+    {TutorialGoal::Oracle, "Build an Oracle", "Culture",
+     {"Culture is counted per head - temples, oracles, schools and shows for the people you have.",
+      "An Oracle (200 Dn) is the quickest way. One is enough for about 2000 people, so build more as the city grows.",
+      "Temples are cheap, calm the streets and add a little."}},
     {TutorialGoal::Town, "Link 2 towns by road", "The towns",
      {"A town joined to your city by road trades with it and grows. Each is worth up to 20 to your Empire rating.",
       "Choose Road (30 Dn a cell) and drag it from a town marked in gold to the city - or just across the Highway, which a road that crosses it shares. Link two now and the others as the funds allow.",
@@ -167,6 +175,7 @@ struct TutorialCensus {
     int population = 0;               // 4 x the housing units, as the game counts it (systems/housing.hpp)
     bool highway_junction = false;    // the province has the Imperial Highway's entry (DS:0x6C90, DS:0x6C8E)
     bool highway_linked = false;      // as province::connect_highway finds it
+    int highway_cells = 0;            // from the junction to the city along the grid (0 without a junction)
     int towns = 0, towns_linked = 0;  // as province::develop_towns counts them
 };
 
@@ -202,7 +211,12 @@ inline TutorialCensus tutorial_census(const model::CityState& state) {
     c.highway_linked = c.highway_junction && province::connected(state.empire, hx, hy, province::kHighwayRoads);
     for (int y = 0; y < province::kMapW; ++y) {
         for (int x = 0; x < province::kMapW; ++x) {
-            if (!tutorial_town_tile(state.empire.cells[static_cast<size_t>(y) * province::kMapW + x] & 0x7F)) continue;
+            const uint8_t cell = state.empire.cells[static_cast<size_t>(y) * province::kMapW + x] & 0x7F;
+            if (cell == province::kCityTile && c.highway_junction) {
+                const int away = std::abs(x - hx) + std::abs(y - hy);
+                if (c.highway_cells == 0 || away < c.highway_cells) c.highway_cells = away;
+            }
+            if (!tutorial_town_tile(cell)) continue;
             ++c.towns;
             if (province::connected(state.empire, x, y, province::kTownRoads)) ++c.towns_linked;
         }
@@ -223,6 +237,7 @@ inline bool tutorial_goal_met(TutorialGoal goal, const TutorialCensus& c, bool f
         case TutorialGoal::Highway: return c.highway_linked || !c.highway_junction;
         case TutorialGoal::Town: return c.towns_linked >= std::min(c.towns, kTutorialTowns);
         case TutorialGoal::Oracle: return c.oracles >= 1;
+        case TutorialGoal::Settled: return c.population >= kTutorialSettled;
         case TutorialGoal::People: return c.population >= kTutorialPeople;
         case TutorialGoal::Promotion: return c.rank >= 2;
     }
@@ -251,12 +266,53 @@ inline std::string tutorial_line(int step, const TutorialCensus& c) {
         case TutorialGoal::Roads: have = c.road_cells; break;
         case TutorialGoal::Housing: have = c.house_cells; break;
         case TutorialGoal::Water: have = c.wells; break;
+        case TutorialGoal::Settled:
         case TutorialGoal::People: have = c.population; break;
         case TutorialGoal::Town: have = c.towns_linked; break;
         default: break;
     }
     if (have > 0) line += " (" + std::to_string(have) + ")";
     return line;
+}
+
+// What the steps still ahead will cost, roughly: the Imperial Highway at 50 Dn a cell and a quarter more for rough
+// ground and turns, 180 Dn for each of the two towns' roads (a spur onto the Highway: `playtest <game> tutorial` pays
+// 150-180), and the Oracle's 200. Shown above the goal from the step that asks for people, so the player keeps it.
+inline constexpr int kTutorialTownRoad = 180, kTutorialOracle = 200;
+inline int tutorial_reserve(int step, const TutorialCensus& c) {
+    const TutorialGoal goal = tutorial_step(step).goal;
+    if (goal != TutorialGoal::Settled && goal != TutorialGoal::Highway && goal != TutorialGoal::People &&
+        goal != TutorialGoal::Oracle && goal != TutorialGoal::Town)
+        return 0;
+    int need = 0;
+    if (c.highway_junction && !c.highway_linked) need += c.highway_cells * 50 * 5 / 4;
+    need += std::max(0, std::min(c.towns, kTutorialTowns) - c.towns_linked) * kTutorialTownRoad;
+    if (c.oracles < 1) need += kTutorialOracle;
+    return need;
+}
+// The line above the goal: "Still to pay for - 1630 Dn". Empty when nothing is.
+inline std::string tutorial_reserve_line(int step, const TutorialCensus& c) {
+    const int need = tutorial_reserve(step, c);
+    if (need <= 0) return std::string();
+    return std::string(ui::tr("Still to pay for")) + " - " + std::to_string(need) + " Dn";
+}
+// The page that opens once when the treasury falls below that: what is short, and what the game does to a city
+// without money (economy::grant_emergency_funds, economy::settle_accounts' welfare cut, systems/plebs.hpp).
+inline constexpr const char* kTutorialTreasuryText[] = {
+    "Stop building for now. Taxes come in at each year's end - let a few years pass, and see that the people's tax is 6 percent.",
+    "Should the treasury run dry, Rome sends 500 Dn once. After that the welfare is cut, the plebs leave, and fires and collapses take the city.",
+};
+inline ui::Page tutorial_treasury_page(int funds, int need) {
+    ui::Page page;
+    page.title = ui::tr("The treasury");
+    page.rows.push_back({ui::tr("In the treasury"), std::to_string(funds) + " Dn"});
+    page.rows.push_back({ui::tr("Still to pay for"), std::to_string(need) + " Dn"});
+    for (const char* text : kTutorialTreasuryText) {
+        page.rows.push_back({"", ""});
+        for (const std::string& line : wrap_note(ui::tr(text), kTutorialWidth)) page.rows.push_back({line, ""});
+    }
+    page.buttons.push_back({ui::tr("Continue"), kActionContinue});
+    return page;
 }
 
 // The command a step asks the player to choose in the city (NoAction for none), and on the province map (the

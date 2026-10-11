@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Record a play session: every save either game writes, and what was on screen.
 
-    record_session.py [OUT] [--original FOLDER] [--every SECONDS] [--play-gaius] [--video]
+    record_session.py [OUT] [--original FOLDER] [--every SECONDS] [--autosave SECONDS] [--play-gaius] [--video]
 
 Start it, then play -- the original Caesar in its DOSBox, Gaius, or one after the
 other -- and stop it with Ctrl+C. While it runs:
@@ -11,6 +11,9 @@ other -- and stop it with Ctrl+C. While it runs:
     named by the time of day (213045_CAESARXX.SAV). A slot saved over ten
     times is ten files, in order: nothing is lost to the game's few save names.
     Gaius's quick, automatic and away saves count too.
+  * The original has no autosave, so one is taken for it every minute: its state
+    read out of DOSBox's memory and written as the save the game would write
+    (213100_MEMORY.SAV; dosbox_memory.py). Nothing is sent to the game. (Windows only.)
   * The original's screen: DOSBox's own screenshot key (Ctrl+F5) is pressed for
     you every few seconds while DOSBox is the window in front, and just after each
     save. Those pictures are the game's frame exactly, not a photograph of the
@@ -40,6 +43,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import dosbox_memory
 from _gaius import REPO, ScriptError, main_wrapper, output_dir, save_summary, tool
 
 SAVE_SIZE = 57126  # formats::save::kSaveSize: a save is always this long
@@ -180,6 +184,44 @@ class PictureMover:
         return moved
 
 
+# --- Autosaves of the original, from DOSBox's memory --------------------------------------------------
+
+class MemorySaves:
+    """The original has no autosave, so the recorder takes its state out of DOSBox's memory on a clock
+    (dosbox_memory.py: the same bytes the game's own save routine would write, with nothing sent to the game) and
+    keeps each as HHMMSS_MEMORY.SAV beside the saves the game writes. A state that has not changed since the last
+    one kept -- the game paused, or left in a menu -- is not kept again, nor is one from before a city is begun."""
+
+    def __init__(self, box, archive, every):
+        self.box = box
+        self.archive = Path(archive)
+        self.every = every
+        self.due = 0.0
+        self.last = None
+        self.kept = 0
+        self.problem = ""  # the last reason there was nothing to read, for the caller to say once
+
+    def poll(self, now):
+        """(copy, still) when a snapshot was kept at this look, else None."""
+        if now < self.due:
+            return None
+        save, still = self.box.snapshot()
+        if save is None:
+            self.problem = self.box.problem
+            self.due = now + min(self.every, 5.0)  # the game may be starting: look again soon
+            return None
+        self.problem = ""
+        self.due = now + self.every
+        if save == self.last or not dosbox_memory.city_present(save):
+            return None
+        self.archive.mkdir(parents=True, exist_ok=True)
+        target = time_name(datetime.now(), "MEMORY.SAV", self.archive)
+        target.write_bytes(save)
+        self.last = save
+        self.kept += 1
+        return target, still
+
+
 # --- DOSBox's screenshot key (Windows) --------------------------------------------------------------
 
 class DosboxKey:
@@ -289,8 +331,8 @@ class DosboxKey:
 #
 # With --video the script runs OBS Studio for the length of the session, on a profile and a scene collection of its
 # own (OBS_NAME, written again at each start, so nothing set by hand in them lasts): the two games' windows -- only
-# those, not the desktop -- each fitted to a 1920 x 1080 picture, 30 frames a second, with the sound the PC plays and
-# no microphone, as .mkv (which survives a crash) in the session's video folder. OBS is started already recording,
+# those, not the desktop -- each fitted to a 1920 x 1080 picture, 30 frames a second, with the two games' own sound (nothing
+# else the PC plays) and no microphone, as .mkv (which survives a crash) in the session's video folder. OBS is started already recording,
 # stopped with a key no keyboard has (F23, its Stop Recording hotkey in that profile) and then closed.
 
 OBS_NAME = "Gaius-recorder"
@@ -322,31 +364,33 @@ def obs_profile(video_folder):
 
 
 def obs_scenes():
-    """The scene collection: a window capture for each game, fitted to the picture, and the PC's sound. A window is
-    found by its program (priority 2), since DOSBox's title changes as it runs; method 2 is Windows' own capture,
-    which sees a window drawn by the graphics card (Gaius's) and one that covers the screen (DOSBox's)."""
+    """The scene collection: for each game a window capture, fitted to the picture, and that program's own sound
+    (OBS's Application Audio Capture) -- not the desktop's, so whatever else the PC plays while the owner plays, a
+    film in the browser or a call, is not in the video. A window is found by its program (priority 2), since
+    DOSBox's title changes as it runs; method 2 is Windows' own capture, which sees a window drawn by the graphics
+    card (Gaius's) and one that covers the screen (DOSBox's)."""
     import json
 
     def window(name, spec):
         return {"id": "window_capture", "versioned_id": "window_capture", "name": name, "mixers": 0,
                 "settings": {"window": spec, "priority": 2, "method": 2, "cursor": True, "client_area": True}}
 
+    def sound(name, spec):
+        return {"id": "wasapi_process_output_capture", "versioned_id": "wasapi_process_output_capture", "name": name,
+                "mixers": 255, "volume": 1.0, "muted": False, "settings": {"window": spec, "priority": 2}}
+
     def item(name, number):
         return {"name": name, "id": number, "visible": True, "locked": True, "pos": {"x": 0.0, "y": 0.0}, "align": 5,
                 "bounds_type": 2, "bounds_align": 0, "bounds": {"x": 1920.0, "y": 1080.0}}
 
-    names = ["Caesar (DOSBox)", "Gaius"]
+    games = [("Caesar (DOSBox)", "DOSBox:SDL_app:DOSBox.exe"), ("Gaius", "Gaius:SDL_app:gaius_viewer.exe")]
+    names = [name for name, _ in games] + [name + " sound" for name, _ in games]
     return json.dumps({
         "name": OBS_NAME, "current_scene": "Games", "current_program_scene": "Games",
         "scene_order": [{"name": "Games"}],
-        "DesktopAudioDevice1": {"id": "wasapi_output_capture", "versioned_id": "wasapi_output_capture",
-                                "name": "Desktop Audio", "mixers": 255, "volume": 1.0, "muted": False,
-                                "settings": {"device_id": "default"}},
-        "sources": [
-            window(names[0], "DOSBox:SDL_app:DOSBox.exe"),
-            window(names[1], "Gaius:SDL_app:gaius_viewer.exe"),
+        "sources": [window(name, spec) for name, spec in games] + [sound(name + " sound", spec) for name, spec in games] + [
             {"id": "scene", "versioned_id": "scene", "name": "Games", "mixers": 0,
-             "settings": {"id_counter": 2, "items": [item(names[0], 1), item(names[1], 2)]}},
+             "settings": {"id_counter": len(names), "items": [item(name, i + 1) for i, name in enumerate(names)]}},
         ]}, indent=2)
 
 
@@ -481,6 +525,9 @@ def main():
     parser.add_argument("--gaius-captures", help="where Gaius is told to write its pictures (default: beside its saves)")
     parser.add_argument("--every", type=float, default=5.0,
                         help="seconds between pictures of each game; 0 for the original: only after a save (default: 5)")
+    parser.add_argument("--autosave", type=float, default=60.0,
+                        help="seconds between saves of the original taken from DOSBox's memory (the original has no "
+                             "autosave; nothing is sent to the game); 0 for none (default: 60)")
     parser.add_argument("--play-gaius", action="store_true", help="start Gaius now, writing its pictures")
     parser.add_argument("--gaius-exe", help="the Gaius to start (default: the built gaius_viewer)")
     parser.add_argument("--video", action="store_true",
@@ -518,6 +565,14 @@ def main():
     key = DosboxKey()
     if install is not None and not key.available:
         print("original: no pictures on this system (DOSBox's key is only pressed on Windows; press Ctrl+F5 yourself)")
+    memory = None
+    if install is not None and options.autosave > 0:
+        box = dosbox_memory.Dosbox()
+        if box.available:
+            memory = MemorySaves(box, session / "original" / "saves", options.autosave)
+            print("original: a save from DOSBox's memory every %.0f seconds while a city is played" % options.autosave)
+        else:
+            print("original: no autosaves on this system (DOSBox's memory is only read on Windows)")
 
     video = None
     if options.video:
@@ -563,6 +618,20 @@ def main():
                         log_file.flush()
                         if name == "original":
                             after_save += [now + 1.5, now + 5.0]  # the save dialog, then the city again
+                # The original's autosaves, out of DOSBox's memory.
+                if memory is not None:
+                    was = memory.problem
+                    taken = memory.poll(now)
+                    if taken:
+                        copy, still = taken
+                        counts["original"] += 1
+                        what = describe(copy) + ("" if still else "; taken while the game was changing it")
+                        stamp = datetime.now().strftime("%H:%M:%S")
+                        print("%s  %-8s %-13s -> %s%s" % (stamp, "original", "(memory)", copy.name, "  (" + what + ")" if what else ""))
+                        log.writerow([stamp, "original", "(memory)", copy.name, what])
+                        log_file.flush()
+                    elif memory.problem != was and "administrator" in memory.problem:
+                        print("original: no autosaves: %s" % memory.problem)
                 # The original's pictures: DOSBox's own key, on the clock and after a save.
                 due = [t for t in after_save if t <= now]
                 if key.available and install is not None and (due or (options.every > 0 and now >= next_picture)):
@@ -608,7 +677,8 @@ def main():
     minutes = (datetime.now() - started).total_seconds() / 60.0
     print("\n%.0f minutes in %s" % (minutes, session))
     for name in watchers:
-        print("  %-8s %d saves, %d pictures" % (name, counts[name], movers[name].moved))
+        from_memory = " (%d of them from DOSBox's memory)" % memory.kept if name == "original" and memory and memory.kept else ""
+        print("  %-8s %d saves%s, %d pictures" % (name, counts[name], from_memory, movers[name].moved))
     return 0
 
 

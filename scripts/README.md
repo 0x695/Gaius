@@ -20,7 +20,8 @@ that holds `CSR.EXE`.
 | [`render_saves.py`](render_saves.py) | the city in each save, drawn with the game's sprites |
 | [`compare_saves.py`](compare_saves.py) | what differs between two saves, briefly or cell by cell |
 | [`check_saves.py`](check_saves.py) | Gaius's simulation against saves; for contributors |
-| [`record_session.py`](record_session.py) | while you play: every save either game writes, and what was on screen |
+| [`record_session.py`](record_session.py) | while you play: every save either game writes, an autosave of the original every minute, and what was on screen |
+| [`dosbox_memory.py`](dosbox_memory.py) | the original's state, read out of the DOSBox it runs in, as a save file (Windows) |
 | [`extract_strings.py`](extract_strings.py) | Gaius's own texts for translation (`lang/template.txt`) |
 
 ## Exporting the game's files
@@ -103,7 +104,7 @@ and stop it with Ctrl+C. It keeps, in a folder a day:
 
 | Folder | Holds |
 |---|---|
-| `original/saves/`, `gaius/saves/` | a copy of every save as it was written, named by the time (`213045_CAESARXX.SAV`). The original has few save names and Gaius's automatic saves rotate; here nothing is overwritten |
+| `original/saves/`, `gaius/saves/` | a copy of every save as it was written, named by the time (`213045_CAESARXX.SAV`). The original has few save names and Gaius's automatic saves rotate; here nothing is overwritten. Also the original's autosaves (`213100_MEMORY.SAV`, Windows only): see below |
 | `original/screens/` | the original's frame, 320 x 200, every five seconds and after each save: DOSBox's own screenshots (its Ctrl+F5, pressed for you while DOSBox is the window in front; Windows only) |
 | `gaius/screens/` | Gaius's frame every five seconds, when it was started with `--capture-dir` (`--play-gaius` does) |
 | `session.csv` | each save: the time, the game, and with the tools built its date, people and funds |
@@ -121,10 +122,24 @@ until DOSBox's title names the game (`Program: CSR`): DOSBox 0.74 ends with a
 libpng error if it is asked for a screenshot before it has drawn its first
 frame, so don't press Ctrl+F5 yourself while DOSBox is starting either.
 
+**The original's autosaves.** The original has none, so every 60 seconds (`--autosave SECONDS`, 0 for none) the
+script takes the game's state out of DOSBox's memory and writes it as a save, `HHMMSS_MEMORY.SAV`. It is the
+file the game itself would write: its save routine copies fixed places of its memory in a fixed order, and
+[`dosbox_memory.py`](dosbox_memory.py) copies the same places from the block where DOSBox keeps the emulated
+PC's memory. Nothing is sent to the game and nothing is written to DOSBox. A snapshot taken with the original's
+save dialog open is the file the game then writes, byte for byte, and the original loads a snapshot like any
+save (copy it to its save folder as `CAESARXX.SAV`). A state that has not changed since the last one kept (the
+game paused, or in a menu) is not kept twice. The game changes its state in a burst once a frame; a snapshot is
+kept when three readings agree, so it lies between two frames, and the few that do not are marked in
+`session.csv`. One taken while the month's last steps run differs on `check_saves.py`'s rebuild check, as a save
+written then does. Only the US release, and only a DOSBox the script may read (not one run as administrator).
+`python scripts/dosbox_memory.py OUT.SAV` takes one snapshot by itself.
+
 `--video` runs OBS Studio for the length of the session, on a profile and a
 scene collection of its own (`Gaius-recorder`, written again at each start):
 the two games' windows and nothing else of the desktop, 1920 x 1080 at 30
-frames a second, with the sound the PC plays and no microphone. OBS starts
+frames a second, with the two games' own sound and no microphone: anything
+else the PC plays meanwhile (a film in the browser, a call) is not in it. OBS starts
 already recording, in the tray, and is stopped and closed when the script is.
 Eight seconds after a game first comes to the front the script asks OBS for a
 still and says whether it has the game's picture (three beeps if it has not).
@@ -151,6 +166,7 @@ pictures are the ground truth Gaius's screens are compared with. Like exports,
 | `save_inspect SAVE` | a save's blocks, named global words and walkers |
 | `save_diff A B [--cells N]` | the difference between two saves |
 | `sim_check SAVE`, `month_check A B` | the simulation against a save, or against two |
+| `sim_check SAVE --water MONTHS` | the water pass month after month: which fountains run, and which alternate |
 | `bindiff_exe A B` | two `CSR.EXE` builds, byte for byte |
 
 ## Tests

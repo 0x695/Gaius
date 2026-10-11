@@ -26,6 +26,9 @@
 // Unrest is deliberately not compared: the engine never resets it, so it
 // carries history a single pass can't reproduce.
 //
+// `sim_check <save> --water N` runs the water pass alone N months and prints each fountain's tile and level: a
+// fountain fed only through another fountain alternates (systems/service.hpp, fountain_supply).
+//
 // Exit status: 0 if the land value, the C9D4 bits, the tiles and 7BB4 all match
 // ("RESULT: match"), 1 if any differs, 2 if the save can't be loaded. The
 // population comparison is shown but doesn't decide it.
@@ -33,6 +36,8 @@
 // Usage: sim_check <CAESARxx.SAV>
 
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <map>
 #include <string>
@@ -59,7 +64,7 @@ int saved_word(const formats::save::SaveFile& sf, uint16_t ds) {
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <CAESARxx.SAV>\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <CAESARxx.SAV> [--water MONTHS]\n", argv[0]);
         return 1;
     }
 
@@ -72,6 +77,26 @@ int main(int argc, char** argv) {
     }
 
     const model::CityState st = model::load(sf);
+    if (argc >= 4 && std::strcmp(argv[2], "--water") == 0) {
+        // The water pass alone, month after month, on the save's own network: each fountain's tile and level
+        // (0xB9 / 0xBB working, 0xBA / 0xBD dry). Shows whether a network settles or alternates.
+        model::CityMap city = st.city;
+        std::printf("%s\n  fountains (row, col):", argv[1]);
+        for (int y = 0; y < model::kCityH; ++y)
+            for (int x = 0; x < model::kCityW; ++x)
+                if (city.tile[y][x] >= 0xB9 && city.tile[y][x] <= 0xBD) std::printf(" (%d, %d)", y, x);
+        std::printf("\n");
+        for (int month = 0; month <= std::atoi(argv[3]); ++month) {
+            if (month != 0) systems::service::apply_water(city);
+            std::printf("  month %2d:", month);
+            for (int y = 0; y < model::kCityH; ++y)
+                for (int x = 0; x < model::kCityW; ++x)
+                    if (city.tile[y][x] >= 0xB9 && city.tile[y][x] <= 0xBD)
+                        std::printf(" %02X/%d", city.tile[y][x], city.operational_state[y][x]);
+            std::printf("\n");
+        }
+        return 0;
+    }
     model::CityMap sim = st.city;
     systems::service::ServiceState svc;
     svc.housing_land_value_base = saved_word(sf, 0x6BF8);

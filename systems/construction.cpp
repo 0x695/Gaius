@@ -841,6 +841,70 @@ bool place_workshop(model::CityState& state, int goods, int x, int y) {
     return true;
 }
 
+// 0x15185. The tenth barracks is the last: the caller posts the refusal's
+// message, as it does for the forum's and the workshop's.
+bool place_barracks(model::CityState& state, int x, int y) {
+    const int count = model::global_word(state, kBarracksCount);
+    if (count >= 10) return false;
+    if (!write_square(state.city, 0xEF, 3, x, y)) return false;
+    auto& t = sized(state.table_120, 120);
+    for (size_t r = 0; r < 120; r += 12) {
+        if (word_at(t, r + 6) != 0) continue;
+        model::set_global_word(state, kBarracksCount, count + 1);
+        set_word_at(t, r + 6, 1);
+        set_word_at(t, r + 4, 0);
+        set_word_at(t, r, x);
+        set_word_at(t, r + 2, y);
+        break;
+    }
+    return true;
+}
+
+int repair_barracks_records(model::CityState& state) {
+    auto& t = sized(state.table_120, 120);
+    const model::CityMap& city = state.city;
+    auto anchored = [&](int x, int y) {
+        return x >= 0 && y >= 0 && x < model::kCityW && y < model::kCityH && city.tile[y][x] == 0xEF &&
+               city.operational_state[y][x] == 0;
+    };
+    int changed = 0, records = 0;
+    for (size_t r = 0; r < 120; r += 12) {
+        if (word_at(t, r + 6) == 0) continue;
+        if (anchored(word_at(t, r), word_at(t, r + 2))) {
+            ++records;
+        } else {
+            std::fill(t.begin() + static_cast<std::ptrdiff_t>(r), t.begin() + static_cast<std::ptrdiff_t>(r + 12), uint8_t{0});
+            ++changed;
+        }
+    }
+    for (int y = 0; y < model::kCityH && records < 10; ++y) {
+        for (int x = 0; x < model::kCityW && records < 10; ++x) {
+            if (!anchored(x, y)) continue;
+            bool known = false;
+            size_t free_slot = 120;
+            for (size_t r = 0; r < 120; r += 12) {
+                if (word_at(t, r + 6) == 0) {
+                    if (free_slot == 120) free_slot = r;
+                } else if (word_at(t, r) == x && word_at(t, r + 2) == y) {
+                    known = true;
+                }
+            }
+            if (known || free_slot == 120) continue;
+            set_word_at(t, free_slot + 6, 1);
+            set_word_at(t, free_slot + 4, 0);
+            set_word_at(t, free_slot, x);
+            set_word_at(t, free_slot + 2, y);
+            ++records;
+            ++changed;
+        }
+    }
+    if (model::global_word(state, kBarracksCount) != records) {
+        model::set_global_word(state, kBarracksCount, records);
+        if (changed == 0) changed = 1;
+    }
+    return changed;
+}
+
 namespace {
 
 // 0x124F8's per-kind cleanup: find the anchor, then remove its record.

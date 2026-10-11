@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _gaius  # noqa: E402
 import check_saves  # noqa: E402
+import dosbox_memory  # noqa: E402
 import export_assets  # noqa: E402
 import record_session  # noqa: E402
 import release_notes  # noqa: E402
@@ -153,6 +154,90 @@ class Logic(unittest.TestCase):
             self.assertEqual(len(list(archive.iterdir())), 2)
             self.assertEqual(again[0][1].read_bytes()[100], 7)
 
+    def test_a_memory_snapshot_is_laid_out_as_the_save_routine_writes(self):
+        import re
+        # The two lists of memory places are Gaius's own, in formats/save and model: one truth, held here.
+        header = (_gaius.REPO / "formats" / "save" / "save.hpp").read_text(encoding="utf-8")
+        table = header[header.index("kGlobalWordDsAddress[128] = {"):]
+        words = [int(v, 16) for v in re.findall(r"0x[0-9A-Fa-f]{4}", table[:table.index("};")].split("{", 1)[1])]
+        self.assertEqual(dosbox_memory.GLOBAL_WORDS, words)
+        model = (_gaius.REPO / "model" / "city_state.cpp").read_text(encoding="utf-8")
+        table = model[model.index("kFinalStateWords[] = {"):]
+        final = [(int(a, 16), int(b)) for a, b in re.findall(r"\{(0x[0-9A-Fa-f]{4}), *(\d+)\}", table[:table.index("};")])]
+        ours = [(w, 2 * i) for i, w in enumerate(dosbox_memory.FINAL_HEAD)]
+        ours += [(w, 24 + 2 * i) for i, w in enumerate(dosbox_memory.FINAL_TAIL)]
+        self.assertEqual(ours, final)
+        # The pieces fill the file, and the blocks start where formats::save's table has them.
+        sizes = [size for _, size in dosbox_memory.LAYOUT]
+        self.assertEqual(sum(sizes), SAVE_SIZE)
+        starts = {offset: sum(sizes[:i]) for i, (offset, _) in enumerate(dosbox_memory.LAYOUT)}
+        self.assertEqual(starts[dosbox_memory.DS + 0x5D84], 0x0100)   # the actors
+        self.assertEqual(starts[dosbox_memory.TILES], 0x13D4)          # the city's tiles
+        self.assertEqual(starts[dosbox_memory.FAR + 0x2752], 0xD724)   # the province
+        self.assertEqual(starts[dosbox_memory.NAME_PLACE], dosbox_memory.NAME_IN_SAVE)
+        self.assertEqual(dosbox_memory.NAME_IN_SAVE, 0xDEE2 + 12)
+
+    def test_a_memory_snapshot_finds_the_game_and_reads_its_save(self):
+        import random
+        rng = random.Random(7)
+        loaded_at = 0x01A2 * 16  # where DOS put the program; the PC's memory begins 0x20 into DOSBox's block
+        pc = bytearray(rng.getrandbits(8) for _ in range(loaded_at + dosbox_memory.LAST + 64))
+        game = loaded_at
+        pc[game + dosbox_memory.NAMES_AT:game + dosbox_memory.NAMES_AT + len(dosbox_memory.NAMES)] = dosbox_memory.NAMES
+        pc[game + dosbox_memory.COSTS_AT:game + dosbox_memory.COSTS_AT + len(dosbox_memory.COSTS)] = dosbox_memory.COSTS
+        pc[100:100 + len(dosbox_memory.NAMES)] = dosbox_memory.NAMES  # the same words somewhere else: another candidate
+        block = 0x0AF3E020
+        self.assertEqual(dosbox_memory.candidates(bytes(pc), block),
+                         [block + 100 - dosbox_memory.NAMES_AT, block + game])
+        stretch = bytes(pc[game + dosbox_memory.FIRST:game + dosbox_memory.LAST])
+        save = dosbox_memory.assemble_from(stretch)
+        self.assertEqual(len(save), SAVE_SIZE)
+        # The first word is DS:0x6CE2, the tiles are segment 43A5, the last word DS:0x6BE6.
+        at = game + dosbox_memory.DS
+        self.assertEqual(save[:2], bytes(pc[at + 0x6CE2:at + 0x6CE4]))
+        self.assertEqual(save[0x13D4:0x13D4 + 10000], bytes(pc[game + dosbox_memory.TILES:game + dosbox_memory.TILES + 10000]))
+        self.assertEqual(save[-2:], bytes(pc[at + 0x6BE6:at + 0x6BE8]))
+        self.assertEqual(save[0xC2:0xC4], save[0xDC:0xDE])  # the word the routine writes twice
+        # The governor's name is put in from where the routine takes it; the rest is untouched.
+        named = dosbox_memory.assemble_from(stretch, b"  Octavian  ")
+        self.assertEqual(named[0xDEEE:0xDEFA], b"  Octavian  ")
+        self.assertEqual(named[:0xDEEE] + named[0xDEFA:], save[:0xDEEE] + save[0xDEFA:])
+        self.assertIsNone(dosbox_memory.assemble_from(stretch[:-1]))  # memory that could not all be read: no save
+        # Before a city is begun the tiles are empty.
+        self.assertFalse(dosbox_memory.city_present(bytes(SAVE_SIZE)))
+        self.assertTrue(dosbox_memory.city_present(bytes([0x1D]) * SAVE_SIZE))
+
+    def test_a_session_keeps_the_originals_state_from_memory(self):
+        class Box:
+            problem = "DOSBox is not running"
+
+            def __init__(self):
+                self.next = (None, False)
+
+            def snapshot(self):
+                return self.next
+
+        city, later = bytes([0x1D]) * SAVE_SIZE, bytes([0x1E]) * SAVE_SIZE
+        with tempfile.TemporaryDirectory() as folder:
+            box = Box()
+            memory = record_session.MemorySaves(box, Path(folder, "saves"), 60.0)
+            self.assertIsNone(memory.poll(1000.0))  # no game yet: nothing, and another look within seconds
+            self.assertEqual(memory.problem, "DOSBox is not running")
+            self.assertIsNone(memory.poll(1002.0))
+            box.next = (bytes(SAVE_SIZE), True)      # the game's start screen: no city, nothing kept
+            self.assertIsNone(memory.poll(1006.0))
+            box.next = (city, True)
+            self.assertIsNone(memory.poll(1010.0))   # not a minute later yet
+            copy, still = memory.poll(1066.0)
+            self.assertTrue(still and copy.name.endswith("_MEMORY.SAV"))
+            self.assertEqual(copy.read_bytes(), city)
+            self.assertIsNone(memory.poll(1126.0))   # the game paused: the same state is not kept twice
+            box.next = (later, False)                # caught while the game was changing it: kept, and said
+            copy, still = memory.poll(1186.0)
+            self.assertFalse(still)
+            self.assertEqual(copy.read_bytes(), later)
+            self.assertEqual((memory.kept, len(list(Path(folder, "saves").iterdir()))), (2, 2))
+
     def test_a_session_gathers_the_pictures(self):
         with tempfile.TemporaryDirectory() as folder:
             source, target = Path(folder, "capture"), Path(folder, "screens")
@@ -202,11 +287,17 @@ class Logic(unittest.TestCase):
         self.assertEqual(sorted(s["settings"]["window"].split(":")[2] for s in captures),
                          ["DOSBox.exe", "gaius_viewer.exe"])
         self.assertTrue(all(s["settings"]["priority"] == 2 for s in captures))  # found by program, not title
-        # The desktop's sound is the only audio: no source records the microphone, and none films the screen.
+        # Each game's own sound is the only audio: no source records the desktop's sound (whatever else the PC
+        # plays) or the microphone, and none films the screen.
         kinds = {s["id"] for s in scenes["sources"]} | {v["id"] for v in scenes.values() if isinstance(v, dict)}
-        self.assertEqual(kinds, {"window_capture", "scene", "wasapi_output_capture"})
+        self.assertEqual(kinds, {"window_capture", "scene", "wasapi_process_output_capture"})
+        self.assertFalse([name for name in scenes if "AudioDevice" in name])
+        sounds = [s for s in scenes["sources"] if s["id"] == "wasapi_process_output_capture"]
+        self.assertEqual([s["settings"]["window"] for s in sounds], [s["settings"]["window"] for s in captures])
+        self.assertTrue(all(s["settings"]["priority"] == 2 and s["mixers"] for s in sounds))
         items = next(s for s in scenes["sources"] if s["id"] == "scene")["settings"]["items"]
-        self.assertEqual([i["name"] for i in items], [s["name"] for s in captures])
+        self.assertEqual([i["name"] for i in items], [s["name"] for s in captures + sounds])
+        self.assertEqual(len({i["id"] for i in items}), len(items))
 
     def test_the_originals_saves_are_looked_for_under_the_overlay_first(self):
         folders = record_session.original_save_folders(Path("C:/Caesar"))

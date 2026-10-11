@@ -50,9 +50,9 @@ enum class Id {
     Unrest,                   // DS:0x6EC6, 0x2DC4B: rioters
     ConstructionPlebs,        // DS:0x6ECA, 0x11C8F: fewer than 50 pleb groups
     SalaryStopped,            // DS:0x6E82, 0x284DA
-    NoFort,                   // DS:0x6E2A, 0x15482
+    NoFort,                   // DS:0x6E2A, 0x15252: a tenth city Barracks (the Fort command has no message)
     NoForum,                  // DS:0x6E2E, 0x14E1D
-    NoFactory,                // DS:0x6E32, 0x15252
+    NoFactory,                // DS:0x6E32, 0x15482
     ProvinceWorkers,          // DS:0x6E72, 0x2E15E: a province road wore away
     ApproachingHighway,       // DS:0x6E76
     ApproachingRoads,         // DS:0x6E7A, 0x24CE5

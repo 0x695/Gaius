@@ -6,6 +6,18 @@ section below that carries its number (`scripts/release_notes.py`). How a releas
 
 ## [Unreleased]
 
+### Added
+- The new year's plaque ("3 BC") at the top right of the city, as the original shows it when a year turns.
+- Autosaves of the original game while you record a session: `scripts/record_session.py` reads its state out of DOSBox once a minute and keeps each as a save (`scripts/dosbox_memory.py`, Windows).
+- `sim_check SAVE --water MONTHS` shows which fountains of a save run and which alternate.
+
+### Changed
+- The tutorial asks for the Imperial Highway while there is money for it (after 500 people, not 2000), shows what the steps ahead still cost on a line above the goal, and warns once when the treasury falls below that. Its pages now say that a second Workshop of the same goods earns less, and to pipe each Fountain to a reservoir.
+- A recorded session's film has the two games' own sound only.
+
+### Fixed
+- A Barracks built by the player now sends its patrols: it was placed without the record the patrols start from. Barracks in older saves are mended when the save is loaded.
+
 ## [0.9.0] - unreleased
 
 The first public beta: Gaius plays a whole career of Caesar, from the start screen to Caesar or dismissal, on Windows, Linux, the Steam Deck, Android and in a browser. It needs your own copy of the game; none is included.

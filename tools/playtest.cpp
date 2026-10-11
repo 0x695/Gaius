@@ -242,6 +242,7 @@ struct Game {
             case CommandId::ClearArea: placed = construction::clear_area(state, sim.random, x, y); break;
             case CommandId::Forum: placed = construction::place_forum(state, forum_grade, x, y); break;
             case CommandId::Workshop: placed = construction::place_workshop(state, workshop_goods, x, y); break;
+            case CommandId::Barracks: placed = construction::place_barracks(state, x, y); break;
             default: placed = construction::place(state.city, tool, x, y); break;
         }
         if (placed) {
@@ -2685,7 +2686,15 @@ struct Novice {
             default: break;
         }
         sync("the step's task");
-        if (step < 8) return;
+        // The steps by what they ask: `growing` from the page that asks for people, `cultured` once the Oracle's page
+        // has been read, `towns` once the towns' has.
+        const auto index_of = [](TutorialGoal wanted) {
+            for (int i = 0; i < viewer::kTutorialStepCount; ++i)
+                if (viewer::kTutorialSteps[i].goal == wanted) return i;
+            return viewer::kTutorialStepCount;
+        };
+        if (step < index_of(TutorialGoal::Settled)) return;
+        const bool cultured = step > index_of(TutorialGoal::Oracle), towns = step > index_of(TutorialGoal::Town);
         repair();
         // Pages 8 and 9, from then on: work for the people there are, an oracle for every 2000, houses while there is
         // work -- and (page 12) once the city stands and the towns are linked, nothing more, so the years close in profit.
@@ -2693,11 +2702,11 @@ struct Novice {
         const bool standing = c.population >= enough_people && c.highway_linked && c.towns_linked >= c.towns;
         if (!standing) {
             for (int guard = 0; guard < 4 && c.population > jobs(c) && workshop(); ++guard) c = count();
-            if (step > 9 && oracles < (c.population + 1999) / 2000) oracle();
+            if (cultured && oracles < (c.population + 1999) / 2000) oracle();
             if (c.population < enough_people && funds() > 50 + reserve && jobs(c) >= c.population &&
                 c.population * 11 >= c.house_cells * 100)
                 more_houses();
-            if (step > 11 && c.highway_linked && (laying == 36 || static_cast<int>(towns_done.size()) < c.towns)) town_road();
+            if (towns && c.highway_linked && (laying == 36 || static_cast<int>(towns_done.size()) < c.towns)) town_road();
         }
         sync("keeping the city");
     }
@@ -2799,6 +2808,10 @@ int main(int argc, char** argv) {
         const int years = argc > 4 ? std::atoi(argv[4]) : 5;
         const std::string mode = argc > 5 ? argv[5] : "saved";
         game.state = model::load(formats::save::load(argv[3]));
+        // PT_REPAIR: give the barracks of a save Gaius wrote before 2026-10-11 their records, as the viewer does on loading
+        // one (without them they send no patrols).
+        if (std::getenv("PT_REPAIR"))
+            std::printf("barracks records repaired: %d\n", construction::repair_barracks_records(game.state));
         game.sim = systems::month::sim_state_from_save(game.state);
         game.install_hooks();
         if (mode == "default") {

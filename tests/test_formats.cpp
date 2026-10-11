@@ -1980,6 +1980,35 @@ void test_construction_forum_and_workshop() {
     CHECK(st->city.service_flags[0][11] == (0x81 | 0x02 | 0x10));
     CHECK(st->city.service_flags[20][30] == (0x81 | 0x02 | 0x10));
     CHECK(st->city.service_flags[21][30] == 0x81);  // outside the square
+
+    // The Barracks (0x15185): tile 0xEF, 3x3, the count and a record in table_120 -- column, row, timer 0, active.
+    CHECK(place_barracks(*st, 70, 40));
+    CHECK(st->city.tile[42][72] == 0xEF && st->city.operational_state[42][72] == 10);
+    CHECK(global_word(*st, 0x6C9C) == 1);
+    CHECK(word(st->table_120, 0) == 70 && word(st->table_120, 2) == 40 && word(st->table_120, 4) == 0 &&
+          word(st->table_120, 6) == 1);
+    CHECK(!place_barracks(*st, 70, 40) && global_word(*st, 0x6C9C) == 1);  // occupied
+    set_global_word(*st, 0x6C9C, 10);
+    CHECK(!place_barracks(*st, 80, 40) && st->city.tile[40][80] == 0x1D);  // ten barracks already
+    set_global_word(*st, 0x6C9C, 1);
+    CHECK(place_barracks(*st, 80, 40) && word(st->table_120, 12) == 80 && global_word(*st, 0x6C9C) == 2);
+    // Clearing one removes its record and takes the count down; the other's stays.
+    CHECK(clear_area(*st, random, 71, 41));
+    CHECK(global_word(*st, 0x6C9C) == 1 && word(st->table_120, 6) == 0 && word(st->table_120, 12 + 6) == 1);
+
+    // Saves Gaius wrote before place_barracks: a barracks on the map without a record, and a count that clearing
+    // one took below zero. The repair gives each its record and counts them; a second look changes nothing.
+    CHECK(repair_barracks_records(*st) == 0);
+    CHECK(place(st->city, CommandId::Barracks, 20, 60));
+    set_global_word(*st, 0x6C9C, -2);
+    CHECK(repair_barracks_records(*st) == 1);
+    CHECK(global_word(*st, 0x6C9C) == 2 && word(st->table_120, 0) == 20 && word(st->table_120, 2) == 60 &&
+          word(st->table_120, 6) == 1);
+    CHECK(repair_barracks_records(*st) == 0);
+    // A record whose barracks is gone is dropped.
+    for (int y = 60; y < 63; ++y)
+        for (int x = 20; x < 23; ++x) st->city.tile[y][x] = 0x1D;
+    CHECK(repair_barracks_records(*st) == 1 && global_word(*st, 0x6C9C) == 1 && word(st->table_120, 6) == 0);
 }
 
 // The fountain supply check (0x2CAE6) and pipe trace (0x2CBF1) inside the
@@ -2006,6 +2035,27 @@ void test_service_fountain_supply() {
     // Next month: the level drops to 0, and the trace sets it back to 1.
     apply_water(f->city);
     CHECK(f->city.tile[10][10] == 0xB9 && f->city.operational_state[10][10] == 1);
+
+    // A second fountain piped only to the first. A reservoir gives level 1 and a fountain passes on its level less
+    // one, so the second gets none; it is supplied only by 0x2CBB9, which gives a *dry* fountain water when its
+    // pipes reach exactly one fountain that has some. So it works every other month (seen in a play session's
+    // saves, 2026-10-11: `sim_check <save> --water N`).
+    f->city.tile[14][10] = 0xBA;
+    for (int y = 11; y <= 13; ++y) f->city.tile[y][10] = 0x44;
+    for (int month = 0; month < 6; ++month) {
+        apply_water(f->city);
+        CHECK(f->city.tile[10][10] == 0xB9 && f->city.operational_state[10][10] == 1);
+        CHECK(f->city.tile[14][10] == (month % 2 == 0 ? 0xB9 : 0xBA) && f->city.operational_state[14][10] == 0);
+    }
+    // With a reservoir of its own it settles.
+    f->city.tile[15][10] = 0xA4;
+    for (int month = 0; month < 4; ++month) {
+        apply_water(f->city);
+        CHECK(f->city.tile[14][10] == 0xB9 && f->city.operational_state[14][10] == 1);
+    }
+    f->city.tile[14][10] = f->city.tile[15][10] = 0x1D;
+    for (int y = 11; y <= 13; ++y) f->city.tile[y][10] = 0x1D;
+    apply_water(f->city);
 
     // Cut the pipe: the fountain runs dry once its level is spent.
     f->city.tile[9][10] = 0x1D;
@@ -2258,6 +2308,29 @@ void test_actors_workshop() {
     CHECK(get_word(t, 6) == 4 && get_word(t, 0x0A) == 1);
     CHECK(s.objects[0].active() == 1 && s.objects[0].type() == 8 && s.objects[0].state() == kTrade);
     CHECK(s.objects[0].screen_x() == 40 * 16 && s.objects[0].screen_y() == 39 * 16);
+}
+
+// A barracks the player builds sends its patrol: the record place_barracks writes is the one the spawner reads
+// (0x2CD1C, steps 75-84). Until 2026-10-11 the viewer placed barracks without it, and none ever patrolled.
+void test_barracks_built_sends_patrol() {
+    std::printf("test_barracks_built_sends_patrol (0x15185 -> 0x2CD1C)\n");
+    using namespace gaius::systems::actors;
+    auto w = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    CityState& s = w->s;
+    gaius::model::set_global_word(s, 0x6C10, 50);  // a populated city
+    s.city.tile[39][40] = 0x36;                    // a road beside it
+    CHECK(gaius::systems::construction::place_barracks(s, 40, 40));
+    for (int step = 75; step < 85; ++step) run_spawners(s, gaius::systems::month::Random{}, step);
+    CHECK(s.objects[0].active() == 1 && s.objects[0].type() == 4 && s.objects[0].state() == kPatrol);
+    CHECK(get_word(s.table_120, 4) == 6);  // the timer starts again
+    // The same barracks placed as a plain building, as the viewer did: nothing comes out of it.
+    auto old = std::make_unique<ActorWorld>(uint8_t{0x1D});
+    gaius::model::set_global_word(old->s, 0x6C10, 50);
+    old->s.city.tile[39][40] = 0x36;
+    old->s.table_120.assign(120, 0);
+    CHECK(gaius::systems::construction::place(old->s.city, gaius::systems::construction::CommandId::Barracks, 40, 40));
+    for (int step = 75; step < 85; ++step) run_spawners(old->s, gaius::systems::month::Random{}, step);
+    CHECK(old->s.objects[0].active() == 0);
 }
 
 // 0x24A6B / 0x26D9D: a chasing soldier that comes within 16 px of a hostile
@@ -4378,12 +4451,17 @@ void test_tutorial() {
     CHECK(line_has(TutorialGoal::Roads, viewer::kTutorialRoadCells) &&
           line_has(TutorialGoal::Housing, viewer::kTutorialHouses) && line_has(TutorialGoal::Water, viewer::kTutorialWells) &&
           line_has(TutorialGoal::Work, viewer::kTutorialWorkshops) &&
+          line_has(TutorialGoal::Settled, viewer::kTutorialSettled) &&
           line_has(TutorialGoal::People, viewer::kTutorialPeople) && line_has(TutorialGoal::Town, viewer::kTutorialTowns));
-    // First and last are pages only read; the city and its income come before the province's roads.
+    // First and last are pages only read. A city that pays its way comes first, then the Highway while the starting
+    // funds cover it, then the city's growth and the towns' roads.
     CHECK(viewer::kTutorialSteps[0].goal == TutorialGoal::Read &&
           viewer::kTutorialSteps[viewer::kTutorialFinal].goal == TutorialGoal::Read);
-    CHECK(step_of(TutorialGoal::People) < step_of(TutorialGoal::Highway) &&
-          step_of(TutorialGoal::Highway) < step_of(TutorialGoal::Town) &&
+    CHECK(step_of(TutorialGoal::VisitForum) < step_of(TutorialGoal::Settled) &&
+          step_of(TutorialGoal::Settled) < step_of(TutorialGoal::Highway) &&
+          step_of(TutorialGoal::Highway) < step_of(TutorialGoal::People) &&
+          step_of(TutorialGoal::People) < step_of(TutorialGoal::Oracle) &&
+          step_of(TutorialGoal::Oracle) < step_of(TutorialGoal::Town) &&
           step_of(TutorialGoal::Promotion) == viewer::kTutorialFinal - 1);
 
     // The census of an empty site: after the welcome the tutorial waits at the Forum step.
@@ -4422,7 +4500,12 @@ void test_tutorial() {
     CHECK(c.workshops == 2 && c.bath_houses == 1 && c.oracles == 1);
     // The visit to the Forum is the player's to make; then the city has to grow.
     CHECK(viewer::tutorial_progress(1, c, false) == step_of(TutorialGoal::VisitForum));
-    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::VisitForum), c, true) == step_of(TutorialGoal::People));
+    CHECK(viewer::tutorial_progress(step_of(TutorialGoal::VisitForum), c, true) == step_of(TutorialGoal::Settled));
+    // Nothing is kept back before the step that asks for people; from there, with no province map, the Oracle only
+    // (and this city has one).
+    CHECK(viewer::tutorial_reserve(step_of(TutorialGoal::Work), c) == 0);
+    CHECK(viewer::tutorial_reserve(step_of(TutorialGoal::Settled), c) == 0 &&
+          viewer::tutorial_reserve_line(step_of(TutorialGoal::Settled), c).empty());
 
     // The province. The Imperial Highway from its junction to the city, laid as the viewer lays it.
     auto at = [&](int x, int y) -> uint8_t& { return st->empire.cells[static_cast<size_t>(y * 40 + x)]; };
@@ -4434,6 +4517,20 @@ void test_tutorial() {
     at(12, 14) = 0x61; // and one south of it
     c = viewer::tutorial_census(*st);
     CHECK(c.highway_junction && !c.highway_linked && c.towns == 2 && c.towns_linked == 0);
+    // What the steps ahead cost: twenty cells of Highway at 50 Dn and a quarter more, and two towns' roads.
+    CHECK(c.highway_cells == 20);
+    CHECK(viewer::tutorial_reserve(step_of(TutorialGoal::Settled), c) == 1250 + 2 * viewer::kTutorialTownRoad);
+    CHECK(viewer::tutorial_reserve_line(step_of(TutorialGoal::Highway), c) == "Still to pay for - 1610 Dn");
+    CHECK(viewer::tutorial_reserve(step_of(TutorialGoal::Promotion), c) == 0);
+    {
+        viewer::TutorialCensus bare = c;
+        bare.oracles = 0;
+        CHECK(viewer::tutorial_reserve(step_of(TutorialGoal::People), bare) == 1610 + viewer::kTutorialOracle);
+        const gaius::ui::Page treasury = viewer::tutorial_treasury_page(430, 1810);
+        CHECK(treasury.rows.size() <= static_cast<size_t>(viewer::kTutorialRows) && treasury.buttons.size() == 1);
+        CHECK(treasury.rows[0].value == "430 Dn" && treasury.rows[1].value == "1810 Dn");
+        for (const auto& row : treasury.rows) CHECK(row.label.size() <= viewer::kTutorialWidth);
+    }
     CHECK(viewer::tutorial_province_command(step_of(TutorialGoal::Highway)) == 42 &&
           viewer::tutorial_province_command(step_of(TutorialGoal::Town)) == 36 &&
           viewer::tutorial_province_command(step_of(TutorialGoal::Forum)) == 0);
@@ -4454,6 +4551,7 @@ void test_tutorial() {
     for (int y = 10; y <= 13; ++y) CHECK(province::place_province_road(*st, province_drag, 12, y) != province::Built::Refused);
     c = viewer::tutorial_census(*st);
     CHECK(c.towns_linked == 2 && c.highway_linked);
+    CHECK(viewer::tutorial_reserve(step_of(TutorialGoal::Town), c) == 0);
     CHECK(viewer::tutorial_province_marks(*st, step_of(TutorialGoal::Town)).empty());
     // A gap in the Highway unlinks the towns that share it, and the Highway itself.
     const uint8_t piece = at(15, 10);
@@ -4543,6 +4641,22 @@ void test_tutorial() {
                 std::printf("  %s, step %d: the goal line is %zu long\n", language, step, viewer::tutorial_line(step, big).size());
                 ok = false;
             }
+        }
+        // The treasury's page and its line above the goal, with the largest numbers they can hold.
+        const ui::Page treasury = viewer::tutorial_treasury_page(32767, 9999);
+        size_t widest = treasury.title.size();
+        for (const ui::PanelRow& row : treasury.rows)
+            widest = std::max(widest, row.label.size() + (row.value.empty() ? 0 : row.value.size() + 1));
+        big.highway_junction = true;
+        big.highway_cells = 80;
+        big.towns = 4;
+        big.towns_linked = 0;
+        const std::string keep = viewer::tutorial_reserve_line(viewer::kTutorialFinal - 2, big);
+        if (static_cast<int>(treasury.rows.size()) > viewer::kTutorialRows || widest > viewer::kTutorialWidth ||
+            keep.empty() || keep.size() > 37) {
+            std::printf("  %s, the treasury: %zu rows, widest %zu, line %zu\n", language, treasury.rows.size(), widest,
+                        keep.size());
+            ok = false;
         }
         return ok;
     };
@@ -7386,6 +7500,10 @@ void test_viewer_message_box() {
     }
     CHECK(count >= 25);
     CHECK(vw::message_line("short", 1).empty());
+    // 0x278A8: the new year's banner, three characters of year and the era (a DOSBox capture reads "3 BC").
+    CHECK(vw::year_banner_text(-3) == "  3 BC" && vw::year_banner_text(-13) == " 13 BC");
+    CHECK(vw::year_banner_text(0) == "  0 AD" && vw::year_banner_text(624) == "624 AD");
+    CHECK(vw::year_banner_text_x(99) == 240 && vw::year_banner_text_x(100) == 248 && vw::year_banner_text_x(-200) == 240);
 
     const std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }
@@ -7849,6 +7967,7 @@ int main() {
     test_actors_walk_around_obstacle();
     test_actors_forum_spawner();
     test_actors_workshop();
+    test_barracks_built_sends_patrol();
     test_actors_soldier_removes_rioter();
     test_actors_rioter_demolishes();
     test_actors_real_saves();

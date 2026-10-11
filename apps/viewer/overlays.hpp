@@ -76,6 +76,29 @@ inline void draw_message_box(std::vector<uint8_t>& rgb, int w, int h, const ui::
     blit_canvas_rect(rgb, w, h, canvas, art.palette, 0, 0, kMessageW, kMessageH);
 }
 
+// --- The new year's banner ----------------------------------------------------------
+//
+// 0x278A8, each frame while DS:0x6C7C counts down from 80 (systems::month's `year_banner`): a 4 x 3 panel at
+// (240, 16) -- `1F6F:1EC1` with DS:0x6D93 = 0xF0, 0x6D91 = 0x10, 0x6D8F = 4, 0x6D8D = 3 -- and `100F:17E2` writing
+// the year in three characters, mode 2, into the first of the six of "    BC" (DS:0x4891) or "    AD" (DS:0x4873)
+// at y = 36: x = 240, or 248 with DS:0x487A from the year 100. The US build never takes the "aJC" / "nCH" strings
+// (DS:0x6DE7 is 0). Checked against a DOSBox capture of "3 BC".
+inline constexpr int kYearBannerX = 240, kYearBannerY = 16, kYearBannerCols = 4, kYearBannerRows = 3, kYearBannerTextY = 36;
+
+inline std::string year_banner_text(int year) {
+    std::string s = ui::number_text(year < 0 ? -year : year, 3, 2);
+    s.resize(3, ' ');
+    return s + (year < 0 ? " BC" : " AD");
+}
+inline int year_banner_text_x(int year) { return year >= 100 ? 248 : 240; }
+
+inline void draw_year_banner(std::vector<uint8_t>& rgb, int w, int h, const ui::InterfaceArt& art, int year) {
+    formats::IndexedImage canvas = ui::blank_canvas();
+    ui::draw_panel(canvas, art, kYearBannerX, kYearBannerY, kYearBannerCols, kYearBannerRows);
+    ui::draw_text(canvas, art, ui::Font::Font1, year_banner_text_x(year), kYearBannerTextY, year_banner_text(year));
+    blit_canvas_rect(rgb, w, h, canvas, art.palette, kYearBannerX, kYearBannerY, kYearBannerCols * 16, kYearBannerRows * 16);
+}
+
 // --- The Forum and Industry type menus -----------------------------------------
 
 inline constexpr int kMenuX = 64, kMenuY = 16, kMenuCols = 12, kMenuRows = 9;

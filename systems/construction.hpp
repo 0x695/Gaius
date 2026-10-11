@@ -99,7 +99,9 @@ enum class PlacementKind {
     // Writes a single seed tile at the clicked cell.
     SingleCell,
     // Writes a seed tile across a width x height footprint via the
-    // executable's shared multi-cell routine at 0x1232E.
+    // executable's shared multi-cell routine at 0x1232E. (The Barracks is
+    // one of these on the map, and place() writes it; its record needs
+    // place_barracks.)
     MultiCell,
     // Drag-built, one cell per call (road/wall/plaza/clear-area): the tile
     // written depends on the cell's neighbours rather than a fixed seed.
@@ -290,7 +292,17 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
 // 30 x 24 bytes): +0 column, +2 row, +4 goods, +6 timer, +8 active, +0x10
 // production level; table_8 (DS:0x5816) counts workshops per goods type.
 //
-// Both place through the shared footprint writer (0x1232E) -- the same
+// Barracks (command 24, 0x15185, transcribed 2026-10-11): tile 0xEF, 3x3.
+// Refused once DS:0x6C9C counts 10 (with the message "You have no need for
+// another fort.", DS:0x6E2A). Record in table_120 (DS:0x5B2C, 10 x 12 bytes):
+// +0 column, +2 row, +4 timer, +6 active, +8 facing; the handler sets the
+// first four and leaves the facing as it was. The record is what sends the
+// patrols (actors, steps 75-84): until 2026-10-11 Gaius placed barracks with
+// place(), which writes the building and no record, so a barracks the player
+// built never sent one, and clearing it took the count below zero. All
+// seventeen real saves with a barracks hold its record and its count.
+//
+// All three place through the shared footprint writer (0x1232E) -- the same
 // terrain rule and part indices as place() -- and return false where it
 // refuses. The record goes into the first free slot; with none free, the
 // building is placed without one, as in the engine.
@@ -311,6 +323,14 @@ inline constexpr std::array<int, 8> kForumGradeCost = {60, 100, 140, 200, 250, 3
 
 bool place_forum(model::CityState& state, int grade, int x, int y);
 bool place_workshop(model::CityState& state, int goods, int x, int y);
+bool place_barracks(model::CityState& state, int x, int y);
+
+// Gaius's own, for saves written before place_barracks existed: gives every
+// barracks on the map that has no record one (as place_barracks would), drops
+// records whose barracks is gone, and sets DS:0x6C9C to the records' number.
+// Returns how many records it added or dropped; 0 on any save the original
+// wrote.
+int repair_barracks_records(model::CityState& state);
 
 // Clear Area on a whole save. As the grid version, and demolishing a forum
 // (0xE0-0xE7), workshop (0xF5/0xF6) or barracks (0xEF) first removes its

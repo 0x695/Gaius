@@ -448,6 +448,7 @@ int main(int argc, char** argv) {
     std::string cohort_command;     // --cohort-command: runs Cohort 2 for a battle (findings section 44)
     int start_speed = -1;           // --speed 0-100: DS:0x5292 (default: the options' CAESAR.INF)
     int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
+    bool test_year_banner = false;  // --test-year-banner: the new year's banner on the first frame (headless captures)
     int test_tutorial = -1;         // --test-tutorial N: the tutorial at step N with its page open (headless captures)
     bool test_tutorial_goal = false;  // --test-tutorial-goal N: at step N with the page read, the goal line on the map
     // --capture-dir DIR [--capture-every SECONDS]: while playing, the game's 320 x 200 picture as a PNG in DIR every few
@@ -487,6 +488,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--cohort-command") == 0 && i + 1 < argc) cohort_command = argv[++i];
         if (std::strcmp(argv[i], "--speed") == 0 && i + 1 < argc) start_speed = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-message") == 0 && i + 1 < argc) test_message = std::atoi(argv[++i]);
+        if (std::strcmp(argv[i], "--test-year-banner") == 0) test_year_banner = true;
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -581,6 +583,7 @@ int main(int argc, char** argv) {
         } else if (save_mode) {
             save = formats::save::load(in_path);
             state = model::load(save);
+            systems::construction::repair_barracks_records(state);
         } else {
             map = formats::empire2::load(in_path);
         }
@@ -873,13 +876,17 @@ int main(int argc, char** argv) {
             sim.messages.post(msg::plain(msg::Id::ConstructionPlebs));
             return false;
         }
-        // 0x14E1D / 0x15252: at 30 forums or 30 workshops.
+        // 0x14E1D / 0x15482 / 0x15252: at 30 forums, 30 workshops or 10 barracks (which the message calls a fort).
         if (tool == construction::CommandId::Forum && model::global_word(state, 0x6CA0) >= 30) {
             sim.messages.post(msg::plain(msg::Id::NoForum));
             return false;
         }
         if (tool == construction::CommandId::Workshop && model::global_word(state, 0x6C9E) >= 30) {
             sim.messages.post(msg::plain(msg::Id::NoFactory));
+            return false;
+        }
+        if (tool == construction::CommandId::Barracks && model::global_word(state, 0x6C9C) >= 10) {
+            sim.messages.post(msg::plain(msg::Id::NoFort));
             return false;
         }
         const int cost = economy::construction_cost(tool, forum_grade);
@@ -927,6 +934,7 @@ int main(int argc, char** argv) {
             case construction::CommandId::Workshop:
                 placed = construction::place_workshop(state, workshop_goods, x, y);
                 break;
+            case construction::CommandId::Barracks: placed = construction::place_barracks(state, x, y); break;
             default: placed = construction::place(state.city, tool, x, y); break;
         }
         if (placed) {
@@ -976,6 +984,8 @@ int main(int argc, char** argv) {
     bool tutorial_forum_visited = false;     // the Forum was opened while the step asked for it
     bool tutorial_touch = false;             // a touch screen: the pages' wording
     Uint32 tutorial_due = 0;                 // when the step's page opens (a moment after the step before was done)
+    bool tutorial_treasury_open = false;     // the page showing is the treasury's warning, not the step's
+    bool tutorial_treasury_warned = false;   // that page has opened in this career (it opens once)
     viewer::TutorialCensus tutorial_census;  // what the city and the province hold, counted every few frames
     std::vector<std::pair<int, int>> tutorial_marks;  // the province cells the step points at
     // Running: switched on and at rank 1, or at rank 2 with only the last page left to show. A headless capture has
@@ -996,6 +1006,15 @@ int main(int argc, char** argv) {
         tutorial_time = time_running;
         time_running = false;
         tutorial_page_seen = true;
+        tutorial_treasury_open = false;
+        screen = Screen::Tutorial;
+    };
+    // The treasury no longer covers what the steps ahead cost: said once, with the numbers.
+    const auto open_treasury_page = [&]() {
+        tutorial_return = screen;
+        tutorial_time = time_running;
+        time_running = false;
+        tutorial_treasury_open = tutorial_treasury_warned = true;
         screen = Screen::Tutorial;
     };
     const auto leave_news = [&]() {
@@ -1212,6 +1231,8 @@ int main(int argc, char** argv) {
     const auto read_state = [&](const std::string& path) {
         try {
             state = model::load(formats::save::load(path));
+            // A save Gaius wrote before 2026-10-11 holds barracks without their records, which send no patrols.
+            if (systems::construction::repair_barracks_records(state)) std::printf("barracks records repaired\n");
             adopt_state();
             saved_fingerprint = viewer::save_fingerprint(model::serialize(state).raw);
             std::printf("loaded %s\n", path.c_str());
@@ -1256,6 +1277,9 @@ int main(int argc, char** argv) {
                                             : viewer::start_page(funding_level, start_difficulty, governor_name,
                                                                  settings.tutorial ? 1 : 0);
             case Screen::Tutorial:
+                if (tutorial_treasury_open)
+                    return viewer::tutorial_treasury_page(model::global_word(state, systems::economy::kFunds),
+                                                          viewer::tutorial_reserve(settings.tutorial_step, tutorial_census));
                 return viewer::tutorial_page(settings.tutorial_step, state, tutorial_touch, settings.tribune_auto);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons, files_recover);
             case Screen::Choice: return viewer::choice_page(choice_forum, choice_forum ? forum_grade : workshop_goods);
@@ -1328,6 +1352,10 @@ int main(int argc, char** argv) {
             if (action != viewer::kActionContinue && action != viewer::kActionTutorialSkip) return;
             screen = tutorial_return;
             time_running = tutorial_time;
+            if (tutorial_treasury_open) {  // the warning: the step stays where it is
+                tutorial_treasury_open = false;
+                return;
+            }
             if (action == viewer::kActionTutorialSkip || settings.tutorial_step >= viewer::kTutorialFinal) {
                 // Skipped, or the last page read: no tutorial until it is switched on again.
                 settings.tutorial = false;
@@ -1414,6 +1442,7 @@ int main(int argc, char** argv) {
                     if (settings.tutorial) {  // the tutorial begins with the career
                         settings.tutorial_step = 0;
                         tutorial_page_seen = tutorial_forum_visited = false;
+                        tutorial_treasury_warned = false;
                         tutorial_due = 0;
                         store_tutorial();
                     }
@@ -1527,10 +1556,9 @@ int main(int argc, char** argv) {
             sim.messages.post(systems::messages::plain(systems::messages::Id::ConstructionPlebs));  // 0x11C8F
             return false;
         }
-        if (id == 29 && model::global_word(state, 0x6C12) >= 10) {
-            sim.messages.post(systems::messages::plain(systems::messages::Id::NoFort));  // 0x15482
-            return false;
-        }
+        // 0x155A2: the Fort command at ten Cohorts fails without a word ("no need for another fort" is the
+        // city Barracks' message).
+        if (id == 29 && model::global_word(state, 0x6C12) >= 10) return false;
         const uint8_t tile = state.empire.cells[static_cast<size_t>(y) * province::kMapW + x] & 0x7F;
         const int cost = economy::kConstructionCost[static_cast<size_t>(id)] << economy::province_cost_shift(id, tile);
         if (!economy::can_afford(state, cost)) {
@@ -1793,6 +1821,10 @@ int main(int argc, char** argv) {
             if (!tutorial_running() || !tutorial_page_seen || (screen != Screen::City && screen != Screen::Province))
                 return std::string();
             return viewer::tutorial_line(settings.tutorial_step, tutorial_census);
+        };
+        const auto tutorial_reserve_text = [&]() -> std::string {
+            if (tutorial_goal_text().empty()) return std::string();
+            return viewer::tutorial_reserve_line(settings.tutorial_step, tutorial_census);
         };
         const auto tutorial_goal_box = [&](const std::string& line) {
             const int text_w = have_font ? ui::game_text_width(line.c_str(), 1, game_font) : ui::text_width(line.c_str(), 1);
@@ -2588,6 +2620,7 @@ int main(int argc, char** argv) {
             sim.messages.post(systems::messages::at(id, systems::messages::Place::City, 50, 50));
             if (model::global_word(state, 0x6C78) == 0) model::set_global_word(state, 0x6C78, 1);
         }
+        if (save_mode && test_year_banner) sim.year_banner = 80;
         if (save_mode && test_promotion) {
             model::set_global_word(state, 0x6CA4, (model::global_word(state, 0x6CA6) + 1) % 50);
             sim.on_promotion(state, false);
@@ -3255,6 +3288,11 @@ int main(int argc, char** argv) {
                 if (!tutorial_page_seen && (screen == Screen::City || screen == Screen::Province) &&
                     SDL_GetTicks() >= tutorial_due && !pointer.left_held && !touch_building)
                     open_tutorial_page();
+                else if (tutorial_page_seen && !tutorial_treasury_warned && test_tutorial < 0 &&
+                         (screen == Screen::City || screen == Screen::Province) && !pointer.left_held && !touch_building &&
+                         model::global_word(state, systems::economy::kFunds) <
+                             viewer::tutorial_reserve(settings.tutorial_step, tutorial_census))
+                    open_treasury_page();
             }
             // The effects this frame asked for, in order: one sound at a time,
             // so the last is the one heard.
@@ -3580,7 +3618,32 @@ int main(int argc, char** argv) {
                 else
                     ui::draw_text(frame, kLogicalW, kLogicalH, box.x + 5, box.y + 2, tutorial_goal.c_str(), 1,
                                   formats::RGB{242, 210, 122});
+                // What the steps ahead still cost, above it: red-edged once the treasury holds less.
+                if (const std::string keep = tutorial_reserve_text(); !keep.empty()) {
+                    ui::Rect above = tutorial_goal_box(keep);
+                    above.y -= 13;
+                    const bool is_short = model::global_word(state, systems::economy::kFunds) <
+                                          viewer::tutorial_reserve(settings.tutorial_step, tutorial_census);
+                    for (int y = above.y; y < above.y + above.h; ++y)
+                        for (int x = above.x; x < above.x + above.w; ++x) {
+                            if (x < 0 || y < 0 || x >= kLogicalW || y >= kLogicalH) continue;
+                            const bool edge = y == above.y || x == above.x || y == above.y + above.h - 1 ||
+                                              x == above.x + above.w - 1;
+                            const size_t i = (static_cast<size_t>(y) * kLogicalW + x) * 3;
+                            frame[i] = edge ? (is_short ? 224 : 150) : 74;
+                            frame[i + 1] = edge ? (is_short ? 64 : 124) : 70;
+                            frame[i + 2] = edge ? (is_short ? 48 : 60) : 52;
+                        }
+                    if (font)
+                        ui::draw_game_text(frame, kLogicalW, kLogicalH, above.x + 5, above.y + 2, keep.c_str(), 1, *font);
+                    else
+                        ui::draw_text(frame, kLogicalW, kLogicalH, above.x + 5, above.y + 2, keep.c_str(), 1,
+                                      formats::RGB{242, 210, 122});
+                }
             }
+            // 0x278A8: the new year's banner, under a message.
+            if (save_mode && have_interface_art && sim.year_banner > 0 && screen == Screen::City)
+                viewer::draw_year_banner(frame, kLogicalW, kLogicalH, interface_art, sim.year);
             if (save_mode && message_visible()) {
                 // 0x279AC: the message's two 28-character lines.
                 const std::string& t = sim.messages.current.text;
