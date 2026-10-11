@@ -418,6 +418,8 @@ bool run_frame(model::CityState& state, SimState& sim) {
         if (sim.messages.timer == 80) sounds::request(sounds::kFanfare);
         sim.messages.tick();
     }
+    // 0x0FA78: the control bar's funds routine, which caps the treasury.
+    economy::clamp_funds(state);
     if (messages::funds_warning(state)) sim.funds_warning = true;
     return step;
 }

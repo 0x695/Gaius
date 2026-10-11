@@ -136,3 +136,26 @@ New VPX-only-in-international-build resources (`FORUM32.VPX`, `IMP_LOGO.VPX`, `W
 | `CONTFRM.GD8` content is build/region-dependent | Definitive (MD5 differs); meaning: the Forum picture's click map (dispatch findings section 34.2) |
 | Missing VOC/VAS files in international build are an intentional design choice | Unresolved — flagged, not assumed |
 | `COHORT.EXE`/`LOADER.EXE`/`HIRES!.COM`/`.MAP` files | Still missing, unchanged from prior assessment |
+
+## 10. The EU build in play: what a video of it shows (2026-10-11)
+
+The international build has still not been disassembled. A 39-minute tutorial video of it (tsartomato, YouTube `NYcLqA_1CMc`, kept with its subtitles outside the repo) was read picture by picture against Gaius's transcription of the US build. Everything here is OBSERVED in the video, not read from code.
+
+**Shared with the US build** (the numbers are the ones Gaius transcribed from the US executable): the costs shown on the cost ghost (house 2, city road 3, hippodrome 300, province road 15, Great Wall 40); the eight Forum grades and their administration reach (6, 6, 8, 8, 10, 10, 12, 12); the eight goods; a donation losing a tenth; a tax rate of 5 % and conscription of 10 % at the start; the reach of wells, baths, schools, markets and the three entertainment buildings; 16 plebs to an auxiliary; the year's plaque at the top right; the Cohort 2 offer and its "Cohort ?" question; the treasury standing at 25000 (dispatch findings 50.3); chained fountains that alternate, and a third fountain fed by two working ones.
+
+**Different in the EU build:**
+
+| | EU (video) | US (Gaius) |
+|---|---|---|
+| Career | nine provinces, ten titles ending in Emperor; targets from 45 average / 15 minimum to 90 / 80 | 21 titles ending in Caesar; from 30 / 10 to 90 / 80 |
+| Imperial favour at the end | 81 (1 + 10 a promotion, an inference) | 91 (1 + 5 a promotion) |
+| Start screen | Trivial funding is 10000; no difficulty; "Preload a game" | Trivial is 8000; a skill level; "Load a game" |
+| Tribune | "Slave" throughout; welfare starts at 10; construction work fixed at 50; no Province duty | "Pleb"; welfare 88; a Province duty |
+| Legion | wages bill starts at 10 Dn | 20 Dn |
+| Province bar | eleven buttons, no Imperial Highway (so Empire tops out at 80, four towns) | Imperial Highway (35 points) |
+| City bar | eight buttons on the main page | eleven |
+| Maps | a list of seven with radio buttons, "land shape" among them | six buttons |
+| Battle screen | five tactics down the right edge | four, read by x |
+| Speed and pause | a pause in the Option screen only, no speed | game speed and pause |
+
+The title ladder is a subset of the US one in the same order (Citizen, Decurian, Magistrate, Praefectus, Legate, Quaestor, Senator, Praetor, Consul, Proconsul), which suggests the US build's longer ladder was the later extension.

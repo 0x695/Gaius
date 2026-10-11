@@ -78,6 +78,22 @@ enum class CommandType {
     QuickSave,    // write the quicksave slot at once: F5. Keyboard enrichment: the Forum's
                   // save page does the same with a pointer, so no device depends on it.
     QuickLoad,    // read the quicksave slot back: F9.
+    // The original's keys on the city and province maps (its keyboard routine 0x2EA47). Not
+    // rebindable, and a key the player has bound to something else keeps the player's meaning.
+    // Every one of them has a button on the bar or in the Forum, so no device depends on them.
+    GoEmpire,     // F1: the map of the Empire (0334:9E34).
+    GoProvince,   // F2 (11C6:567F).
+    GoCity,       // F3 (11C6:56BF).
+    GoForum,      // F (11C6:5705).
+    GoMaps,       // G, from the city only (11C6:575B).
+    GoRatings,    // R: the ratings screen (0334:ADC5).
+    GoTribune,    // S: the Tribune of the Plebs (0334:B4B6).
+    BarPage,      // 1, 2, 3: the control bar's page DS:0x6D0E, in `dx` (0, 1, 2).
+    Help,         // the original's online help of the current command: H. The original opens
+                  // it with both mouse buttons down (0x0F855) and shows it while they are held,
+                  // which the viewer also does;
+                  // the key is there so a device without two buttons can reach it, and
+                  // holds it until the next key or click.
 };
 
 // What a TextKey command carries.
@@ -116,7 +132,8 @@ struct Command {
 //
 // Defaults -- keyboard: Menu Escape, ToggleWindowMode F11, CycleTool Tab,
 // PreviousTool Shift+Tab (not rebindable: Shift with the CycleTool key),
-// CycleVariant V, ToggleTime Space, CycleScreen M, QuickSave F5, QuickLoad F9.
+// CycleVariant V, ToggleTime Space (and the original's T, while T is bound to nothing else),
+// CycleScreen M, QuickSave F5, QuickLoad F9, Help H.
 // Gamepad: Select A, Secondary B, CycleTool X, ToggleTime Y, PreviousTool left
 // shoulder, CycleVariant right shoulder, CycleScreen Back, Menu Start (the quick
 // slots have no button: every pad has its own spare ones, so the player picks).
@@ -127,7 +144,7 @@ inline constexpr CommandType kBindable[] = {CommandType::Menu,        CommandTyp
                                             CommandType::ToggleTime,  CommandType::CycleScreen,
                                             CommandType::ToggleWindowMode, CommandType::Select,
                                             CommandType::Secondary,   CommandType::QuickSave,
-                                            CommandType::QuickLoad};
+                                            CommandType::QuickLoad,   CommandType::Help};
 
 // A stable name for a command ("cycle_tool"), for the settings file.
 const char* command_name(CommandType type);

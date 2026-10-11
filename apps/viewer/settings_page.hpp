@@ -61,6 +61,9 @@ inline constexpr int kActionResume = 1400, kActionPause = 1401, kActionSettingsL
                      kActionSettingsSave = 1403, kActionRestart = 1404, kActionExit = 1405, kActionYes = 1406,
                      kActionNo = 1407, kActionResetControls = 1408, kActionImportGame = 1409,
                      kActionRescanGame = 1410;
+// Settings > Game > Cheat: 1000 Dn into the city's funds, as often as wanted, up to the treasury's cap.
+inline constexpr int kActionCheatFunds = 1412;
+inline constexpr int kCheatFunds = 1000;
 
 inline int row_id(SettingRow row, int binding = 0) { return static_cast<int>(row) + binding; }
 
@@ -69,6 +72,7 @@ struct SettingsView {
     SettingsTab tab = kSettingsGame;
     bool messages_on = true;          // the save's DS:0x6C78
     bool in_game = true;              // a career is under way (Save, Pause, Restart apply)
+    int funds = 0;                    // the city's funds DS:0x6CA2, for the cheat's row
     bool windowed_platform = true;    // the window mode can change (not on Android)
     bool can_import = false;          // Android: a folder can be imported
     bool game_found = true;
@@ -123,6 +127,7 @@ inline const char* binding_label(platform::CommandType t) {
         case C::Secondary: return "Back";
         case C::QuickSave: return "Quick save";
         case C::QuickLoad: return "Quick load";
+        case C::Help: return "Help";
         default: return "?";
     }
 }
@@ -163,6 +168,10 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.rows.push_back(row(ui::tr("Tribune"), ui::tr(s.tribune_auto ? "Automatic" : "By hand"),
                                     row_id(SettingRow::TribuneAuto)));
             page.rows.push_back(row(ui::tr("Tutorial"), on_off(s.tutorial), row_id(SettingRow::Tutorial)));
+            // Either arrow adds the money: there is nothing to take back.
+            if (v.in_game)
+                page.rows.push_back({ui::tr("Cheat - add 1000 Dn"), std::to_string(v.funds) + " Dn", kActionCheatFunds,
+                                     kActionCheatFunds});
             // Always a way out: back into the game, or to the start screen when Settings was opened from there.
             page.buttons.push_back({ui::tr(v.in_game ? "Resume" : "Back"), kActionResume});
             page.buttons.push_back({ui::tr("Pause"), kActionPause, v.in_game});
@@ -277,6 +286,7 @@ inline ui::Page controller_hints_page() {
     bound(CommandType::Menu, ui::tr("Settings"));
     bound(CommandType::QuickSave, ui::tr("Quick save"));
     bound(CommandType::QuickLoad, ui::tr("Quick load"));
+    bound(CommandType::Help, ui::tr("Help"));
     page.rows.push_back({ui::tr("Move the pointer"), ui::tr("Left stick")});
     page.rows.push_back({ui::tr("Scroll the map"), std::string(ui::tr("Right stick")) + " " + ui::pad_markup('u') +
                                                        ui::pad_markup('d') + ui::pad_markup('<') + ui::pad_markup('>')});

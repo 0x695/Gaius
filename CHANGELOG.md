@@ -10,12 +10,18 @@ section below that carries its number (`scripts/release_notes.py`). How a releas
 - The new year's plaque ("3 BC") at the top right of the city, as the original shows it when a year turns.
 - Autosaves of the original game while you record a session: `scripts/record_session.py` reads its state out of DOSBox once a minute and keeps each as a save (`scripts/dosbox_memory.py`, Windows).
 - `sim_check SAVE --water MONTHS` shows which fountains of a save run and which alternate.
+- The original's online help: hold both mouse buttons (or press H) on the city or the province map for what the command in hand does. Housing, Forum and Temple show their grades.
+- A province now opens as in the original: the map of the Empire, then a welcome with your name, rank and province. A key or a click moves on.
+- The original's keys on the city and province maps: F1 the map of the Empire, F2 the province, F3 the city, F the Forum, G the maps, R the ratings, S the Tribune of the Plebs, 1 / 2 / 3 the control bar's pages, T pause (Space still pauses too).
+- A cheat in Settings > Game: 1000 Dn into the city's funds, as often as you like, up to the treasury's 25000.
 
 ### Changed
 - The tutorial asks for the Imperial Highway while there is money for it (after 500 people, not 2000), shows what the steps ahead still cost on a line above the goal, and warns once when the treasury falls below that. Its pages now say that a second Workshop of the same goods earns less, and to pipe each Fountain to a reservoir.
 - A recorded session's film has the two games' own sound only.
+- W, A, S and D no longer scroll the map (S is the original's key for the Tribune); the arrow keys, the mouse at the edge and a middle-drag do.
 
 ### Fixed
+- The treasury holds at most 25000 Dn, as in the original. Without the limit a very rich city's funds could wrap round and be lost at the year's end.
 - A Barracks built by the player now sends its patrols: it was placed without the record the patrols start from. Barracks in older saves are mended when the save is loaded.
 
 ## [0.9.0] - unreleased

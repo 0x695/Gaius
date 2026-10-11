@@ -10,6 +10,7 @@
 // Run with:  GAIUS_TEST_ASSETS=/path/to/your/caesar/files ./gaius_tests
 
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -1840,7 +1841,7 @@ void test_construction_pipes() {
     f->city.tile[64][40] = 0x5A;
     CHECK(place_pipe(f->city, drag, 40, 64) && tile[64][40] == 0x8E);
     // Water with no pipe beside it is a place for a reservoir, whichever of its pieces it is.
-    for (uint8_t water : {0x4E, 0x52, 0x56, 0x5A, 0x62, 0x66, 0x6A, 0x6E}) {
+    for (uint8_t water : std::initializer_list<uint8_t>{0x4E, 0x52, 0x56, 0x5A, 0x62, 0x66, 0x6A, 0x6E}) {
         f->city.tile[80][80] = water;
         CHECK(place_pipe(f->city, drag, 80, 80));
         CHECK(tile[80][80] == 0xA4 && f->city.operational_state[80][80] == water);
@@ -2997,7 +2998,7 @@ void test_platform_game_detection() {
         fs::create_directories(dir);
         for (int i = 0; i < plat::kEssentialGameFileCount; ++i) {
             std::string name = plat::kEssentialGameFiles[i];
-            if (i % 2 == 0) std::transform(name.begin(), name.end(), name.begin(), ::tolower);  // any letter case
+            if (i % 2 == 0) std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });  // any letter case
             std::ofstream(dir / name).put('x');
         }
     };
@@ -3616,7 +3617,7 @@ void test_ail_sequencer() {
     AilXmidi d(log.fn());
     d.init();
     // Program 5, middle C for 5 intervals, 10 intervals, the end.
-    const std::vector<uint8_t> xmi = make_xmi({{5, 0}}, {0xC1, 5, 0x91, 60, 127, 5, 10, 0xFF, 0x2F, 0x00});
+    const std::vector<uint8_t> xmi = make_xmi({{uint8_t{5}, uint8_t{0}}}, {0xC1, 5, 0x91, 60, 127, 5, 10, 0xFF, 0x2F, 0x00});
     CHECK(d.register_sequence(xmi));
     CHECK(d.request() == 5);
     d.install_timbre(0, 5, kTestTimbre);
@@ -3643,7 +3644,7 @@ void test_ail_sequencer() {
     l.init();
     l.install_timbre(0, 5, kTestTimbre);
     CHECK(l.register_sequence(
-        make_xmi({{5, 0}}, {0xC1, 5, 0xB1, 116, 2, 0x91, 60, 127, 1, 2, 0xB1, 117, 127, 0xFF, 0x2F, 0})));
+        make_xmi({{uint8_t{5}, uint8_t{0}}}, {0xC1, 5, 0xB1, 116, 2, 0x91, 60, 127, 1, 2, 0xB1, 117, 127, 0xFF, 0x2F, 0})));
     l.start();
     for (int i = 0; i < 20; ++i) l.serve();
     CHECK(key_ons(loop_log) == 2 && l.status() == AilXmidi::kDone);
@@ -3653,7 +3654,7 @@ void test_ail_sequencer() {
     AilXmidi s(stop_log.fn());
     s.init();
     s.install_timbre(0, 5, kTestTimbre);
-    CHECK(s.register_sequence(make_xmi({{5, 0}}, {0xC1, 5, 0x91, 60, 127, 100, 50, 0xFF, 0x2F, 0})));
+    CHECK(s.register_sequence(make_xmi({{uint8_t{5}, uint8_t{0}}}, {0xC1, 5, 0x91, 60, 127, 100, 50, 0xFF, 0x2F, 0})));
     s.start();
     s.serve();
     stop_log.writes.clear();
@@ -3780,6 +3781,20 @@ void test_simulation_sounds() {
     month::run_frame(*st, sim);
     got = sounds::take();
     CHECK(std::count(got.begin(), got.end(), sounds::kFanfare) == 1 && sim.year_banner == 79);
+
+    // 0x212A1, each frame: the treasury is held to 0-25000 (the funds were 5000 and stayed so above).
+    CHECK(global_word(*st, 0x6CA2) == 5000);
+    set_global_word(*st, 0x6CA2, 25001);
+    month::run_frame(*st, sim);
+    CHECK(global_word(*st, 0x6CA2) == gaius::systems::economy::kFundsCap);
+    set_global_word(*st, 0x6CA2, 32000);
+    gaius::systems::economy::clamp_funds(*st);
+    CHECK(global_word(*st, 0x6CA2) == 25000);
+    set_global_word(*st, 0x6CA2, -7);
+    gaius::systems::economy::clamp_funds(*st);
+    CHECK(global_word(*st, 0x6CA2) == 0);
+    set_global_word(*st, 0x6CA2, 5000);
+    sounds::take();
 
     // The battle's message: a sword at 0x73, a war cry at 0x32.
     gaius::ui::BattleScreen b;
@@ -5796,6 +5811,24 @@ void test_governor_dialogs() {
     set_global_word(*st, 0x6C2C, 120);
     const auto salary = ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Salary);
     CHECK(outside(salary, ui::compose_governor_screen(*st, art, picture), 0x50, 0x50, 10 * 16, 3 * 16) == 0);
+    // 0x0A1F4, the welcome a province begins with: a 14 x 6 panel at (0x30, 0x20) and nothing outside it; the rank
+    // and the province change it, and each only its own line (y 0x50 and y 0x6E, 16 characters from x 0x60).
+    {
+        const gaius::formats::IndexedImage blank = ui::blank_canvas();
+        const auto welcome = ui::compose_welcome_screen(*st, art);
+        CHECK(welcome.width == 320 && welcome.height == 200 && welcome.pixels != blank.pixels);
+        CHECK(outside(welcome, blank, 0x30, 0x20, 14 * 16, 6 * 16) == 0);
+        const int16_t rank_was = static_cast<int16_t>(global_word(*st, 0x6C30));
+        const int16_t province_was = static_cast<int16_t>(global_word(*st, 0x6CA6));
+        set_global_word(*st, 0x6C30, static_cast<int16_t>(rank_was == 2 ? 3 : 2));
+        const auto ranked = ui::compose_welcome_screen(*st, art);
+        CHECK(ranked.pixels != welcome.pixels && outside(ranked, welcome, 0x60, 0x50, 16 * 8, 12) == 0);
+        set_global_word(*st, 0x6C30, rank_was);
+        set_global_word(*st, 0x6CA6, static_cast<int16_t>(province_was == 5 ? 6 : 5));
+        const auto moved_province = ui::compose_welcome_screen(*st, art);
+        CHECK(moved_province.pixels != welcome.pixels && outside(moved_province, welcome, 0x60, 0x6E, 16 * 8, 12) == 0);
+        set_global_word(*st, 0x6CA6, province_was);
+    }
     // Inside the panel, the figure changes only its own place, (0x68, 0x64), 5 characters.
     set_global_word(*st, 0x6C2C, 9999);
     const auto salary2 = ui::compose_governor_dialog(*st, art, picture, ui::GovernorDialog::Salary);
@@ -7504,6 +7537,36 @@ void test_viewer_message_box() {
     CHECK(vw::year_banner_text(-3) == "  3 BC" && vw::year_banner_text(-13) == " 13 BC");
     CHECK(vw::year_banner_text(0) == "  0 AD" && vw::year_banner_text(624) == "624 AD");
     CHECK(vw::year_banner_text_x(99) == 240 && vw::year_banner_text_x(100) == 248 && vw::year_banner_text_x(-200) == 240);
+    // 0x0D650: the online help. A name of 16 characters and two lines of 30 for each of the 44 commands; the full
+    // panel with the grades' pictures for Housing, Forum and Temple only.
+    {
+        const auto trim = [](std::string s) {
+            while (!s.empty() && s.back() == ' ') s.pop_back();
+            return s.substr(std::min(s.find_first_not_of(' '), s.size()));
+        };
+        for (int c = 0; c < vw::kHelpCommands; ++c) {
+            CHECK(std::string(vw::help_names()[static_cast<size_t>(c)]).size() == 16);
+            CHECK(std::string(vw::help_records()[static_cast<size_t>(c)]).size() == 60);
+            CHECK(vw::help_line(c, 0).size() == 30 && vw::help_line(c, 1).size() == 30);
+            CHECK(vw::help_kind(c) == (c >= 11 && c <= 13 ? 2 : 1));
+            CHECK(vw::help_pictures(c).size() == (c == 11 ? 16u : c == 12 || c == 13 ? 8u : 0u));
+            // the names are the command table's
+            if (c < gaius::systems::construction::kCommandCount)
+                CHECK(trim(vw::help_names()[static_cast<size_t>(c)]) ==
+                      gaius::systems::construction::command_name(static_cast<gaius::systems::construction::CommandId>(c)));
+        }
+        CHECK(vw::help_kind(-1) == 0 && vw::help_kind(44) == 0 && vw::help_line(44, 0).empty());
+        CHECK(trim(vw::help_line(0, 0)) == "You currently have no action" && trim(vw::help_line(0, 1)) == "selected");
+        // every picture lies on the 20 x 11 panel, and the frames are the grades in order
+        for (int c : {11, 12, 13}) {
+            const auto pictures = vw::help_pictures(c);
+            const int first = c == 11 ? 0 : c == 12 ? 24 : 16;
+            for (size_t i = 0; i < pictures.size(); ++i) {
+                CHECK(pictures[i].frame == first + static_cast<int>(i));
+                CHECK(pictures[i].x >= 16 && pictures[i].x < 320 && pictures[i].y >= 64 && pictures[i].y < 176);
+            }
+        }
+    }
 
     const std::string dir = test_assets_dir();
     if (dir.empty()) { skip("GAIUS_TEST_ASSETS not set"); return; }

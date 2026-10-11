@@ -303,7 +303,7 @@ Bytes synthetic_vas() {
     out[0x14] = 0x18;           // its offset
     for (int plane = 0; plane < 4; ++plane) {
         // length 10, 16000 bytes, then one run of 16000 (no XOR bytes)
-        for (const uint8_t b : {10, 0, 0x80, 0x3E, 0, 0, 0, 0, 0x7F, 0x3E}) out.push_back(b);
+        for (const uint8_t b : std::initializer_list<uint8_t>{10, 0, 0x80, 0x3E, 0, 0, 0, 0, 0x7F, 0x3E}) out.push_back(b);
     }
     return out;
 }

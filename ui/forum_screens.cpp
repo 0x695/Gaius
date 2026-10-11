@@ -30,6 +30,19 @@ constexpr const char* kRanks[] = {
     "    Praetor     ", "     Consul     ", "    Proconsul   ", "    Princeps    ", "    Imperator   ",
     "     Caesar     "};
 
+// DS:0x70F2, the provinces' names as 16-character fields.
+constexpr const char* kProvinces[] = {
+    "    Sicilia     ", "    Campania    ", "    Latium      ", " Cisalpine Gaul ", "    Corsica     ",
+    "    Sardinia    ", " Alpes Maritimae", "   Narbonensis  ", "  Hispania Inf. ", "     Baetica    ",
+    " Lusitania Inf. ", " Lusitania Sup. ", " Tarraconensis  ", " Aquitania Inf. ", "  Hispania Sup. ",
+    " Aquitania Sup. ", "  Lugdunensis   ", "    Belgica     ", "  Gallia  Sup.  ", "  Gallia  Inf.  ",
+    "  W. Britannia  ", "  E. Britannia  ", " Britannia Sup. ", "   Caledonia    ", "  Germania Inf. ",
+    "  Germania Sup. ", "    Pannonia    ", "     Dacia      ", "   Illyricum    ", "    Dalmatia    ",
+    "   Macedonia    ", "     Achaea     ", "     Creta      ", "    Thracia     ", "      Asia      ",
+    "   Pamphylia    ", "   Cappadocia   ", "    Assyria     ", "     Syria      ", "  Mesopotamia   ",
+    "     Judea      ", "     Arabia     ", "    Aegyptus    ", "   Cyrenaica    ", "     Africa     ",
+    "    Numidia     ", "   Mauretania   ", "  Caeariensis   ", "   Tingitania   ", "     Moesia     "};
+
 }  // namespace
 
 formats::IndexedImage compose_history_screen(const model::CityState& state, const InterfaceArt& art) {
@@ -344,23 +357,28 @@ formats::IndexedImage compose_governor_screen(const model::CityState& state, con
     // The rank (DS:0x7102) and province (DS:0x70F2), 16-character fields.
     const int rank = g(state, 0x6C30);
     if (rank >= 0 && rank <= 20) draw_text(img, art, Font::Font1, 0x94, 0x25, kRanks[rank]);
-    static constexpr const char* kProvinces[] = {
-        "    Sicilia     ", "    Campania    ", "    Latium      ", " Cisalpine Gaul ", "    Corsica     ",
-        "    Sardinia    ", " Alpes Maritimae", "   Narbonensis  ", "  Hispania Inf. ", "     Baetica    ",
-        " Lusitania Inf. ", " Lusitania Sup. ", " Tarraconensis  ", " Aquitania Inf. ", "  Hispania Sup. ",
-        " Aquitania Sup. ", "  Lugdunensis   ", "    Belgica     ", "  Gallia  Sup.  ", "  Gallia  Inf.  ",
-        "  W. Britannia  ", "  E. Britannia  ", " Britannia Sup. ", "   Caledonia    ", "  Germania Inf. ",
-        "  Germania Sup. ", "    Pannonia    ", "     Dacia      ", "   Illyricum    ", "    Dalmatia    ",
-        "   Macedonia    ", "     Achaea     ", "     Creta      ", "    Thracia     ", "      Asia      ",
-        "   Pamphylia    ", "   Cappadocia   ", "    Assyria     ", "     Syria      ", "  Mesopotamia   ",
-        "     Judea      ", "     Arabia     ", "    Aegyptus    ", "   Cyrenaica    ", "     Africa     ",
-        "    Numidia     ", "   Mauretania   ", "  Caeariensis   ", "   Tingitania   ", "     Moesia     "};
     const int province = g(state, 0x6CA6);
     if (province >= 0 && province < 50) draw_text(img, art, Font::Font1, 0x94, 0x45, kProvinces[province]);
     // 0x0C373: the name, 8 px a character from x 0xA4.
     draw_text(img, art, Font::Font1, 0xA4, 0x14, governor_name(state));
     // 0x0BDD3, each frame: the buttons.
     for (int row : {1, 2, 4, 8, 10}) draw_block(img, art.blocks, 29, 18 * 16, row * 16);
+    return img;
+}
+
+formats::IndexedImage compose_welcome_screen(const model::CityState& state, const InterfaceArt& art) {
+    formats::IndexedImage img = blank_canvas();
+    draw_panel(img, art, 0x30, 0x20, 14, 6);
+    draw_text(img, art, Font::Font1, 0x30, 0x28, "          Welcome");
+    draw_text(img, art, Font::Font1, 0x2C, 0x5F, "             of");
+    const int rank = g(state, 0x6C30);
+    if (rank >= 0 && rank <= 20) draw_text(img, art, Font::Font1, 0x60, 0x50, kRanks[rank]);
+    const int province = g(state, 0x6CA6);
+    if (province >= 0 && province < 50) draw_text(img, art, Font::Font1, 0x60, 0x6E, kProvinces[province]);
+    // 0x0C328: the name's twelve characters, one every 16 pixels.
+    const std::string name = governor_name(state);
+    for (size_t i = 0; i < name.size() && i < 12; ++i)
+        draw_text(img, art, Font::Font1, 0x40 + 16 * static_cast<int>(i), 0x3C, std::string(1, name[i]));
     return img;
 }
 

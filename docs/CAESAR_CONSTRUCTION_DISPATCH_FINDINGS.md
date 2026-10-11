@@ -2220,3 +2220,58 @@ The original ran under DOSBox (the GOG release's own `DOSBox.exe`, a config of G
 - **The pace** (`Settings::pace`, the Game tab's "Game pace"). The simulation is transcribed from the executable and its barbarians were checked again against `0x2D6F4` and the month counter at `0x29472` (the difficulty tests, the first year, the 18-month wrap, the army's size and where it appears are the same), so what differs is how fast the frames come. In the GOG release's DOSBox (3000 cycles) the original's main loop takes about 66 ms a frame: between two new-year banners ("12 BC", "11 BC") there are about 85 s at the top game speed, a month about 7 s -- every frame is a step at speed 100, and a month is 106 steps. The viewer stepped every 19 ms, a month in 2 s, three and a half times quicker: three and a half times the barbarians, fires and taxes a minute, against the same player. "Original" (66 ms, the default) keeps the release's pace; "Fast" keeps the old one. The year's Rome notice and the new-year banner showed on their own after a few seconds in the capture.
 - **The preview** (`1F6F:159F`, the pointer routine, and `0x2141D`, the cost). Each toolbar handler sets `DS:0x6D12`, the command's preview tile, and `DS:0x6D10`, how far the picture rises above the cell: Housing `0xC8`/0, Bath Houses `0xE8`/12, Barracks `0xEF`/4, Prefecture `0xEE`/3, Temple `0xD8`/2, Hospital `0xED`/0, School `0xEC`/0, Oracle `0xEB`/16, Heavy Industry 4/0, Market 5/0, Theater `0xF0`/16, Coliseum `0xF1`/16, Hippodrome `0xF2`/6; the Forum takes `0xDF` + the type menu's choice, the Workshop `0x18` (`0x28` past the fourth goods)/2; the others (Clear Area, Road, Plaza, Reservoir, Well, Fountain, Wall, Tower) set 0. In scroll mode a command with a preview tile draws that **one picture** at the cell (a frame of `HOUSES.PL8`, tile - `0xC8`, from `0xC8` up, of `HOUSES2.PL8` -- `494C:0000` -- below), its top left `rise` pixels above the cell's; one with none draws POINTERS frame 1, the 16 x 16 dashed frame (frames `0x2E` and `0x2F`, corner brackets round a diamond in orange and blue, are the pointer routine's two other scroll-mode frames; what selects them, `DS:0x6CA8`, is not read). The cost -- `[3496:1548 + 2 * command]`, the Forum's `[3496:15A0 + 2 * grade]`, shifted by `DS:0x6DD9` in the province -- is written in the large font at the cell's left two rows down, one to three digits by its size. The captures agree: a well, a fountain, a wall, a road, a plaza and a reservoir show the dashed frame with 5, 10, 5, 3, 10 and 3, the barracks its building with 80. Section 47 had the building drawn by rendering the city with it placed, which gave a well and a fountain a picture and the multi-cell buildings a drawing of their cells; it is the tile's picture now.
 - **Not done.** The original's start screen is a panel with "Initial funding / Trivial / 8000", "Skill level / Easy", and "Choose name", "Load a game" and "OK" buttons; Gaius's is its own layout. The Golden Sector logo is left out of the opening. The scroll-mode pointer frames `0x2E`/`0x2F`.
+
+## 50. The online help, a province's arrival and the treasury's cap (2026-10-11)
+
+Three things the original does that Gaius did not, found by opening the films of the recorded sessions (item 49 of `CLAUDE.md`) and a video of the EU build, then read in the US executable.
+
+### 50.1 The online help
+
+- **When.** The main loop, flat `0x0F855`: if `DS:0x6D56` and `DS:0x6D54` are both non-zero -- the left and the right mouse button, held -- it calls `0x0F913`, which calls `0x0D650`, then loops on `100F:1258` until both words are zero (`0x0F91A`) and clears the click words `DS:0x6D4E` and `DS:0x6D4C`. `0x0D650` draws once and flips the page (`2EF9:0301` is the page flip: it waits for the retrace at `2EF9:02D0` and swaps the two page offsets; it is not a wait for a click). So the help is on screen for as long as both buttons are held, the game stands still meanwhile, and neither button's click acts afterwards. DEFINITIVE for the code; that the two words are the buttons' held state is STRONG INFERENCE from the tests that follow (`0x6D56` with the pointer above y `0xB0` calls the build handler `11C6:0006`).
+- **What.** The command is `DS:0x6D0C`, the one in hand (0, "No action", with none). `DS:0x079E + command` is the kind: 1 for every command but Housing (11), Forum (12) and Temple (13), which have 2. The texts are one string at `DS:0x215D` (far pointer `DS:0x70FA`), 60 characters a command for the 44 commands, drawn as two lines of 30 by `0x0D7B9` at x 40, 16 pixels apart. The names are the 16-character records at `DS:0x1D4C` (`DS:0x70FE`). The title is "Caesar - Online help" (`DS:0x0C66`, and again at `DS:0x0C7B`).
+- **Kind 1** (`0x0D688`): `1F6F:1EC1` with x `0x20`, y `0x20`, 16 columns, 6 rows; the title at (`0x50`, `0x70`); the name at (`0x70`, `0x26`); the lines from y `0x42`.
+- **Kind 2** (`0x0D70D`): the panel at (0, 0), 20 columns and 11 rows; the title at (`0x50`, `0xA2`); the name at (`0x6C`, 6); the lines from y `0x1E`; then the pictures of the building's grades, each through `1F6F:18C5`, which draws frame `303E:001C` of the sheet in segment `54E0` -- `HOUSES.PL8` -- at (`303E:0024`, `303E:0026`): `0x0D81F` the sixteen housing grades (frames 0-15) at 16 times the cells of `DS:0x07C9`, `0x0D865` the eight Forums (frames 24-31, `DS:0x0829`), `0x0D8AF` the eight Temple stages (frames 16-23, `DS:0x0809`). The title is written before the pictures, so one that reaches it covers it.
+- **In Gaius:** `viewer::draw_help_box` and its tables (`apps/viewer/overlays.hpp`), `--test-help N`. The small box matches the film's frame of command 0 by eye. That a picture's position is its top left corner is read from the layout (the 4 x 4 Forum at cell (2, 6) then ends on the panel's last row), not from the blitter `303E:13D6`. STRONG INFERENCE.
+
+### 50.2 A province's arrival
+
+The loop at `0x0F761` begins each province:
+
+- `0x0D1D3`: the map of the Empire (`0x09276`), the provinces' markers (`0x0D21E`) and the string at `DS:0x6E3A` -- "generating scrubland", `DS:0x3160` -- at (`0x4E`, `0xBB`), on both pages. The terrain is then generated (`0x16F05`), which is why the map stays up: in DOSBox at the GOG release's speed, six seconds and more.
+- `0x0A1F4`, after the province's reset: the screen goes black; a panel at (`0x30`, `0x20`), 14 columns and 6 rows; "          Welcome" (`DS:0x3EE1`) at (`0x30`, `0x28`); the governor's twelve characters one every 16 pixels from (`0x40`, `0x3C`) (`0x0C328`); the rank's 16-character record (`DS:0x7102`) at (`0x60`, `0x50`); "             of" (`DS:0x3EF3`) at (`0x2C`, `0x5F`); the province's record (`DS:0x70F2`) at (`0x60`, `0x6E`). Then `100F:0079` with 4: it waits four of its periods (`0x1E78` passes of `0x11348` each), or until a key (`0:1900`) or a click (`DS:0x6D4E`, `DS:0x6D4C`).
+- **In Gaius:** `Screen::Arrival` and `ui::compose_welcome_screen`; `--test-arrival 1|2`. The lengths (a second and a half, three seconds) are Gaius's own: the original's depend on the machine.
+
+### 50.3 The treasury's cap
+
+`0x212A1` (`1F6F:1BB1`) draws the control bar's funds. Its first six instructions are not about drawing: `DS:0x6CA2` below 0 becomes 0, above `0x61A8` (25000) becomes 25000, written back. It has two callers, the main loop's frame at `0x0FA78` (after the step, the year's plaque `2700:08A8` and the message `2700:09AC`) and `0x1F6E4`. So with the city or the province on screen the treasury is held to 0-25000 every frame. `systems/economy.hpp` had named the routine "the display's clamp" and nothing applied it; `economy::clamp_funds`, called from `month::run_frame` before the funds warning. DEFINITIVE. The video of the EU build shows a treasury standing at exactly 25000 for long stretches, which is what sent the reading back to this routine.
+
+This qualifies item 30's note on the 16-bit funds word: the treasury can no longer drift towards 32767 from year to year. The yearly settlement still adds the taxes before anything clamps, so a single year's income above 7767 Dn on a full treasury would wrap; no real save is near it, and it is unchecked in the original.
+
+## 51. The keys on the two maps (2026-10-11)
+
+A player's written walkthrough of the US build lists hotkeys nobody here had looked for. The routine is `0x2EA47` (far, in the segment after the province actors); it runs when a key is waiting (`2EF9:002D` = 1 after `2EF9:130B`) and reads the typed character `2EF9:002F` and the scan code `2EF9:0033` (section 42.4). Every test is a plain compare, in this order. DEFINITIVE for the compares; the names of the far calls are those of the handlers the toolbar and the Forum already reach, where known.
+
+| Key | Test | What it does |
+|---|---|---|
+| Enter, Escape | char `0x0D`, `0x1B` | sets `DS:0x6D54`: the right button |
+| `;` | char `0x3B` | sets `DS:0x6D56`: the left button |
+| arrows | scan `0x48`, `0x50`, `0x4B`, `0x4D` | move the pointer 8 pixels (`2EF9:0023` y, `2EF9:0021` x) |
+| `x`, `X` | char | `100F:0CC0`, then `100F:0B50` with `DS:0x68F6` -- not identified |
+| `1`, `2`, `3` | char | the bar's page `DS:0x6D0E` = 0, 1, 2; clears `0x6D12`, `0x6D14`, `0x6CAA`, `0x6CAC`, `0x6CA8`; redraws the bar (`1F6F:1AA8`) |
+| F1 | scan `0x3B` | `0334:9E34` (the map of the Empire, `0x0D174`), then the view again |
+| F2 | scan `0x3C` | pointer to (160, 100), `11C6:567F`: go to the province |
+| F3 | scan `0x3D` | the same, `11C6:56BF`: go to the city, page 0, no command |
+| Alt+X | scan `0x2D`, char 0 | `0334:B9EC` (`0x0ED2C`, the exit question) |
+| Space | char `0x20` | the next page, 0 -> 1 -> 2 -> 0; nothing on the province's bar (`0x6D0E` = 3) |
+| `f`, `F` | char | `11C6:5705`: the Forum |
+| `g`, `G` | char | `11C6:575B`: the maps, unless the province is on screen (`DS:0x6CAE` = 1) |
+| `r`, `R` | char | `0334:ADC5`: the ratings screen |
+| `s`, `S` | char | `0334:B4B6`: the Tribune of the Plebs |
+| `p`, `P` | char | flips `DS:0x0600` into `DS:0x529A`: the minimap's position marker (section 42) |
+| `t`, `T` | char | `0334:BCDE` (`0x0F01E`): pause |
+
+The compare with `=` (`0x2EB2E`) has no branch after it: a key taken out. A second routine at `0x2EDF6` has the same first half (buttons, arrows, `x`) and F2 alone; which screen runs it was not followed. The pause loop (`0x0F070`) ends on either button, `T` or Escape (scan 1), and draws nothing but the view meanwhile, so the original cannot build while paused; Gaius can.
+
+Gaius takes F1-F3, F, G, R, S, 1-3 and T (`platform::CommandType::GoEmpire` ... `BarPage`; fixed keys, and a key the player has bound to something else keeps the player's meaning). Space stays Gaius's pause, Escape its Settings screen and the arrows its scrolling; W, A, S and D no longer scroll, since S is the Tribune's. The help of section 50.1 moved from F1 to H.
+
+The same walkthrough agrees with the transcription on every number it gives: the 19 promotion targets (`3496:01C6`), the starting funds' floor of 4000, the savings carried over, 2000 plebs, 30 forums and workshops, 16 plebs an auxiliary, the reach of every service, and the pipe rules. Two things it adds from play: with the treasury at its cap the funds "can overflow going to zero", after which the plebs leave -- the 16-bit wrap at the settlement that section 50.3 left unchecked, followed by the welfare cut; and the top row of the city map is said to grow stray roads and to turn pipe into river, which would be the neighbour tests reading above the grid. The second is unchecked. Its claim that the battle's tactics change nothing disagrees with section 27 and is unchecked too. Its Alt+F12 is DOSBox's own fast-forward, not the game's.

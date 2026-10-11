@@ -7,6 +7,7 @@
 //   - the minimap in the top left corner: the terrain's land and water in a 25 x 25 square, and a red frame for the
 //     part of the city on screen;
 //   - the message box, a 16 x 3 stone panel at the top left corner with the message's two lines;
+//   - the online help of the current command, opened with both mouse buttons;
 //   - the cost ghost at the pointer: a dashed frame the size of the command's footprint with its cost in it, and for a
 //     building the building itself.
 // Positions are in the original's 320 x 200 screen. The panels are the game's own P_BLOCKS stone (ui/interface.hpp).
@@ -154,6 +155,136 @@ inline void draw_type_menu(std::vector<uint8_t>& rgb, int w, int h, const ui::In
                 rgb[i + 2] = 116;
             }
     }
+}
+
+// --- The online help ----------------------------------------------------------------
+//
+// 0x0F855: with both mouse buttons down (DS:0x6D56 and DS:0x6D54) the main loop calls 0x0D650, which shows the help
+// of the current command DS:0x6D0C once (2EF9:0301 is a page flip, not a wait); 0x0F91A then holds the game until
+// both buttons are up, so the help is on screen for as long as they are held. The kind is
+// the byte at DS:0x079E + command: 1 for every command but Housing, Forum and Temple, which have 2.
+//   kind 1 (0x0D688): a 16 x 6 panel at (32, 32); the command's 16-character name (DS:0x1D4C) at (112, 38); the
+//     help's two 30-character lines (DS:0x215D, 60 a command; 0x0D7B9) at (40, 66) and (40, 82); the title at
+//     (80, 112).
+//   kind 2 (0x0D70D): a 20 x 11 panel at (0, 0); the name at (108, 6); the lines at (40, 30) and (40, 46); the title
+//     at (80, 162); and the pictures of the building's grades -- frames of HOUSES.PL8 (54E0:0000, through
+//     1F6F:18C5) at 16 times the cell positions of DS:0x07C9 (Housing, frames 0-15), DS:0x0829 (Forum, 24-31) and
+//     DS:0x0809 (Temple, 16-23).
+// The texts are the executable's, spelling included. That a picture's position is its top left corner is read
+// from the layout (the largest Forum then ends on the panel's last row), not from the blitter.
+inline constexpr int kHelpCommands = 44, kHelpLineChars = 30;
+
+inline const std::array<const char*, kHelpCommands>& help_names() {
+    static const std::array<const char*, kHelpCommands> r = {
+        " No action      ", " Main Toolbar   ", " Clear Area     ", " Go to Forum    ",
+        "   Road         ", " Resevoir\\pipe  ", "  Maps          ", "  Wall          ",
+        "  Tower         ", "  Well          ", " Fountain       ", " Housing        ",
+        "  Forum         ", "  Temple        ", "Bath Houses     ", " Hospital       ",
+        "  School        ", " Oracle         ", " Career         ", "Go to Province  ",
+        " Theater        ", " Coliseum       ", "Hippodrome      ", "  Plaza         ",
+        " Barracks       ", "Prefecture      ", "Heavy Industry  ", " Market         ",
+        " Workshop       ", "  Fort          ", "  Halt          ", "Cohort Patrol   ",
+        "Cohort Attack   ", "Cohort Go Home  ", "Cohort Go Home  ", "Clear Area      ",
+        "Provincial road ", "Great Wall      ", "Infrastructure  ", "Construction    ",
+        "Game Options    ", "Great Tower     ", "  Highway       ", " Go to City     ",
+    };
+    return r;
+}
+
+inline const std::array<const char*, kHelpCommands>& help_records() {
+    static const std::array<const char*, kHelpCommands> r = {
+        "You currently have no action            selected            ",
+        "This icon returns you to the          main icon bar         ",
+        " Prepares areas for building  and removes rubble, buildings ",
+        "  Takes you to the forum and     thence to your advisors.   ",
+        " Build roads from houses to    forums,workshops,markets.    ",
+        "Click on lakes or rivers for aresevoir ,connect to fountain ",
+        "This screen allows you to findthe problem areas of the city ",
+        "Build walls to thwart invadersthat have entered the city map",
+        " Towers help strengthen walls   from attack by barbarians   ",
+        " Wells provide water but only      to adjacent houses.      ",
+        "   Fountains provide water           over a wide area.      ",
+        "Houses increase in stature as an area becomes prosperous....",
+        "Essential for a thriving city, and for collecting taxes !!! ",
+        " Add value to an area and help   soothe unhappy citizens.   ",
+        " No city will become truely    great without sanitation !!  ",
+        "Hospitals are welcome anywhere and improve a neighborhood.  ",
+        "Or Highschools!! are needed to attract the middle classes.  ",
+        "Oracles have uplifting effects over wide areas of the city  ",
+        "                                                            ",
+        " Takes you between your city    and the region around it.   ",
+        "  Useful in attracting in a      more discerning citizen.   ",
+        "Provides entertainment for all   and boosts city culture    ",
+        " The ultimate spectacle for a city giving pleasure to 1000's",
+        "  Turning roads into plazas    helps increase land values.  ",
+        "  Placed in the, city provides soldiers to quell trouble.   ",
+        "The Cops!!, help prevent riots   and collect local taxes.   ",
+        "  Boosts the productivity of        nearby workshops.       ",
+        "Vital to citizens - your       goods are sold there.        ",
+        "  Makes one of eight goods -      jars indicate its output. ",
+        "  Stations a new Cohort in a       likely trouble area.     ",
+        "                                                            ",
+        " Click on a Cohort, then on    2 points to patrol between.  ",
+        " Click on a Cohort, then on    the barbarian group to attack",
+        " Send the Cohort back to its               fort             ",
+        " Send the Cohort back to its               fort             ",
+        "      Clearing costs more           over heavy terrian.     ",
+        "Provide links to your outlyingtowns (make them straight!!). ",
+        " Protect the region with major           defenses.          ",
+        " The basics for a functional               city             ",
+        "Buildings to upgrade and boost        city development      ",
+        "      Loadsave game, or          change game options        ",
+        "Towers help strengthen walls   from attack by barbarians    ",
+        "Imperial highways boost the   provinces overall success.    ",
+        "     Returns you to your              capital city.         ",
+    };
+    return r;
+}
+
+// 0: no help; 1: the small box; 2: the full panel with the grades' pictures.
+inline int help_kind(int command) {
+    if (command < 0 || command >= kHelpCommands) return 0;
+    return command >= 11 && command <= 13 ? 2 : 1;
+}
+inline std::string help_line(int command, int line) {
+    if (help_kind(command) == 0) return std::string();
+    return std::string(help_records()[static_cast<size_t>(command)]).substr(line == 0 ? 0 : kHelpLineChars, kHelpLineChars);
+}
+
+struct HelpPicture {
+    int frame, x, y;  // a frame of HOUSES.PL8 and its top left on the 320 x 200 screen
+};
+inline std::vector<HelpPicture> help_pictures(int command) {
+    static constexpr int kHousing[16][2] = {{1, 4}, {3, 4}, {5, 4}, {7, 4}, {9, 4},  {12, 4}, {15, 4}, {18, 4},
+                                            {1, 6}, {3, 6}, {6, 6}, {9, 6}, {12, 6}, {6, 8},  {9, 8},  {15, 7}};
+    static constexpr int kTemple[8][2] = {{4, 4}, {6, 4}, {8, 4}, {10, 4}, {12, 4}, {14, 4}, {7, 7}, {10, 7}};
+    static constexpr int kForum[8][2] = {{1, 4}, {4, 4}, {7, 4}, {10, 4}, {14, 4}, {10, 7}, {14, 7}, {2, 6}};
+    std::vector<HelpPicture> out;
+    if (command == 11)
+        for (int i = 0; i < 16; ++i) out.push_back({i, kHousing[i][0] * 16, kHousing[i][1] * 16});
+    if (command == 12)
+        for (int i = 0; i < 8; ++i) out.push_back({24 + i, kForum[i][0] * 16, kForum[i][1] * 16});
+    if (command == 13)
+        for (int i = 0; i < 8; ++i) out.push_back({16 + i, kTemple[i][0] * 16, kTemple[i][1] * 16});
+    return out;
+}
+
+// Draws the help of `command` over a frame; `buildings` is HOUSES.PL8.
+inline void draw_help_box(std::vector<uint8_t>& rgb, int w, int h, const ui::InterfaceArt& art,
+                          const formats::PL8Sheet& buildings, int command) {
+    const int kind = help_kind(command);
+    if (kind == 0) return;
+    const bool full = kind == 2;
+    const int px = full ? 0 : 32, py = full ? 0 : 32, cols = full ? 20 : 16, rows = full ? 11 : 6;
+    formats::IndexedImage canvas = ui::blank_canvas();
+    ui::draw_panel(canvas, art, px, py, cols, rows);
+    // In the routine's order: the title first, so a picture that reaches it covers it.
+    ui::draw_text(canvas, art, ui::Font::Font1, 80, full ? 162 : 112, "Caesar - Online help");
+    ui::draw_text(canvas, art, ui::Font::Font1, full ? 108 : 112, full ? 6 : 38, help_names()[static_cast<size_t>(command)]);
+    ui::draw_text(canvas, art, ui::Font::Font1, 40, full ? 30 : 66, help_line(command, 0));
+    ui::draw_text(canvas, art, ui::Font::Font1, 40, full ? 46 : 82, help_line(command, 1));
+    for (const HelpPicture& p : help_pictures(command)) ui::draw_sprite(canvas, buildings, p.frame, p.x, p.y);
+    blit_canvas_rect(rgb, w, h, canvas, art.palette, px, py, cols * 16, rows * 16);
 }
 
 // --- The minimap -------------------------------------------------------------------

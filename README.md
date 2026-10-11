@@ -132,11 +132,13 @@ The right button works as in the original: with a building chosen the map builds
 |---|---|---|---|
 | Choose, build | Left click (drag to lay roads and walls) | A | Tap (drag with a road tool) |
 | Toolbar / placing; cancel a drag | Right click, Enter | B | Two-finger tap, Undo button |
-| Scroll | Arrow keys, WASD, mouse at the edge, middle-drag | Right stick, d-pad | One-finger drag |
+| Scroll | Arrow keys, mouse at the edge, middle-drag | Right stick, d-pad | One-finger drag |
 | Zoom | Wheel | Triggers | Pinch |
 | Next building, its variant | Tab, V | X (LB previous), RB | Toolbar |
-| Pause time | Space | Y | — |
+| Pause time | Space, T | Y | — |
 | Quick save, quick load | F5, F9 | — (rebindable) | — |
+| Help for the command in hand | both mouse buttons, or H | — (rebindable) | — |
+| The original's keys | F1 Empire map, F2 province, F3 city, F Forum, G maps, R ratings, S Tribune, 1 2 3 toolbar pages | — | — |
 | Change screen | M, the toolbar | View | Toolbar |
 | Settings | Esc | Menu | Back |
 | Window mode, data layers | F11, F8 | — | — |

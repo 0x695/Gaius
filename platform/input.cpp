@@ -113,6 +113,7 @@ const char* command_name(CommandType type) {
         case CommandType::Secondary: return "secondary";
         case CommandType::QuickSave: return "quick_save";
         case CommandType::QuickLoad: return "quick_load";
+        case CommandType::Help: return "help";
         default: return "";
     }
 }
@@ -137,6 +138,7 @@ void reset_bindings() {
     b[CommandType::Secondary] = {-1, SDL_CONTROLLER_BUTTON_B};
     b[CommandType::QuickSave] = {SDLK_F5, -1};
     b[CommandType::QuickLoad] = {SDLK_F9, -1};
+    b[CommandType::Help] = {SDLK_h, -1};  // F1 is the original's map of the Empire
 }
 
 void bind_key(CommandType type, int keycode) {
@@ -340,7 +342,27 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
                 return c;
             }
             const std::optional<CommandType> bound = command_for_key(static_cast<int>(sym));
-            if (!bound) return std::nullopt;
+            if (!bound) {
+                // The original's own keys (0x2EA47), for whatever the player has not bound.
+                switch (sym) {
+                    case SDLK_F1: return Command{CommandType::GoEmpire};
+                    case SDLK_F2: return Command{CommandType::GoProvince};
+                    case SDLK_F3: return Command{CommandType::GoCity};
+                    case SDLK_f: return Command{CommandType::GoForum};
+                    case SDLK_g: return Command{CommandType::GoMaps};
+                    case SDLK_r: return Command{CommandType::GoRatings};
+                    case SDLK_s: return Command{CommandType::GoTribune};
+                    case SDLK_t: return Command{CommandType::ToggleTime};  // 0x0F01E, Pause
+                    case SDLK_1:
+                    case SDLK_2:
+                    case SDLK_3: {
+                        Command c{CommandType::BarPage};
+                        c.dx = static_cast<int>(sym - SDLK_1);
+                        return c;
+                    }
+                    default: return std::nullopt;
+                }
+            }
             if (*bound == CommandType::CycleTool && (event.key.keysym.mod & KMOD_SHIFT))
                 return Command{CommandType::PreviousTool};
             if (*bound == CommandType::Select || *bound == CommandType::Secondary) {
@@ -358,7 +380,10 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
             c.x = event.button.x;
             c.y = event.button.y;
             if (event.button.button == SDL_BUTTON_LEFT) {
-                c.type = CommandType::Select;
+                // With the right button already down the two are held together, whichever came
+                // first (the original's main loop reads both, 0x0F855).
+                c.type = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_RMASK) ? CommandType::CancelDrag
+                                                                                   : CommandType::Select;
                 return c;
             }
             if (event.button.button == SDL_BUTTON_RIGHT) {

@@ -59,6 +59,11 @@ formats::IndexedImage load_governor_picture(const std::string& asset_dir);
 formats::IndexedImage compose_governor_screen(const model::CityState& state, const InterfaceArt& art,
                                               const formats::IndexedImage& picture);
 
+// 0x0A1F4, shown as a province begins: on a black screen a 14 x 6 panel at (48, 32) with "Welcome" at (48, 40),
+// the governor's name a letter every 16 pixels from (64, 60) (0x0C328), the rank at (96, 80), "of" at (44, 95)
+// and the province at (96, 110). `100F:0079` then waits four of its periods, or for a key or a click.
+formats::IndexedImage compose_welcome_screen(const model::CityState& state, const InterfaceArt& art);
+
 // The governor screen's three dialogs, each drawn over it: the promotion
 // requirements (0x0BE7C, button (18, 2)), the salary (0x0C06A, (18, 8)) and
 // the donation (0x0C17D, (18, 10)). A right click (DS:0x6D4C) ends each; a

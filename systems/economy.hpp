@@ -11,7 +11,7 @@
 // and each name matches the manual's description of that figure and the UI
 // limits (0x0E650-0x0EB37) on the value.
 //   DS:0x6CA2  city funds (the toolbar's Available Funds; the display routine
-//              0x212A1 clamps it to 0-25000)
+//              0x212A1 clamps the word itself to 0-25000: clamp_funds)
 //   DS:0x6C04  population tax rate, 0-25 %   DS:0x6C02  industrial tax rate, 0-25 %
 //   DS:0x6C06  conscription rate, 0-50 %     DS:0x6C08  army wages bill, 0-999
 //   DS:0x6C2C  governor's salary, 0-9999     DS:0x6C2E  personal savings
@@ -77,6 +77,13 @@ bool can_afford(const model::CityState& state, int cost);
 // DS:0x6BC0 += cost. A drag the player cancels gives it all back (0x11EFE).
 void charge(model::CityState& state, int cost);
 void refund(model::CityState& state, int amount);
+
+// 0x212A1 (1F6F:1BB1), the control bar's funds: before it draws them the
+// routine writes the limits back into DS:0x6CA2 -- below 0 becomes 0, above
+// 25000 becomes 25000. The main loop's frame calls it (0x0FA78), so with the
+// city or the province on screen the treasury never holds more.
+inline constexpr int kFundsCap = 25000;
+void clamp_funds(model::CityState& state);
 
 // 0x120C0, run when a placement can't be afforded: the first time only
 // (DS:0x6C9A), and only up to rank 6 (DS:0x6C30), Rome sends 500 Dn. Returns

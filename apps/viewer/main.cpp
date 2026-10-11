@@ -10,12 +10,16 @@
 //
 // Controls (Settings > Keys rebinds them; platform/input.hpp has the gamepad and touch forms):
 //   middle-mouse drag / single-finger touch drag / left gamepad stick  -> pan
-//   arrow keys / WASD / the mouse resting at the window's edge         -> scroll the map (the original's scroll speed)
+//   arrow keys / the mouse resting at the window's edge                -> scroll the map (the original's scroll speed)
+//   the original's keys (0x2EA47): F1 Empire map, F2 province, F3 city, F Forum, G Maps, R ratings, S Tribune,
+//     1 2 3 the bar's pages, T pause; H is the help of the command in hand
 //   scroll wheel / gamepad triggers                                    -> zoom
 //   right button / Enter / two-finger tap / gamepad B                  -> the original's right button: toggles scroll
 //     mode (a command chosen, the map builds) and command mode (the toolbar answers); leaves the Maps panel, the save
 //     page and the funds warning; during a drag-built command it cancels the drag and refunds it
 //   F5 / F9                                                            -> quick save / quick load (QUICKSAV.SAV)
+//   both mouse buttons held, or F1                                     -> the original's online help of the command
+//                                                                         in hand (city and province maps)
 //   F8                                                                 -> cycle the developer data layers
 //   Tab / gamepad X (left shoulder: previous)                          -> cycle build tool
 //   V / gamepad right shoulder / tap the selected button               -> next Forum grade or Workshop goods
@@ -448,6 +452,8 @@ int main(int argc, char** argv) {
     std::string cohort_command;     // --cohort-command: runs Cohort 2 for a battle (findings section 44)
     int start_speed = -1;           // --speed 0-100: DS:0x5292 (default: the options' CAESAR.INF)
     int test_message = -1;          // --test-message N: post systems::messages::Id N before the first frame
+    int test_arrival = 0;           // --test-arrival N: stage N of a province's arrival on the first frame (1 the map, 2 the welcome)
+    int test_help = -1;             // --test-help N: the online help of command N on the first frame (headless captures)
     bool test_year_banner = false;  // --test-year-banner: the new year's banner on the first frame (headless captures)
     int test_tutorial = -1;         // --test-tutorial N: the tutorial at step N with its page open (headless captures)
     bool test_tutorial_goal = false;  // --test-tutorial-goal N: at step N with the page read, the goal line on the map
@@ -489,6 +495,8 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--speed") == 0 && i + 1 < argc) start_speed = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-message") == 0 && i + 1 < argc) test_message = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--test-year-banner") == 0) test_year_banner = true;
+        if (std::strcmp(argv[i], "--test-help") == 0 && i + 1 < argc) test_help = std::atoi(argv[++i]);
+        if (std::strcmp(argv[i], "--test-arrival") == 0 && i + 1 < argc) test_arrival = std::atoi(argv[++i]);
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) screenshot_path = argv[++i];
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) screenshot_frames = std::atoi(argv[++i]);
         // Headless verification hooks -- there's no real mouse/touch/gamepad
@@ -631,6 +639,12 @@ int main(int argc, char** argv) {
     formats::IndexedImage governor_picture;  // C_VITAE.VPX
     bool have_governor_picture = false;
     ui::GovernorDialog governor_dialog = ui::GovernorDialog::None;  // open over the governor's screen
+    int help_command = -1;      // the online help box (0x0D650) is up for this command; -1: closed
+    bool help_resume = false;   // time was running when it opened
+    bool help_held = false;     // opened by the two buttons: it stays only while both are down
+    // The right button acts when it goes down, so pressed first of the two it has already changed the mode by the
+    // time the left one calls for help: what the mode was is kept while the button stays down, to put it back.
+    bool right_toggled = false, right_was_tool = false, right_was_province = false;
     bool pause_until_click = false;  // "Pause the game" (0x0F01E): a click or T resumes
     char key_last = 0, key_prev = 0;  // 2EF9:002F and 2EF9:0031: the last key typed and the one before
     // The original screens' buttons, run once a frame (0x0D41D / 0x0D521).
@@ -948,7 +962,13 @@ int main(int argc, char** argv) {
     // a battle. The last two open themselves when the simulation asks and stop
     // time until they're answered.
     enum class Screen { City, Province, Maps, ForumHall, Forum, Promotion, Battle, Ending, Start, Files, Notice, EmpireMap,
-                        NameEntry, Settings, Choice, News, Tutorial };
+                        NameEntry, Settings, Choice, News, Tutorial, Arrival };
+    // A province begins as the original shows it (0x0F79D-0x0F7E8): the map of the Empire with "generating
+    // scrubland" under it while the terrain is made (0x0D1D3), then the welcome panel (0x0A1F4), then the city.
+    // The original's map stays for as long as its generator runs and the panel for four periods of 100F:0079;
+    // Gaius gives them a second and a half and three seconds, and a key or a click moves on.
+    int arrival_stage = 0;  // 1: the map; 2: the welcome
+    Uint32 arrival_until = 0;
     Screen settings_return = Screen::City;  // where Resume goes back to
     bool choice_forum = true;               // the Choice screen: the Forum type menu, or the Industry type menu
     bool choice_time = false;               // whether time was running when the menu opened
@@ -1041,6 +1061,9 @@ int main(int argc, char** argv) {
     if (start_screen == "forum-page") screen = Screen::Forum;
     if (start_screen == "empire" && have_empire_map && have_icons) screen = Screen::EmpireMap;
     Screen battle_return = Screen::Province;
+    Screen empire_return = Screen::Forum;  // the map of the Empire: the governor's page, or the map F1 was pressed on
+    bool forum_from_map = false;           // a Forum screen opened by its key (R, S): a right click returns to the map
+    Screen forum_map_return = Screen::City;
     viewer::ForumTab forum_tab =
         start_forum_tab == viewer::kStatue
             ? viewer::kStatue
@@ -1100,6 +1123,14 @@ int main(int argc, char** argv) {
         };
     };
     if (save_mode) install_hooks();
+    const auto begin_arrival = [&]() {
+        if (!have_empire_map || !have_icons || !have_interface_art || !screenshot_path.empty()) return false;
+        arrival_stage = 1;
+        arrival_until = SDL_GetTicks() + 1500;
+        screen = Screen::Arrival;
+        time_running = false;
+        return true;
+    };
 
     // 0x0F81B: an accepted promotion (DS:0x6C26 = 1) moves the governor to the
     // new province: its map EMPIRE2.0NN (0x0FF1C writes the province number in
@@ -1287,6 +1318,7 @@ int main(int argc, char** argv) {
                 viewer::SettingsView v = settings_view;
                 v.messages_on = model::global_word(state, 0x6C78) != 0;
                 v.in_game = settings_return != Screen::Start;
+                v.funds = model::global_word(state, systems::economy::kFunds);
                 const platform::GameFolderReport folder = platform::inspect_game_folder(game_dir);
                 v.game_found = folder.status == platform::GameFolderStatus::Usable;
                 v.game_note = viewer::game_folder_note(folder);
@@ -1437,8 +1469,10 @@ int main(int argc, char** argv) {
                     // 0x0F7D3 / 0x0F7DA: the first message, shown 78 frames.
                     sim.messages.post(systems::messages::plain(systems::messages::Id::NoCity));
                     sim.messages.timer = 0x4E;
-                    screen = Screen::City;
-                    time_running = true;
+                    if (!begin_arrival()) {
+                        screen = Screen::City;
+                        time_running = true;
+                    }
                     if (settings.tutorial) {  // the tutorial begins with the career
                         settings.tutorial_step = 0;
                         tutorial_page_seen = tutorial_forum_visited = false;
@@ -1460,6 +1494,7 @@ int main(int argc, char** argv) {
                 return;
             }
             if (action == viewer::kActionEmpireMap) {
+                empire_return = Screen::Forum;
                 screen = Screen::EmpireMap;  // 0x0C060 -> 0x0D174
                 return;
             }
@@ -1473,6 +1508,7 @@ int main(int argc, char** argv) {
             if (action == viewer::kActionRankUp || action == viewer::kActionRankDown)
                 sim.difficulty = model::global_word(state, systems::forum::kDifficulty);
         } else if (screen == Screen::Promotion) {
+            bool arrived = false;  // the new province opens with its arrival, not straight on the city
             if (action == viewer::kActionAccept) {
                 if (promotion_to_caesar) {
                     admin::become_caesar(state);
@@ -1484,7 +1520,7 @@ int main(int argc, char** argv) {
                     const bool tutorial_rank = tutorial_running() && model::global_word(state, admin::kRank) == 1;
                     admin::accept_promotion(state, sim.difficulty);
                     std::printf("promotion accepted: %s\n", viewer::rank_name(model::global_word(state, admin::kRank)));
-                    if (model::global_word(state, 0x6C26) == 1) start_new_province();
+                    if (model::global_word(state, 0x6C26) == 1) arrived = start_new_province() && begin_arrival();
                     if (tutorial_rank) {
                         // The tutorial's rank is done: its last page opens over the new province's site.
                         settings.tutorial_step = viewer::kTutorialFinal;
@@ -1498,8 +1534,10 @@ int main(int argc, char** argv) {
             } else {
                 return;
             }
-            screen = Screen::City;
-            time_running = true;
+            if (!arrived) {
+                screen = Screen::City;
+                time_running = true;
+            }
         } else if (screen == Screen::Battle) {
             if (action >= viewer::kActionTactic && action < viewer::kActionTactic + 4) {
                 // The screen draws the generator once a frame while it waits (systems/battle.hpp).
@@ -1960,6 +1998,7 @@ int main(int argc, char** argv) {
                               : (have_forum_picture ? Screen::ForumHall : Screen::Forum);
             order_cohort = patrol_x = patrol_y = -1;
             province_image_dirty = true;
+            forum_from_map = false;
         };
         // The Select Forum Type / Select Industry Type menus: the chosen type becomes the command; Cancel leaves none.
         const auto choose_type = [&](int action) {
@@ -2052,6 +2091,15 @@ int main(int argc, char** argv) {
                 case viewer::kActionResume:  // 0x0F0CC
                     screen = settings_return;
                     return;
+                case viewer::kActionCheatFunds: {
+                    // Gaius's own cheat (the original has none for money): 1000 Dn, never past the treasury's cap.
+                    if (settings_return == Screen::Start) return;
+                    const int funds = model::global_word(state, systems::economy::kFunds);
+                    model::set_global_word(state, systems::economy::kFunds,
+                                           std::min(funds + viewer::kCheatFunds, systems::economy::kFundsCap));
+                    systems::economy::clamp_funds(state);
+                    return;
+                }
                 case viewer::kActionPause:  // 0x0F01E: the view without steps until a click or T
                     screen = settings_return;
                     time_running = false;
@@ -2143,7 +2191,10 @@ int main(int argc, char** argv) {
                     platform::set_text_entry(true);
                 }
                 if (index == 1) governor_dialog = ui::GovernorDialog::Requirements;
-                if (index == 2 && have_empire_map && have_icons) screen = Screen::EmpireMap;
+                if (index == 2 && have_empire_map && have_icons) {
+                    empire_return = Screen::Forum;
+                    screen = Screen::EmpireMap;
+                }
                 if (index == 3) governor_dialog = ui::GovernorDialog::Salary;
                 if (index == 4) governor_dialog = ui::GovernorDialog::Donation;
             } else if (key > 200) {
@@ -2250,6 +2301,29 @@ int main(int argc, char** argv) {
         return;
         };
         // The original's cancel for a drag-built command, and touch's Undo.
+        // 0x0F855 / 0x0D650: the help of the command in hand (DS:0x6D0C; none is command 0), over the city or the
+        // province. The original waits in it for a click, so time stands still.
+        const auto open_help = [&]() {
+            if (!save_mode || !have_interface_art || !have_sprites || help_command >= 0) return;
+            if (screen == Screen::City)
+                help_command = tool_armed ? static_cast<int>(kBuildTools[tool_index]) : 0;
+            else if (screen == Screen::Province)
+                help_command = province_armed ? kProvinceCommands[province_command].id : 0;
+            else
+                return;
+            if (viewer::help_kind(help_command) == 0) {
+                help_command = -1;
+                return;
+            }
+            help_resume = time_running;
+            time_running = false;
+        };
+        const auto close_help = [&]() {
+            help_command = -1;
+            if (help_resume) time_running = true;
+            help_resume = false;
+            help_held = false;
+        };
         const auto cancel_drag = [&]() {
         // The original's drag-cancel gesture (see DragUndoCell's
         // comment): put back every cell this drag touched and
@@ -2373,7 +2447,7 @@ int main(int argc, char** argv) {
                 return;
             }
             if (screen == Screen::EmpireMap) {
-                screen = Screen::Forum;  // 0x0D174 waits for a click
+                screen = empire_return;  // 0x0D174 waits for a click
                 return;
             }
             if (screen == Screen::NameEntry) {
@@ -2621,6 +2695,13 @@ int main(int argc, char** argv) {
             if (model::global_word(state, 0x6C78) == 0) model::set_global_word(state, 0x6C78, 1);
         }
         if (save_mode && test_year_banner) sim.year_banner = 80;
+        if (save_mode && (test_arrival == 1 || test_arrival == 2) && have_empire_map && have_icons && have_interface_art) {
+            arrival_stage = test_arrival;
+            arrival_until = SDL_GetTicks() + 600000;
+            screen = Screen::Arrival;
+            time_running = false;
+        }
+        if (save_mode && have_interface_art && have_sprites && viewer::help_kind(test_help) != 0) help_command = test_help;
         if (save_mode && test_promotion) {
             model::set_global_word(state, 0x6CA4, (model::global_word(state, 0x6CA6) + 1) % 50);
             sim.on_promotion(state, false);
@@ -2752,6 +2833,28 @@ int main(int argc, char** argv) {
                 window.physical_size(&pw, &ph);
                 auto cmd = platform::translate_event(event, pw, ph);
                 if (!cmd) continue;
+                if (save_mode && screen == Screen::Arrival) {
+                    const platform::CommandType t = cmd->type;
+                    if (t == platform::CommandType::Quit) running = false;
+                    if (t == platform::CommandType::Select || t == platform::CommandType::Secondary ||
+                        t == platform::CommandType::Menu || t == platform::CommandType::ToggleTime)
+                        arrival_until = 0;  // the frame below moves on
+                    continue;
+                }
+                if (help_command >= 0) {
+                    // Opened by the buttons, it goes when one is let go (0x0F91A; below) and no click acts
+                    // meanwhile. Opened by the key, a click or a key puts it away and does nothing else.
+                    if (help_held && cmd->type != platform::CommandType::Quit) continue;
+                    const platform::CommandType t = cmd->type;
+                    if (t == platform::CommandType::Quit) running = false;
+                    if (t == platform::CommandType::Select || t == platform::CommandType::Secondary ||
+                        t == platform::CommandType::Menu || t == platform::CommandType::Help ||
+                        t == platform::CommandType::ToggleTime || t == platform::CommandType::Quit) {
+                        close_help();
+                        last_step_ms = SDL_GetTicks();  // no catching up on the time it was open
+                    }
+                    continue;
+                }
 
                 switch (cmd->type) {
                     case platform::CommandType::TextKey:
@@ -2879,7 +2982,7 @@ int main(int argc, char** argv) {
                             break;
                         }
                         if (save_mode && screen == Screen::EmpireMap) {
-                            screen = Screen::Forum;
+                            screen = empire_return;
                             break;
                         }
                         if (save_mode && original_forum_screen() && governor_dialog != ui::GovernorDialog::None) {
@@ -2887,7 +2990,9 @@ int main(int argc, char** argv) {
                             break;
                         }
                         if (save_mode && original_forum_screen()) {
-                            screen = have_forum_picture ? Screen::ForumHall : Screen::City;
+                            screen = forum_from_map ? forum_map_return
+                                     : have_forum_picture ? Screen::ForumHall : Screen::City;
+                            forum_from_map = false;
                             break;
                         }
                         if (save_mode && screen == Screen::NameEntry) {
@@ -2915,6 +3020,9 @@ int main(int argc, char** argv) {
                             if (order_cohort >= 0 || patrol_x >= 0) {
                                 order_cohort = patrol_x = patrol_y = -1;
                             } else {
+                                right_toggled = true;
+                                right_was_tool = tool_armed;
+                                right_was_province = province_armed;
                                 province_armed = !province_armed;
                                 province_drag_x = province_drag_y = -1;
                             }
@@ -2923,6 +3031,9 @@ int main(int argc, char** argv) {
                         if (save_mode && screen == Screen::City) {
                             // The original's two modes (manual, "Scroll mode"): with a command chosen the right button
                             // returns to command mode to pick a new icon; in command mode it takes the last command up again.
+                            right_toggled = true;
+                            right_was_tool = tool_armed;
+                            right_was_province = province_armed;
                             if (tool_armed) {
                                 tool_armed = false;
                             } else if (tool_remembered) {
@@ -3017,7 +3128,61 @@ int main(int argc, char** argv) {
                         break;
                     }
                     case platform::CommandType::CancelDrag:
-                        cancel_drag();
+                        // Both buttons down: a drag is taken back; with none under way it is the
+                        // original's call for help.
+                        if (save_mode && drag_undo.empty()) {
+                            if (right_toggled) {
+                                tool_armed = right_was_tool;
+                                province_armed = right_was_province;
+                                right_toggled = false;
+                            }
+                            open_help();
+                            help_held = help_command >= 0;
+                        } else
+                            cancel_drag();
+                        break;
+                    case platform::CommandType::Help:
+                        open_help();
+                        break;
+                    // The original's keys on the two maps (0x2EA47).
+                    case platform::CommandType::GoEmpire:
+                        if (save_mode && (screen == Screen::City || screen == Screen::Province) && have_empire_map &&
+                            have_icons) {
+                            empire_return = screen;
+                            screen = Screen::EmpireMap;
+                        }
+                        break;
+                    case platform::CommandType::GoProvince:
+                        if (save_mode && screen == Screen::City) switch_to(1);
+                        break;
+                    case platform::CommandType::GoCity:
+                        if (save_mode && screen == Screen::Province) switch_to(0);
+                        break;
+                    case platform::CommandType::GoForum:
+                        if (save_mode && (screen == Screen::City || screen == Screen::Province)) {
+                            forum_from_map = false;
+                            switch_to(3);
+                        }
+                        break;
+                    case platform::CommandType::GoMaps:
+                        if (save_mode && screen == Screen::City) switch_to(2);  // not from the province (DS:0x6CAE)
+                        break;
+                    case platform::CommandType::GoRatings:
+                    case platform::CommandType::GoTribune:
+                        if (save_mode && (screen == Screen::City || screen == Screen::Province)) {
+                            forum_map_return = screen;
+                            forum_from_map = true;
+                            forum_tab = cmd->type == platform::CommandType::GoRatings ? viewer::kRatings : viewer::kTribune;
+                            screen = Screen::Forum;
+                        }
+                        break;
+                    case platform::CommandType::BarPage:
+                        // DS:0x6D0E: the bar's page, and no command in hand.
+                        if (save_mode && screen == Screen::City && toolbar.original_bar()) {
+                            toolbar.set_bar_page(cmd->dx);
+                            tool_armed = false;
+                            play_effect(0);
+                        }
                         break;
                     case platform::CommandType::Hover: {
                         if (!save_mode) break;
@@ -3106,7 +3271,7 @@ int main(int argc, char** argv) {
                 }
             }
 
-            // Scrolling the map: the arrow keys and WASD, and the mouse resting at the window's edge (after a short
+            // Scrolling the map: the arrow keys (not WASD: S is the original's Tribune key), and the mouse resting at the window's edge (after a short
             // pause, so passing over the edge on the way to a button or the title bar does nothing), at the scroll
             // speed of the original's options. Held buttons (a drag, a build) keep the pointer from scrolling.
             {
@@ -3118,10 +3283,10 @@ int main(int argc, char** argv) {
                 const bool focused = (SDL_GetWindowFlags(window.sdl_window()) & SDL_WINDOW_INPUT_FOCUS) != 0;
                 if (map_view && focused && !platform::text_entry()) {
                     const Uint8* keys = SDL_GetKeyboardState(nullptr);
-                    if (keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_A]) sx -= 1;
-                    if (keys[SDL_SCANCODE_RIGHT] || keys[SDL_SCANCODE_D]) sx += 1;
-                    if (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W]) sy -= 1;
-                    if (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S]) sy += 1;
+                    if (keys[SDL_SCANCODE_LEFT]) sx -= 1;
+                    if (keys[SDL_SCANCODE_RIGHT]) sx += 1;
+                    if (keys[SDL_SCANCODE_UP]) sy -= 1;
+                    if (keys[SDL_SCANCODE_DOWN]) sy += 1;
                     double ex = 0, ey = 0;
                     int mx = 0, my = 0, pw_edge = 0, ph_edge = 0;
                     const Uint32 mouse = SDL_GetMouseState(&mx, &my);
@@ -3220,6 +3385,26 @@ int main(int argc, char** argv) {
                 }
             }
 
+            if (save_mode && screen == Screen::Arrival && SDL_GetTicks() >= arrival_until) {
+                if (arrival_stage == 1) {
+                    arrival_stage = 2;
+                    arrival_until = SDL_GetTicks() + 3000;
+                } else {
+                    arrival_stage = 0;
+                    screen = Screen::City;
+                    time_running = true;
+                    last_step_ms = SDL_GetTicks();
+                }
+            }
+            if (right_toggled && !(SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_RMASK)) right_toggled = false;
+            if (help_command >= 0 && help_held) {
+                // 0x0F91A: the help stays until one of the two buttons is up.
+                const Uint32 held = SDL_GetMouseState(nullptr, nullptr);
+                if (!(held & SDL_BUTTON_LMASK) || !(held & SDL_BUTTON_RMASK)) {
+                    close_help();
+                    last_step_ms = SDL_GetTicks();  // no catching up on the time it was open
+                }
+            }
             if (time_running) {
                 const Uint32 now = SDL_GetTicks();
                 // A battle or a promotion offer stops time mid-step.
@@ -3357,6 +3542,16 @@ int main(int argc, char** argv) {
                                              std::clamp(news_topic, 0, 4) * 2 + (news_alternate ? 1 : 0))];
                 ui::draw_text(picture, interface_art, ui::Font::Font1, 0, 186, line);
                 ui::canvas_to_rgb(picture, rome_palette, frame);
+            } else if (save_mode && screen == Screen::Arrival && arrival_stage == 2) {
+                ui::canvas_to_rgb(ui::compose_welcome_screen(state, interface_art), interface_art.palette, frame);
+            } else if (save_mode && screen == Screen::Arrival) {
+                // 0x0D1D3: the map, the provinces given and the status line.
+                formats::IndexedImage empire;
+                render::render_empire_map(empire_picture, toolbar_icons, empire_markers, state.table_50,
+                                          model::global_word(state, 0x6CA6), empire);
+                ui::draw_text(empire, interface_art, ui::Font::Font1, render::kGeneratingX, render::kGeneratingY,
+                              render::kGeneratingText);
+                ui::canvas_to_rgb(empire, empire_palette, frame);
             } else if (save_mode && screen == Screen::EmpireMap) {
                 // 0x09276 + 0x0D21E: the map of the Empire and the provinces given.
                 formats::IndexedImage empire;
@@ -3671,6 +3866,8 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+            if (help_command >= 0)
+                viewer::draw_help_box(frame, kLogicalW, kLogicalH, interface_art, sprites.buildings, help_command);
             // A line of feedback for a moment ("Quicksaved"), and the reason time is stopped while the player is away.
             if (save_mode && (focus_paused || (!toast_text.empty() && SDL_GetTicks() < toast_until))) {
                 const std::string line = focus_paused ? std::string(ui::tr("Paused")) : toast_text;

@@ -41,6 +41,11 @@ void refund(model::CityState& state, int amount) {
     set(state, 0x6BC0, g(state, 0x6BC0) - amount);
 }
 
+void clamp_funds(model::CityState& state) {
+    if (g(state, kFunds) < 0) set(state, kFunds, 0);
+    if (g(state, kFunds) > kFundsCap) set(state, kFunds, kFundsCap);
+}
+
 bool grant_emergency_funds(model::CityState& state) {
     if (g(state, 0x6C9A) != 0 || g(state, 0x6C30) > 6) return false;
     set(state, 0x6C9A, 1);

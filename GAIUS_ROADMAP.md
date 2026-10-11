@@ -373,6 +373,10 @@ Every Phase 7 item is done. The scroll speed drives the map's key and edge scrol
 - [ ] **A water plan the real game allows for the bot** — a reservoir on the nearest lake, pipe to fountains — to restore a full career to Caesar.
 - [ ] **The Tower command** (`0x9A`-`0x9F`, one of six pieces by the walls around it; section 46) — on the toolbar but dimmed.
 - [ ] **The original's start screen** — a panel with "Initial funding / Skill level", "Choose name", "Load a game" and "OK"; Gaius's "A new career" page is its own layout.
+- [x] **The online help** (2026-10-11) — both mouse buttons, or H: the command's name and two lines, and the grades' pictures for Housing, Forum and Temple (findings section 50.1).
+- [x] **A province's arrival** (2026-10-11) — the map of the Empire with "generating scrubland", then the welcome panel (50.2).
+- [x] **The original's keys** (2026-10-11) — F1-F3, F, G, R, S, 1-3 and T on the two maps, from its keyboard routine (findings section 51); and a funds cheat in Settings.
+- [x] **The treasury's cap** (2026-10-11) — 25000 Dn, written back by the control bar's funds routine each frame (50.3).
 - [ ] **The opening's last pieces** — the Golden Sector logo (`LOGO.VPX`) is left out, and the three pictures' times are estimates from a CPU-bound wait loop.
 - [ ] **The scroll-mode pointer frames `0x2E` and `0x2F`** — what selects them (`DS:0x6CA8`) is not read.
 - [ ] **Captures of the message box and the province view** — their geometry is read from the code only; whether the province view has a plaque or a minimap is unknown; the hover marks of the original's menus are unknown.
