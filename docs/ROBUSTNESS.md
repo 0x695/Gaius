@@ -48,7 +48,7 @@ All of it in code the real files never exercised, and none on a real save:
 
 ## Not covered
 
-- The corpus tests (5188 checks with the game's files) do not run in CI, only locally.
+- The corpus tests (5224 checks with the game's files) do not run in CI, only locally.
 - Gamepad, touch, window and audio-device code (`platform/`, the viewer's main loop) are not fuzzed; they take their input from the system, not from a file.
 - The fuzzer starts from the files this project has: a different release's files are not among its seeds (the international release is detected before any file is read).
 - The Cohort 2 hand-over (`csr0.dat` and `cohort.csr`, read back after an external program) is not fuzzed.

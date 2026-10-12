@@ -3427,6 +3427,20 @@ void test_save_slots() {
     fs::remove_all(dir, ec);
     fs::create_directories(dir);
     CHECK(viewer::recoverable_saves(dir).empty() && viewer::next_autosave(dir) == 0);
+    // The slots' names: none to begin with, kept by slot, and an emptied one is forgotten.
+    {
+        std::vector<std::string> names = viewer::read_slot_names(dir, 8);
+        CHECK(names.size() == 8 && names[0].empty());
+        names[2] = "Before the war";
+        names[7] = "Livia";
+        CHECK(viewer::write_slot_names(dir, names));
+        names = viewer::read_slot_names(dir, 8);
+        CHECK(names[2] == "Before the war" && names[7] == "Livia" && names[0].empty() && names[3].empty());
+        names[2].clear();
+        viewer::write_slot_names(dir, names);
+        CHECK(viewer::read_slot_names(dir, 8)[2].empty() && viewer::read_slot_names(dir, 8)[7] == "Livia");
+        fs::remove(dir / viewer::kSlotNamesFile, ec);
+    }
     const auto touch = [&](const std::string& name, int minutes_ago) {
         std::ofstream(dir / name, std::ios::binary) << "x";
         fs::last_write_time(dir / name, fs::file_time_type::clock::now() - std::chrono::minutes(minutes_ago));
@@ -4694,6 +4708,74 @@ void test_tutorial() {
     }
     ui::set_catalog(ui::Catalog{"en", "English", {}});
 
+    // The tutorial's own rule for the first promotion: the average is enough, whatever the single ratings; not
+    // while the player has asked Rome to wait, and not past the first rank.
+    {
+        const auto promo = std::make_unique<gaius::model::CityState>(*st);
+        set_global_word(*promo, administration::kRank, 1);
+        set_global_word(*promo, 0x6C24, 0);
+        set_global_word(*promo, administration::kProsperity, 6);
+        set_global_word(*promo, administration::kAverage, 34);
+        CHECK(!viewer::tutorial_promotion_due(*promo));
+        set_global_word(*promo, administration::kAverage, 40);
+        CHECK(viewer::tutorial_promotion_due(*promo));
+        set_global_word(*promo, 0x6C24, 9);
+        CHECK(!viewer::tutorial_promotion_due(*promo));
+        set_global_word(*promo, 0x6C24, 0);
+        set_global_word(*promo, administration::kRank, 2);
+        CHECK(!viewer::tutorial_promotion_due(*promo));
+        viewer::TutorialCensus census;
+        census.average = 31;
+        CHECK(viewer::tutorial_line(step_of(TutorialGoal::Promotion), census) == "Earn Rome's promotion (31)");
+    }
+    // The goods a province suits: province 31 (the first session's) is best at Wheat, then Pottery; the Work page
+    // names them.
+    {
+        const auto goods = std::make_unique<gaius::model::CityState>(*st);
+        set_global_word(*goods, 0x6CA6, 31);
+        CHECK(viewer::tutorial_best_goods(*goods) == "Wheat, Pottery");
+        const ui::Page work = viewer::tutorial_page(step_of(TutorialGoal::Work), *goods);
+        CHECK(work.rows[0].label == "Best goods here" && work.rows[0].value == "Wheat, Pottery");
+    }
+    // The warnings: the first that applies and has not been given; each fits the page.
+    {
+        using viewer::TutorialAdvice;
+        bool given[viewer::kTutorialAdviceCount] = {};
+        viewer::TutorialCensus census;
+        census.people_tax = 6;
+        census.industry_tax = 5;
+        CHECK(viewer::tutorial_advice_due(census, 1000, 500, 0, given) == TutorialAdvice::None);
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 0, given) == TutorialAdvice::Treasury);
+        census.industry_tax = 6;
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 0, given) == TutorialAdvice::IndustryTax);
+        census.people_tax = 7;
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 0, given) == TutorialAdvice::PeopleTax);
+        given[static_cast<size_t>(TutorialAdvice::PeopleTax)] = given[static_cast<size_t>(TutorialAdvice::IndustryTax)] =
+            given[static_cast<size_t>(TutorialAdvice::Treasury)] = true;
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 2, given) == TutorialAdvice::None);
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 3, given) == TutorialAdvice::Losses);
+        given[static_cast<size_t>(TutorialAdvice::Losses)] = true;
+        census.workshops = 3;
+        census.population = 2000;
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 3, given) == TutorialAdvice::Workshops);
+        census.best_workshop = 2;
+        CHECK(viewer::tutorial_advice_due(census, 400, 500, 3, given) == TutorialAdvice::None);
+        for (const char* code : {"en", "de", "fr"}) {
+            if (std::string(code) != "en")
+                ui::set_catalog(ui::parse_catalog(code, ui::embedded_language_file(std::string(code) + ".txt")));
+            for (TutorialAdvice a : {TutorialAdvice::PeopleTax, TutorialAdvice::IndustryTax, TutorialAdvice::Losses,
+                                     TutorialAdvice::Workshops}) {
+                const ui::Page page = viewer::tutorial_advice_page(a, *st, 0, 0);
+                size_t widest = page.title.size();
+                for (const ui::PanelRow& row : page.rows)
+                    widest = std::max(widest, row.label.size() + (row.value.empty() ? 0 : row.value.size() + 1));
+                CHECK(!page.title.empty() && page.rows.size() >= 4 &&
+                      static_cast<int>(page.rows.size()) <= viewer::kTutorialRows && widest <= viewer::kTutorialWidth);
+            }
+        }
+        ui::set_catalog(ui::Catalog{"en", "English", {}});
+    }
+
     // The switch and the step reached are kept in gaius.cfg; the start screen and Settings > Game turn it on again,
     // from the start.
     ui::Settings settings;
@@ -5539,7 +5621,6 @@ void test_name_entry() {
     e = gaius::ui::begin_name_entry("            ");
     for (char c : std::string("Marcus")) gaius::ui::name_key(e, NameKey::Character, c);
     CHECK(gaius::ui::name_text(e) == "Marcus      " && e.cursor == 6);
-    gaius::ui::name_key(e, NameKey::Character, ' ');  // spaces aren't accepted
     gaius::ui::name_key(e, NameKey::Character, '!');
     CHECK(e.cursor == 6);
     gaius::ui::name_key(e, NameKey::Backspace);
@@ -5547,6 +5628,22 @@ void test_name_entry() {
     gaius::ui::name_key(e, NameKey::Left);
     gaius::ui::name_key(e, NameKey::Delete);
     CHECK(gaius::ui::name_text(e) == "Marc        " && e.cursor == 4);
+    // Gaius's own: a space is a character; a dialog opened `fresh` is emptied by the first one typed, and any other
+    // key first keeps what is there; a name is set in the middle of its twelve characters.
+    {
+        gaius::ui::NameEntry f = gaius::ui::begin_name_entry("Octavian");
+        f.fresh = true;
+        for (char c : std::string("Li via")) gaius::ui::name_key(f, NameKey::Character, c);
+        CHECK(gaius::ui::name_text(f) == "Li via      " && f.cursor == 6 && !f.fresh);
+        f = gaius::ui::begin_name_entry("Octavian");
+        f.fresh = true;
+        gaius::ui::name_key(f, NameKey::Right);
+        gaius::ui::name_key(f, NameKey::Character, 'x');
+        CHECK(gaius::ui::name_text(f) == "Oxtavian    ");
+        CHECK(gaius::ui::centered_name("Livia") == "   Livia    " && gaius::ui::centered_name("  Octavian  ") == "  Octavian  ");
+        CHECK(gaius::ui::trimmed_name("  a b  ") == "a b" && gaius::ui::trimmed_name("    ").empty());
+        CHECK(gaius::ui::centered_name("ABCDEFGHIJKLMNOP") == "ABCDEFGHIJKL");
+    }
     for (int i = 0; i < 20; ++i) gaius::ui::name_key(e, NameKey::Character, '_');
     CHECK(e.cursor == 11 && gaius::ui::name_text(e) == "Marc________");
     gaius::ui::name_key(e, NameKey::Delete);

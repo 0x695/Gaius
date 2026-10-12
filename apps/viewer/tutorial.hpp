@@ -46,6 +46,7 @@
 #include "model/city_state.hpp"
 #include "systems/administration.hpp"
 #include "systems/construction.hpp"
+#include "systems/forum.hpp"
 #include "systems/housing.hpp"
 #include "systems/province.hpp"
 #include "ui/panel.hpp"
@@ -120,13 +121,13 @@ inline constexpr TutorialStep kTutorialSteps[] = {
     {TutorialGoal::Work, "Build a Market and 2 Workshops", "Work",
      {"People need work. Where many are idle, the houses decay.",
       "Build a Market beside the road among the houses. Then two Workshops at the edge of the houses - they want people living within three cells, and a Market along their road.",
-      "Give each different goods - a second Workshop of the same goods earns less for both. The Forum's industry advisor ranks the goods for this province."}},
+      "Give each different goods, from the best named above."}},
     {TutorialGoal::BathHouse, "Build Bath Houses", "Bath Houses",
      {"Houses ask for more as they grow - water, then a market, then baths, later a school and a theater.",
       "Choose Bath Houses and build them beside the road among the houses. They serve the plots within three cells.",
       nullptr}},
     {TutorialGoal::VisitForum, "Visit the Forum", "Your advisors",
-     {"Go to Forum takes you to your advisors. The Treasurer keeps the accounts, and the people's tax can rise from 5 to 6 percent at no cost.",
+     {"Go to Forum shows your advisors. With the Treasurer, keep the people's tax at 6 percent and the industry tax at 5 - no higher.",
       "At the year's end Rome takes a tribute, and most of the year's profit if more than 500 Dn lie in the treasury. Miss three tributes and you are dismissed.",
       "The Tribune's plebs fight fires and mend buildings and roads. He staffs them by himself."},
      "The Tribune's plebs fight fires and mend buildings and roads. Give each duty the number in brackets.",
@@ -152,7 +153,7 @@ inline constexpr TutorialStep kTutorialSteps[] = {
       "Choose Road (30 Dn a cell) and drag it from a town marked in gold to the city - or just across the Highway, which a road that crosses it shares. Link two now and the others as the funds allow.",
       "The standard beside the city is your Cohort. Cohort Patrol sends it out when barbarians are sighted."}},
     {TutorialGoal::Promotion, "Earn Rome's promotion", "Promotion",
-     {"In brackets, what an Equitus needs. A year is in profit only if you spend less than you earn, building included. Once the city stands, let the years pass and accept the promotion.",
+     {"In brackets, what an Equitus needs. Reach the average and Rome promotes you at the month's end - in a first province it overlooks a weak rating. Prosperity rises only in years that end in profit.",
       nullptr, nullptr}},
     {TutorialGoal::Read, "", "Well done, Equitus",
      {"Rome has promoted you. A new province and an empty site for its capital are yours, and all you have learned applies again.",
@@ -177,6 +178,9 @@ struct TutorialCensus {
     bool highway_linked = false;      // as province::connect_highway finds it
     int highway_cells = 0;            // from the junction to the city along the grid (0 without a junction)
     int towns = 0, towns_linked = 0;  // as province::develop_towns counts them
+    int peace = 0, culture = 0, prosperity = 0, empire = 0, average = 0;  // the ratings (administration.hpp)
+    int people_tax = 0, industry_tax = 0;  // DS:0x6C04, DS:0x6C02, percent
+    int best_workshop = 0;                 // the highest production level among the workshops, 0-7
 };
 
 inline bool tutorial_town_tile(uint8_t tile) { return tile == 0x61 || tile == 0x79 || tile == 0x7A || tile == 0x4C; }
@@ -187,6 +191,18 @@ inline TutorialCensus tutorial_census(const model::CityState& state) {
     c.rank = model::global_word(state, systems::administration::kRank);
     c.forums = model::global_word(state, 0x6CA0);
     c.workshops = model::global_word(state, 0x6C9E);
+    c.peace = model::global_word(state, systems::administration::kPeace);
+    c.culture = model::global_word(state, systems::administration::kCulture);
+    c.prosperity = model::global_word(state, systems::administration::kProsperity);
+    c.empire = model::global_word(state, systems::administration::kEmpire);
+    c.average = model::global_word(state, systems::administration::kAverage);
+    c.people_tax = model::global_word(state, 0x6C04);
+    c.industry_tax = model::global_word(state, 0x6C02);
+    // A workshop record is 24 bytes: +0x08 active, +0x10 its production level (actors::workshop_level).
+    for (size_t r = 0; r + 24 <= state.table_720.size(); r += 24) {
+        const int active = state.table_720[r + 8] | (state.table_720[r + 9] << 8);
+        if (active != 0) c.best_workshop = std::max(c.best_workshop, state.table_720[r + 0x10] & 7);
+    }
     int market_cells = 0, oracle_cells = 0, units = 0;
     for (const auto& row : state.city.tile) {
         for (const uint8_t t : row) {
@@ -269,10 +285,83 @@ inline std::string tutorial_line(int step, const TutorialCensus& c) {
         case TutorialGoal::Settled:
         case TutorialGoal::People: have = c.population; break;
         case TutorialGoal::Town: have = c.towns_linked; break;
+        case TutorialGoal::Promotion: have = c.average; break;  // of the 35 the tutorial's rule asks
         default: break;
     }
     if (have > 0) line += " (" + std::to_string(have) + ")";
     return line;
+}
+
+// The tutorial's own rule for the first promotion, Gaius's and not the original's: Rome offers it once the average
+// is reached, whatever the single ratings. The original also asks 12 of each (administration::check_promotion), and
+// the first person to play the tutorial through stood at an average of 40 for years with a Prosperity of 6 --
+// Prosperity rises only in a year that closes in profit, which a player still building never has. The original's
+// rule stands with the tutorial off, and from the second rank always.
+inline bool tutorial_promotion_due(const model::CityState& state) {
+    namespace admin = systems::administration;
+    return model::global_word(state, admin::kRank) == 1 && model::global_word(state, 0x6C24) == 0 &&
+           model::global_word(state, admin::kAverage) >= admin::kPromotion[1].average;
+}
+
+// The goods this province suits best, by the industry report's own table (3496:1880): the two best, and a third
+// when it is rated Good or better, joined by commas -- "Wheat, Pottery".
+inline std::string tutorial_best_goods(const model::CityState& state) {
+    const systems::forum::IndustryReport report = systems::forum::industry_report(state);
+    std::vector<int> order = {0, 1, 2, 3, 4, 5, 6, 7};
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+        return report.rows[static_cast<size_t>(a)].suitability > report.rows[static_cast<size_t>(b)].suitability;
+    });
+    std::string names;
+    for (size_t i = 0; i < order.size() && i < 3; ++i) {
+        const int goods = order[i];
+        if (i >= 2 && report.rows[static_cast<size_t>(goods)].suitability < 1) break;
+        if (!names.empty()) names += ", ";
+        names += systems::forum::kGoodsNames[static_cast<size_t>(goods)];
+    }
+    return names;
+}
+
+// Pages that open once in a career while the tutorial runs, when the player does one of the things that quietly
+// ruin a first city. Each was read off a played session (2026-10-11): the people's tax raised to 7 percent emptied
+// a city of 2200 with a quarter of its people idle (month::run_economy's tables), the industry tax at 6 percent
+// took a level a year from every workshop until none earned anything (economy::industrial_tax_pressure), and
+// twenty years of building closed every year at a loss, so Prosperity never moved (administration::prosperity_year).
+enum class TutorialAdvice { None, Treasury, PeopleTax, IndustryTax, Losses, Workshops };
+inline constexpr int kTutorialAdviceCount = 6;
+inline constexpr int kTutorialLossYears = 3;
+struct TutorialAdviceText {
+    const char* title;
+    const char* text[2];
+};
+inline constexpr TutorialAdviceText kTutorialAdviceTexts[] = {
+    {"", {nullptr, nullptr}},
+    {"The treasury", {nullptr, nullptr}},  // tutorial_treasury_page
+    {"The people's tax",
+     {"A people's tax above 6 percent breeds unrest. Where many are out of work the houses then fall, street by street.",
+      "Set it back to 6 at the Treasurer's. Workshops, Markets and Forums give the idle work."}},
+    {"The industry tax",
+     {"An industry tax above 5 percent costs every Workshop a little of its output each year, until none earns anything.",
+      "Set it to 5 at the Treasurer's. Lower still for some years, and the Workshops recover."}},
+    {"Years at a loss",
+     {"Three years have closed at a loss. Prosperity rises only in a year that ends in profit, and all you build counts as spending.",
+      "Stop building for a year or two and let the taxes come in."}},
+    {"Idle workshops",
+     {"Your Workshops produce nothing. A Workshop counts the people housed within three cells of it - give it sixteen full plots or more.",
+      "Build the best goods for this province, each of them once, and keep the industry tax at 5 percent."}},
+};
+// Which advice the city calls for now, the first that applies and has not been given (`given` by TutorialAdvice).
+// `loss_years` is the count of years in a row that closed at a loss; `reserve` what the steps ahead cost.
+inline TutorialAdvice tutorial_advice_due(const TutorialCensus& c, int funds, int reserve, int loss_years,
+                                          const bool given[kTutorialAdviceCount]) {
+    const auto open = [&](TutorialAdvice a) { return !given[static_cast<size_t>(a)]; };
+    if (open(TutorialAdvice::PeopleTax) && c.people_tax > 6) return TutorialAdvice::PeopleTax;
+    if (open(TutorialAdvice::IndustryTax) && c.industry_tax > 5) return TutorialAdvice::IndustryTax;
+    if (open(TutorialAdvice::Treasury) && funds < reserve) return TutorialAdvice::Treasury;
+    if (open(TutorialAdvice::Losses) && loss_years >= kTutorialLossYears) return TutorialAdvice::Losses;
+    if (open(TutorialAdvice::Workshops) && c.workshops >= kTutorialWorkshops && c.population >= 1000 &&
+        c.best_workshop == 0)
+        return TutorialAdvice::Workshops;
+    return TutorialAdvice::None;
 }
 
 // What the steps still ahead will cost, roughly: the Imperial Highway at 50 Dn a cell and a quarter more for rough
@@ -309,6 +398,21 @@ inline ui::Page tutorial_treasury_page(int funds, int need) {
     page.rows.push_back({ui::tr("Still to pay for"), std::to_string(need) + " Dn"});
     for (const char* text : kTutorialTreasuryText) {
         page.rows.push_back({"", ""});
+        for (const std::string& line : wrap_note(ui::tr(text), kTutorialWidth)) page.rows.push_back({line, ""});
+    }
+    page.buttons.push_back({ui::tr("Continue"), kActionContinue});
+    return page;
+}
+
+inline ui::Page tutorial_advice_page(TutorialAdvice advice, const model::CityState& state, int funds, int need) {
+    if (advice == TutorialAdvice::Treasury) return tutorial_treasury_page(funds, need);
+    const TutorialAdviceText& t = kTutorialAdviceTexts[static_cast<size_t>(advice)];
+    ui::Page page;
+    page.title = ui::tr(t.title);
+    if (advice == TutorialAdvice::Workshops) page.rows.push_back({ui::tr("Best goods here"), tutorial_best_goods(state)});
+    for (const char* text : t.text) {
+        if (!text) continue;
+        if (!page.rows.empty()) page.rows.push_back({"", ""});
         for (const std::string& line : wrap_note(ui::tr(text), kTutorialWidth)) page.rows.push_back({line, ""});
     }
     page.buttons.push_back({ui::tr("Continue"), kActionContinue});
@@ -411,6 +515,7 @@ inline ui::Page tutorial_page(int step, const model::CityState& state, bool touc
         rating("Empire", admin::kEmpire, need.each, ui::tr("Highway, towns"));
         rating("Average", admin::kAverage, need.average, "");
     }
+    if (s.goal == TutorialGoal::Work) page.rows.push_back({ui::tr("Best goods here"), tutorial_best_goods(state)});
     const bool use_alt = s.alt && ((s.alt_when == TutorialAlt::Touch && touch) ||
                                    (s.alt_when == TutorialAlt::TribuneByHand && !tribune_auto));
     int last = -1;

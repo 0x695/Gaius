@@ -18,7 +18,7 @@
 //     mode (a command chosen, the map builds) and command mode (the toolbar answers); leaves the Maps panel, the save
 //     page and the funds warning; during a drag-built command it cancels the drag and refunds it
 //   F5 / F9                                                            -> quick save / quick load (QUICKSAV.SAV)
-//   both mouse buttons held, or F1                                     -> the original's online help of the command
+//   H                                                                  -> the original's online help of the command
 //                                                                         in hand (city and province maps)
 //   F8                                                                 -> cycle the developer data layers
 //   Tab / gamepad X (left shoulder: previous)                          -> cycle build tool
@@ -805,6 +805,7 @@ int main(int argc, char** argv) {
     const auto step_ms = [&]() -> Uint32 {
         return static_cast<Uint32>(settings.pace == ui::GamePace::Fast ? ui::kFrameMsFast : ui::kFrameMsOriginal);
     };
+    int loss_years = 0;  // years in a row that closed at a loss (the tutorial's advice, apps/viewer/tutorial.hpp)
     auto report_month = [&]() {
         std::printf("month %d, year %d: population %d, funds %d Dn\n", sim.month + 1, sim.year,
                     4 * sim.population_units, model::global_word(state, systems::economy::kFunds));
@@ -817,6 +818,7 @@ int main(int argc, char** argv) {
             std::printf("  last year: population tax %d, industrial tax %d, construction %d, operating costs %d, "
                         "tribute %d, profit %d\n",
                         g(0x6BB2), g(0x6BB0), g(0x6BAE), g(0x6BAC), g(0x6BAA), g(0x6BB4));
+            loss_years = g(0x6BB4) < 0 ? loss_years + 1 : 0;
         }
     };
     auto advance_month = [&]() {
@@ -989,6 +991,7 @@ int main(int argc, char** argv) {
     std::string governor_name = ui::governor_name(state);
     ui::NameEntry name_entry;
     bool name_return_to_forum = false;  // opened from the governor's screen rather than the start screen
+    int name_save_slot = -1;            // ... or to name the slot being saved to (Gaius's own use of the dialog)
     Screen notice_return = Screen::City;  // where the funds warning's Continue goes back to
     bool notice_is_hints = false;         // the notice page shows the touch hints, not the funds warning
     bool notice_is_pad_hints = false;     // ... or the controller page (a gamepad is connected, or Settings > Keys asked)
@@ -1004,8 +1007,8 @@ int main(int argc, char** argv) {
     bool tutorial_forum_visited = false;     // the Forum was opened while the step asked for it
     bool tutorial_touch = false;             // a touch screen: the pages' wording
     Uint32 tutorial_due = 0;                 // when the step's page opens (a moment after the step before was done)
-    bool tutorial_treasury_open = false;     // the page showing is the treasury's warning, not the step's
-    bool tutorial_treasury_warned = false;   // that page has opened in this career (it opens once)
+    viewer::TutorialAdvice tutorial_advice = viewer::TutorialAdvice::None;  // the page showing is this advice, not the step's
+    bool tutorial_advised[viewer::kTutorialAdviceCount] = {};               // each has opened in this career (once each)
     viewer::TutorialCensus tutorial_census;  // what the city and the province hold, counted every few frames
     std::vector<std::pair<int, int>> tutorial_marks;  // the province cells the step points at
     // Running: switched on and at rank 1, or at rank 2 with only the last page left to show. A headless capture has
@@ -1026,15 +1029,17 @@ int main(int argc, char** argv) {
         tutorial_time = time_running;
         time_running = false;
         tutorial_page_seen = true;
-        tutorial_treasury_open = false;
+        tutorial_advice = viewer::TutorialAdvice::None;
         screen = Screen::Tutorial;
     };
-    // The treasury no longer covers what the steps ahead cost: said once, with the numbers.
-    const auto open_treasury_page = [&]() {
+    // One of the tutorial's warnings (the treasury short of what the steps ahead cost, a tax set too high, years at
+    // a loss, workshops that make nothing): said once each.
+    const auto open_advice_page = [&](viewer::TutorialAdvice advice) {
         tutorial_return = screen;
         tutorial_time = time_running;
         time_running = false;
-        tutorial_treasury_open = tutorial_treasury_warned = true;
+        tutorial_advice = advice;
+        tutorial_advised[static_cast<size_t>(advice)] = true;
         screen = Screen::Tutorial;
     };
     const auto leave_news = [&]() {
@@ -1215,14 +1220,17 @@ int main(int argc, char** argv) {
             recoverable = viewer::recoverable_saves(saves_dir());
             for (size_t i = 0; i < recoverable.size() && i < 2; ++i) slot_buttons.push_back(recover_button(i));
         }
+        const std::vector<std::string> slot_names = viewer::read_slot_names(saves_dir(), viewer::kSaveSlots);
         for (int i = 0; i < viewer::kSaveSlots; ++i) {
             const std::string path = slot_path(i);
             std::string label = std::to_string(i + 1) + "  empty";
+            const std::string named = slot_names[static_cast<size_t>(i)].empty() ? std::string()
+                                                                                 : slot_names[static_cast<size_t>(i)] + "  ";
             bool exists = false;
             if (fs::exists(path)) {
                 const std::string what = describe_save(path);
                 exists = !what.empty();
-                label = std::to_string(i + 1) + "  " + (exists ? what : std::string("unreadable"));
+                label = std::to_string(i + 1) + "  " + (exists ? named + what : std::string("unreadable"));
             }
             slot_buttons.push_back({label, viewer::kActionSlot + i, files_saving || exists});
         }
@@ -1304,13 +1312,15 @@ int main(int argc, char** argv) {
             case Screen::Ending: return viewer::ending_page(state, ending_caesar);
             case Screen::Start:
             case Screen::NameEntry:
+                if (name_save_slot >= 0) return viewer::files_page(true, slot_buttons, false);
                 return name_return_to_forum ? viewer::forum_page(state, forum_tab, sim.speed, rating_hint)
                                             : viewer::start_page(funding_level, start_difficulty, governor_name,
                                                                  settings.tutorial ? 1 : 0);
             case Screen::Tutorial:
-                if (tutorial_treasury_open)
-                    return viewer::tutorial_treasury_page(model::global_word(state, systems::economy::kFunds),
-                                                          viewer::tutorial_reserve(settings.tutorial_step, tutorial_census));
+                if (tutorial_advice != viewer::TutorialAdvice::None)
+                    return viewer::tutorial_advice_page(tutorial_advice, state,
+                                                        model::global_word(state, systems::economy::kFunds),
+                                                        viewer::tutorial_reserve(settings.tutorial_step, tutorial_census));
                 return viewer::tutorial_page(settings.tutorial_step, state, tutorial_touch, settings.tribune_auto);
             case Screen::Files: return viewer::files_page(files_saving, slot_buttons, files_recover);
             case Screen::Choice: return viewer::choice_page(choice_forum, choice_forum ? forum_grade : workshop_goods);
@@ -1345,6 +1355,38 @@ int main(int argc, char** argv) {
                screen == Screen::Ending || screen == Screen::Start || screen == Screen::Files ||
                screen == Screen::Notice || screen == Screen::Settings || screen == Screen::Choice ||
                screen == Screen::Tutorial;
+    };
+    // The name dialog closes: the governor's name is taken (set in the middle, as the default is), or the slot is
+    // written under the name typed. `cancelled` only matters for a save, which Escape or the right button calls off.
+    const auto finish_name_entry = [&](bool cancelled) {
+        platform::set_text_entry(false);
+        if (name_save_slot >= 0) {
+            const int slot = name_save_slot;
+            name_save_slot = -1;
+            screen = Screen::Files;
+            if (!cancelled && write_state(slot_path(slot))) {
+                std::vector<std::string> names = viewer::read_slot_names(saves_dir(), viewer::kSaveSlots);
+                names[static_cast<size_t>(slot)] = ui::trimmed_name(ui::name_text(name_entry));
+                viewer::write_slot_names(saves_dir(), names);
+                platform::web::flush_storage();
+                screen = files_return;
+                show_toast(ui::tr("Saved"));
+            }
+            refresh_slots();
+            return;
+        }
+        governor_name = ui::centered_name(ui::name_text(name_entry));
+        if (name_return_to_forum) ui::set_governor_name(state, governor_name);
+        screen = name_return_to_forum ? Screen::Forum : Screen::Start;
+        name_return_to_forum = false;
+    };
+    // Opening it: the first key typed replaces the name shown, and a line says how to finish.
+    const auto open_name_entry = [&](const std::string& name) {
+        name_entry = ui::begin_name_entry(ui::trimmed_name(name));
+        name_entry.fresh = true;
+        screen = Screen::NameEntry;
+        platform::set_text_entry(true);
+        show_toast(ui::tr("Type a name, then press Enter"), 8000);
     };
     auto apply_page_action = [&](int action) {
         namespace admin = systems::administration;
@@ -1384,8 +1426,8 @@ int main(int argc, char** argv) {
             if (action != viewer::kActionContinue && action != viewer::kActionTutorialSkip) return;
             screen = tutorial_return;
             time_running = tutorial_time;
-            if (tutorial_treasury_open) {  // the warning: the step stays where it is
-                tutorial_treasury_open = false;
+            if (tutorial_advice != viewer::TutorialAdvice::None) {  // a warning: the step stays where it is
+                tutorial_advice = viewer::TutorialAdvice::None;
                 return;
             }
             if (action == viewer::kActionTutorialSkip || settings.tutorial_step >= viewer::kTutorialFinal) {
@@ -1432,7 +1474,13 @@ int main(int argc, char** argv) {
                 if (files_recover || slot < 0 || slot >= viewer::kSaveSlots) return;
                 path = slot_path(slot);
             }
-            if (files_saving) {
+            if (files_saving && have_name_art && recovered < 0) {
+                // A name for the slot first: the one it has, or the governor's.
+                const int slot = action - viewer::kActionSlot;
+                const std::string had = viewer::read_slot_names(saves_dir(), viewer::kSaveSlots)[static_cast<size_t>(slot)];
+                name_save_slot = slot;
+                open_name_entry(had.empty() ? governor_name : had);
+            } else if (files_saving) {
                 if (write_state(path)) screen = files_return;
             } else if (read_state(path)) {
                 screen = Screen::City;
@@ -1452,9 +1500,7 @@ int main(int argc, char** argv) {
             }
             if (action == viewer::kActionChooseName && have_name_art) {
                 // 0x27F84: the name dialog.
-                name_entry = ui::begin_name_entry(governor_name);
-                screen = Screen::NameEntry;
-                platform::set_text_entry(true);
+                open_name_entry(governor_name);
                 return;
             }
             if (action == viewer::kActionBegin) {
@@ -1476,7 +1522,8 @@ int main(int argc, char** argv) {
                     if (settings.tutorial) {  // the tutorial begins with the career
                         settings.tutorial_step = 0;
                         tutorial_page_seen = tutorial_forum_visited = false;
-                        tutorial_treasury_warned = false;
+                        for (bool& given : tutorial_advised) given = false;
+                        loss_years = 0;
                         tutorial_due = 0;
                         store_tutorial();
                     }
@@ -1576,13 +1623,29 @@ int main(int argc, char** argv) {
     int province_drag_x = -1, province_drag_y = -1;
 
     // The province actor of a type range standing on a cell (+0x12/+0x13), or -1.
+    // Where on the province picture the click being handled fell, in its pixels; -1 when only the cell is known.
+    int province_px = -1, province_py = -1;
     auto province_actor_at = [&](int x, int y, int type_lo, int type_hi) {
         for (int i = 0; i < model::kActorCount; ++i) {
             const model::Actor& a = state.objects[static_cast<size_t>(i)];
             if (a.active() != 0 && a.type() >= type_lo && a.type() <= type_hi && a.raw_x() == x && a.raw_y() == y)
                 return i;
         }
-        return -1;
+        // Not on a unit's cell: on its picture, then. render_province stands a unit's foot in the middle of its
+        // cell, so most of the picture is over the cell above, which is where a player aims (the first session
+        // with forts, 2026-10-11: ten clicks on Cohorts, none taken). The one drawn in front wins.
+        int found = -1;
+        if (province_px >= 0) {
+            for (int i = 0; i < model::kActorCount; ++i) {
+                const model::Actor& a = state.objects[static_cast<size_t>(i)];
+                if (a.active() == 0 || a.type() < type_lo || a.type() > type_hi) continue;
+                const int left = a.screen_x(), foot = a.screen_y() + 8;
+                if (province_px < left || province_px >= left + render::kProvincePx) continue;
+                if (province_py < foot - 24 || province_py >= foot + 8) continue;
+                if (found < 0 || a.screen_y() > state.objects[static_cast<size_t>(found)].screen_y()) found = i;
+            }
+        }
+        return found;
     };
     // One province construction command on a cell, charged the way the build
     // routine charges it: the terrain's cost shift, the pleb gate and the funds.
@@ -1596,7 +1659,11 @@ int main(int argc, char** argv) {
         }
         // 0x155A2: the Fort command at ten Cohorts fails without a word ("no need for another fort" is the
         // city Barracks' message).
-        if (id == 29 && model::global_word(state, 0x6C12) >= 10) return false;
+        if (id == 29 && model::global_word(state, 0x6C12) >= 10) {
+            // Gaius's own word for it: a player with the money clicked eight times and saw nothing (2026-10-11).
+            show_toast(ui::tr("Ten Cohorts is the most a province has"), 3000);
+            return false;
+        }
         const uint8_t tile = state.empire.cells[static_cast<size_t>(y) * province::kMapW + x] & 0x7F;
         const int cost = economy::kConstructionCost[static_cast<size_t>(id)] << economy::province_cost_shift(id, tile);
         if (!economy::can_afford(state, cost)) {
@@ -2185,10 +2252,8 @@ int main(int argc, char** argv) {
             } else if (key == 200) {
                 // DS:0x0444: the name, the requirements, the map, the salary, the donation.
                 if (index == 0 && have_name_art) {
-                    name_entry = ui::begin_name_entry(governor_name);
+                    open_name_entry(governor_name);
                     name_return_to_forum = true;
-                    screen = Screen::NameEntry;
-                    platform::set_text_entry(true);
                 }
                 if (index == 1) governor_dialog = ui::GovernorDialog::Requirements;
                 if (index == 2 && have_empire_map && have_icons) {
@@ -2281,8 +2346,11 @@ int main(int argc, char** argv) {
         }
         if (!save_mode || screen != Screen::City || drag_last_x < 0 || !tool_armed) return;
         const auto tool = kBuildTools[tool_index];
-        if (systems::construction::placement_spec(tool).kind !=
-            systems::construction::PlacementKind::DragAutoTiled) {
+        // Housing is painted too: the original places a building on every cell the held button passes, and a
+        // street of plots at a click each was the complaint of the first sessions. Other buildings stay a click each
+        // here (a held button dragged over the map would spend hundreds of Dn).
+        if (systems::construction::placement_spec(tool).kind != systems::construction::PlacementKind::DragAutoTiled &&
+            tool != systems::construction::CommandId::Housing) {
             return;
         }
         int lx = 0, ly = 0;
@@ -2584,8 +2652,10 @@ int main(int argc, char** argv) {
                 }
                 if (province_panel_contains(lx, ly)) return;
                 if (!province_armed) return;  // command mode: the map does nothing until a command is chosen
-                province_click(static_cast<int>(pcam.x + lx / pcam.zoom) / render::kProvincePx,
-                               static_cast<int>(pcam.y + ly / pcam.zoom) / render::kProvincePx);
+                province_px = static_cast<int>(pcam.x + lx / pcam.zoom);
+                province_py = static_cast<int>(pcam.y + ly / pcam.zoom);
+                province_click(province_px / render::kProvincePx, province_py / render::kProvincePx);
+                province_px = province_py = -1;
                 return;
             }
             int hit = toolbar.hit_test(lx, ly);
@@ -2860,14 +2930,9 @@ int main(int argc, char** argv) {
                     case platform::CommandType::TextKey:
                         if (save_mode && screen == Screen::NameEntry) {
                             const ui::NameKey key = static_cast<ui::NameKey>(static_cast<int>(cmd->text_key));
-                            if (ui::name_key(name_entry, key, cmd->ch) != 0) {
-                                // Escape or Enter: the dialog edits in place, so both keep it.
-                                governor_name = ui::name_text(name_entry);
-                                if (name_return_to_forum) ui::set_governor_name(state, governor_name);
-                                screen = name_return_to_forum ? Screen::Forum : Screen::Start;
-                                name_return_to_forum = false;
-                                platform::set_text_entry(false);
-                            }
+                            // Escape or Enter: the dialog edits in place, so both keep the governor's name.
+                            if (const int ended = ui::name_key(name_entry, key, cmd->ch); ended != 0)
+                                finish_name_entry(ended == 1);
                         }
                         break;
                     case platform::CommandType::Quit:
@@ -2997,11 +3062,7 @@ int main(int argc, char** argv) {
                         }
                         if (save_mode && screen == Screen::NameEntry) {
                             // 0x0C544: a right-click ends the dialog, keeping the name.
-                            governor_name = ui::name_text(name_entry);
-                            if (name_return_to_forum) ui::set_governor_name(state, governor_name);
-                            screen = name_return_to_forum ? Screen::Forum : Screen::Start;
-                            name_return_to_forum = false;
-                            platform::set_text_entry(false);
+                            finish_name_entry(true);
                             break;
                         }
                         if (save_mode && screen == Screen::Battle && have_battle_art &&
@@ -3128,18 +3189,10 @@ int main(int argc, char** argv) {
                         break;
                     }
                     case platform::CommandType::CancelDrag:
-                        // Both buttons down: a drag is taken back; with none under way it is the
-                        // original's call for help.
-                        if (save_mode && drag_undo.empty()) {
-                            if (right_toggled) {
-                                tool_armed = right_was_tool;
-                                province_armed = right_was_province;
-                                right_toggled = false;
-                            }
-                            open_help();
-                            help_held = help_command >= 0;
-                        } else
-                            cancel_drag();
+                        // The right button while the left is held: a drag is taken back. (For a day it also opened
+                        // the original's help when no drag was under way, as the original's two buttons do; in play it
+                        // got in the way of putting a tool down, so the help is the H key's alone.)
+                        cancel_drag();
                         break;
                     case platform::CommandType::Help:
                         open_help();
@@ -3473,11 +3526,20 @@ int main(int argc, char** argv) {
                 if (!tutorial_page_seen && (screen == Screen::City || screen == Screen::Province) &&
                     SDL_GetTicks() >= tutorial_due && !pointer.left_held && !touch_building)
                     open_tutorial_page();
-                else if (tutorial_page_seen && !tutorial_treasury_warned && test_tutorial < 0 &&
-                         (screen == Screen::City || screen == Screen::Province) && !pointer.left_held && !touch_building &&
-                         model::global_word(state, systems::economy::kFunds) <
-                             viewer::tutorial_reserve(settings.tutorial_step, tutorial_census))
-                    open_treasury_page();
+                else if (tutorial_page_seen && test_tutorial < 0 && (screen == Screen::City || screen == Screen::Province) &&
+                         !pointer.left_held && !touch_building) {
+                    const viewer::TutorialAdvice advice = viewer::tutorial_advice_due(
+                        tutorial_census, model::global_word(state, systems::economy::kFunds),
+                        viewer::tutorial_reserve(settings.tutorial_step, tutorial_census), loss_years, tutorial_advised);
+                    if (advice != viewer::TutorialAdvice::None) {
+                        open_advice_page(advice);
+                    } else if (viewer::tutorial_step(settings.tutorial_step).goal == viewer::TutorialGoal::Promotion &&
+                               viewer::tutorial_promotion_due(state)) {
+                        // The tutorial's rule for the first promotion (tutorial.hpp): the average is enough.
+                        systems::administration::pick_province(state, sim.random);
+                        sim.on_promotion(state, false);
+                    }
+                }
             }
             // The effects this frame asked for, in order: one sound at a time,
             // so the last is the one heard.

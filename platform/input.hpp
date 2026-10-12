@@ -60,7 +60,8 @@ enum class CommandType {
                   // which masterplan 5a point 4 exists to prevent.
     CycleScreen,  // next screen -- city, province, Forum: M, gamepad Back. Touch and mouse
                   // reach the same screens through the strip of buttons along the top.
-    CancelDrag,   // the original's cancel gesture for a drag-built command (Road, Wall,
+    CancelDrag,   // (right button pressed while the left is held; never the other way round)
+                  // the original's cancel gesture for a drag-built command (Road, Wall,
                   // Plaza, Clear Area): "press the right button while still holding down
                   // the left" (manual, Building Roads). Right-click while the left button
                   // is also down, so it never collides with a plain right-click's own
@@ -90,10 +91,9 @@ enum class CommandType {
     GoTribune,    // S: the Tribune of the Plebs (0334:B4B6).
     BarPage,      // 1, 2, 3: the control bar's page DS:0x6D0E, in `dx` (0, 1, 2).
     Help,         // the original's online help of the current command: H. The original opens
-                  // it with both mouse buttons down (0x0F855) and shows it while they are held,
-                  // which the viewer also does;
-                  // the key is there so a device without two buttons can reach it, and
-                  // holds it until the next key or click.
+                  // it with both mouse buttons down (0x0F855) and shows it while they are held;
+                  // Gaius did too for a day, and in play the two buttons got in the way of putting
+                  // a tool down, so it is the key's alone, and stays until the next key or click.
 };
 
 // What a TextKey command carries.

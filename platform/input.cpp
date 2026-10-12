@@ -380,10 +380,7 @@ std::optional<Command> translate_event(const SDL_Event& event, int physical_w, i
             c.x = event.button.x;
             c.y = event.button.y;
             if (event.button.button == SDL_BUTTON_LEFT) {
-                // With the right button already down the two are held together, whichever came
-                // first (the original's main loop reads both, 0x0F855).
-                c.type = (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_RMASK) ? CommandType::CancelDrag
-                                                                                   : CommandType::Select;
+                c.type = CommandType::Select;
                 return c;
             }
             if (event.button.button == SDL_BUTTON_RIGHT) {

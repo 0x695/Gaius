@@ -64,6 +64,20 @@ NameEntry begin_name_entry(const std::string& name) {
 
 std::string name_text(const NameEntry& e) { return std::string(e.name.begin(), e.name.end()); }
 
+std::string trimmed_name(const std::string& name) {
+    const size_t a = name.find_first_not_of(' ');
+    if (a == std::string::npos) return std::string();
+    return name.substr(a, name.find_last_not_of(' ') - a + 1);
+}
+
+std::string centered_name(const std::string& name) {
+    std::string t = trimmed_name(name);
+    if (t.size() > static_cast<size_t>(kNameLength)) t.resize(kNameLength);
+    std::string out(static_cast<size_t>(kNameLength), ' ');
+    out.replace((static_cast<size_t>(kNameLength) - t.size()) / 2, t.size(), t);
+    return out;
+}
+
 void name_letter_up(NameEntry& e, int i) {
     if (i < 0 || i >= kNameLength) return;
     char& c = e.name[static_cast<size_t>(i)];
@@ -91,6 +105,8 @@ void name_letter_down(NameEntry& e, int i) {
 int name_key(NameEntry& e, NameKey key, char ch) {
     int& cur = e.cursor;
     const int length = kNameLength;  // both of 0x0C48C's limits are 12
+    const bool fresh = e.fresh;
+    e.fresh = false;
     switch (key) {
         case NameKey::Escape: return 1;
         case NameKey::Enter: return 2;
@@ -115,8 +131,12 @@ int name_key(NameEntry& e, NameKey key, char ch) {
             }
             break;
         case NameKey::Character: {
-            const bool accepted = ch == '_' || (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') ||
+            const bool accepted = ch == '_' || ch == ' ' || (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') ||
                                   (ch >= 'A' && ch <= 'Z');
+            if (accepted && fresh) {
+                e.name.fill(' ');
+                cur = 0;
+            }
             if (accepted && cur < length) {
                 e.name[static_cast<size_t>(cur)] = ch;
                 ++cur;

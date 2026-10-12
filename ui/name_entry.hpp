@@ -35,10 +35,17 @@ void set_governor_name(model::CityState& state, const std::string& name);
 struct NameEntry {
     std::array<char, kNameLength> name{};
     int cursor = 0;  // DS:0x6D32
+    // Gaius's own: set by a caller that wants the first typed character to replace the whole name (the original
+    // overwrites letter by letter, which left the first players with "OctaviaA"). Any key clears it.
+    bool fresh = false;
 };
 
 NameEntry begin_name_entry(const std::string& name);
 std::string name_text(const NameEntry& e);
+// A name without the spaces around it, and the same set in the middle of the 12 characters, as the default
+// "  Octavian  " is. Gaius's own: the original keeps the name as it was typed.
+std::string trimmed_name(const std::string& name);
+std::string centered_name(const std::string& name);
 
 // 0x0CB68, a letter's up arrow: 'Z' becomes 'a'; anything below '@' becomes
 // '@'; otherwise the next character, at most 'z'.
@@ -53,6 +60,7 @@ void name_letter_down(NameEntry& e, int i);
 // and Right move the cursor; Delete clears the character under it (on the last
 // one, then steps back); '_', digits and letters overwrite the character under
 // the cursor and advance, stopping on the last. Anything else does nothing.
+// (Gaius also takes a space, and with `fresh` set the first character typed empties the name first.)
 enum class NameKey { Character, Escape, Enter, Backspace, Left, Right, Delete };
 int name_key(NameEntry& e, NameKey key, char ch = 0);
 

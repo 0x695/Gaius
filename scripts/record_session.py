@@ -363,12 +363,14 @@ def obs_profile(video_folder):
         'OBSBasic.Screenshot={"bindings":[{"key":"OBS_KEY_F24"}]}', ""])
 
 
-def obs_scenes():
+def obs_scenes(gaius_program="gaius_viewer.exe"):
     """The scene collection: for each game a window capture, fitted to the picture, and that program's own sound
     (OBS's Application Audio Capture) -- not the desktop's, so whatever else the PC plays while the owner plays, a
     film in the browser or a call, is not in the video. A window is found by its program (priority 2), since
     DOSBox's title changes as it runs; method 2 is Windows' own capture, which sees a window drawn by the graphics
-    card (Gaius's) and one that covers the screen (DOSBox's)."""
+    card (Gaius's) and one that covers the screen (DOSBox's). `gaius_program` is the file name of the Gaius being
+    played: a release build is not called gaius_viewer.exe, and a window whose program has another name is not
+    filmed at all (a 44-minute black film, 2026-10-11)."""
     import json
 
     def window(name, spec):
@@ -383,7 +385,7 @@ def obs_scenes():
         return {"name": name, "id": number, "visible": True, "locked": True, "pos": {"x": 0.0, "y": 0.0}, "align": 5,
                 "bounds_type": 2, "bounds_align": 0, "bounds": {"x": 1920.0, "y": 1080.0}}
 
-    games = [("Caesar (DOSBox)", "DOSBox:SDL_app:DOSBox.exe"), ("Gaius", "Gaius:SDL_app:gaius_viewer.exe")]
+    games = [("Caesar (DOSBox)", "DOSBox:SDL_app:DOSBox.exe"), ("Gaius", "Gaius:SDL_app:" + gaius_program)]
     names = [name for name, _ in games] + [name + " sound" for name, _ in games]
     return json.dumps({
         "name": OBS_NAME, "current_scene": "Games", "current_program_scene": "Games",
@@ -397,9 +399,10 @@ def obs_scenes():
 class Obs:
     """OBS Studio run for one session. start() returns False, with the reason printed, when there is no video."""
 
-    def __init__(self, program, video_folder):
+    def __init__(self, program, video_folder, gaius_program="gaius_viewer.exe"):
         self.program = Path(program)
         self.folder = Path(video_folder)
+        self.gaius_program = gaius_program
         self.process = None
 
     @staticmethod
@@ -423,7 +426,7 @@ class Obs:
         (config / "basic" / "scenes").mkdir(parents=True, exist_ok=True)
         self.folder.mkdir(parents=True, exist_ok=True)
         (config / "basic" / "profiles" / OBS_NAME / "basic.ini").write_text(obs_profile(self.folder), encoding="utf-8")
-        (config / "basic" / "scenes" / (OBS_NAME + ".json")).write_text(obs_scenes(), encoding="utf-8")
+        (config / "basic" / "scenes" / (OBS_NAME + ".json")).write_text(obs_scenes(self.gaius_program), encoding="utf-8")
         for name in ("global.ini", "user.ini"):  # a first start of OBS: no set-up wizard over the game
             if not (config / name).exists():
                 (config / name).write_text("[General]\nFirstRun=true\n", encoding="utf-8")
@@ -579,7 +582,8 @@ def main():
         program = obs_program(options.obs_exe)
         if program is None:
             raise ScriptError("--video needs OBS Studio (obsproject.com); pass --obs-exe if it is installed elsewhere")
-        video = Obs(program, session / "video")
+        gaius_program = Path(options.gaius_exe).name if options.gaius_exe else "gaius_viewer.exe"
+        video = Obs(program, session / "video", gaius_program)
         if not video.start():
             video = None
 

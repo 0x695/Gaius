@@ -24,7 +24,7 @@ TABLES = {
     "apps/viewer/settings_page.hpp": ["kTabs"],
     "apps/viewer/main.cpp": ["kProvinceCommands"],
     "apps/viewer/save_view.hpp": ["kOverlayNames"],
-    "apps/viewer/tutorial.hpp": ["kTutorialSteps", "kTutorialTreasuryText"],
+    "apps/viewer/tutorial.hpp": ["kTutorialSteps", "kTutorialTreasuryText", "kTutorialAdviceTexts"],
 }
 # Functions whose returned literals go through tr() by their callers.
 FUNCTIONS = {
