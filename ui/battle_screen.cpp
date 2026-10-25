@@ -330,7 +330,7 @@ void compose_battle(const BattleScreen& b, const model::CityState& state, const 
         // 0x23708: 100F:00EF runs 2EF9:0C50 on both display pages, which
         // clears them to colour 0 (findings section 42.2), then a 14 x 5 panel and the Yes / No buttons
         // (DS:0x132C).
-        std::fill(img.pixels.begin(), img.pixels.end(), 0);
+        std::fill(img.pixels.begin(), img.pixels.end(), uint8_t{0});
         panel(img, art.blocks, 0x30, 0x40, 14, 5);
         blit(img, art.blocks, 29, 12 * 16, 6 * 16);
         blit(img, art.blocks, 29, 12 * 16, 7 * 16);

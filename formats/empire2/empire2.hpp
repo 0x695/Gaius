@@ -5,7 +5,7 @@
 // CAESAR_EMPIRE2_RE.md / CAESAR_REVERSE_ENGINEERING_COMPLETE.md section 14:
 //
 //   struct Empire2File {
-//       uint8_t prefix[2];   // 14 14 in all 50 files and all 17 saves.
+//       uint8_t prefix[2];   // 14 14 in all 50 files and every save.
 //                            // The engine never reads it as a field: it
 //                            // is loaded and saved with the map at
 //                            // 3496:2752 and only reached by grid reads

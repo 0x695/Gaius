@@ -985,7 +985,7 @@ When the calendar turns the year it:
 - **Every year balances.** In every year of funds (`table_60_c`) and profit (`table_72`) the saves' histories hold -- years -13 to -2 of the first city, -13 to 13 of the second -- the year's change in funds is that year's profit, with two exceptions:
   - year -2 of `CAESARUX`'s city gained 18 Dn outside the accounts. The governor's savings would be 210 by then (`CAESARWX`'s 160 and five more years of salary 10) but are 190 in `CAESARVX`: a donation of 20, 90 % of it to the city;
   - year 3 of `CAESARXW`'s city gained 500: the emergency funds flag `DS:0x6C9A` is 0 in `CAESARXU` and 1 in `CAESARXT`.
-- **Each save's last year is reproduced.** `test_economy_year_end_matches_saves` starts from the funds a year earlier, less that year's construction (plus the grant or donation above), and runs `settle_accounts` with the saved taxes, operating costs and tribute due. It lands on the saved funds, tribute paid and profit in all 17 saves, and the saved tax per head matches last year's population tax and population.
+- **Each save's last year is reproduced.** `test_economy_year_end_matches_saves` starts from the funds a year earlier, less that year's construction (plus the grant or donation above), and runs `settle_accounts` with the saved taxes, operating costs and tribute due. It lands on the saved funds, tribute paid and profit in every save, and the saved tax per head matches last year's population tax and population.
 - **The taxes are consistent, not proven.** No save holds the city as it stood at a year's end.
   - `CAESARUX`'s 71 Dn of population tax is 284 tax units at an average rate of 5: `CAESARVX` shows the year's sum at 21 after four months, and 21 + 8 x 6 = 69, which is 5 after dividing by 12.
   - `CAESARXQ`'s 53 Dn of industrial tax is 3 levels at 7 %: 3 x 64 x 7 / 25 = 53, with its industrial rate 7.
@@ -1013,7 +1013,7 @@ The Military Advisor's screen (`0x0B1B7`-`0x0B436`) draws three pairs of figures
 | `DS:0x6C4A` | `DS:0x6C48` | irregular Centuries | population and the conscription rate `DS:0x6C06` |
 | `DS:0x6C52` | `DS:0x6C50` | auxiliary Centuries | plebs on army duty `DS:0x6C5A` / 16 (`0x0E85A`, `0x2DDFC`) |
 
-A new province starts with 2 regular Centuries and nothing else (`0x058C0`-`0x058DE`, and the Prima Cohors' +0x20 = 2 at `0x062E3`). The manual says one; all 17 saves have two.
+A new province starts with 2 regular Centuries and nothing else (`0x058C0`-`0x058DE`, and the Prima Cohors' +0x20 = 2 at `0x062E3`). The manual says one; every save has two.
 
 ### 26.2 Recruiting (`0x289C0`)
 
@@ -1035,7 +1035,7 @@ A new province starts with 2 regular Centuries and nothing else (`0x058C0`-`0x05
 
 ### 26.4 Checked against the saves
 
-- **Recruiting.** Every save keeps last year's Legion beside this year's, and the population units at the year's end are the newest record of `table_60_d` (section 22.3). Recruiting from last year's regulars and irregulars with those units and the saved wages and conscription gives the saved regulars and irregulars in all 17 saves. `CAESARXT`-`XQ` exercise the rule: wages 15 dropped the city's regulars from 2 to 1, and irregulars rose to 2 at 496 units and 12 % (`CAESARXR`) and fell back to 1 by `CAESARXQ`.
+- **Recruiting.** Every save keeps last year's Legion beside this year's, and the population units at the year's end are the newest record of `table_60_d` (section 22.3). Recruiting from last year's regulars and irregulars with those units and the saved wages and conscription gives the saved regulars and irregulars in every save. `CAESARXT`-`XQ` exercise the rule: wages 15 dropped the city's regulars from 2 to 1, and irregulars rose to 2 at 496 units and 12 % (`CAESARXR`) and fell back to 1 by `CAESARXQ`.
 - **Assigning.** Every save has one Cohort, holding the whole Legion; assigning the saved Legion leaves every actor record unchanged.
 - `test_military_year_matches_saves`.
 
@@ -1057,7 +1057,7 @@ When a Cohort attacking an army (province state 12, `0x24FF7`) comes within 16 p
 - **Race by province.** `0x22146` sets `DS:0x6BD6` = `3496:175E`[province `DS:0x6CA6`], one byte for each of the 50 provinces.
 - **Race rows.** `3496:1790`[race x 8] gives, in order, the banner sprite `DS:0x6BD8` (40-43), the city invader type less 5 `DS:0x6BDA` (0-2, used by `0x2D891`), and the strength against each tactic: `DS:0x6BD4` Assault, `0x6BD2` Flank, `0x6BD0` Charge, `0x6BCE` Tortoise. The last two bytes of each row are 0.
 - **Names.** `DS:0x2BAD`, 16 characters each, drawn by `0x2268A` as race x 16: Carthaginians, Mauri, Blemmyes, Sassanids, Huns, Ostrogoths, Visigoths, Alamanni, Saxons, Picts, Celts, Celtiberians, Helvetii, Ligurians, Illyrians, Volcae -- the manual's "sixteen types of barbarians".
-- **Checked.** All 17 saves hold the race words the tables give for their province: 47 (Caeariensis) the Mauri, 20 (W. Britannia) the Picts.
+- **Checked.** Every save holds the race words the tables give for its province: 47 (Caeariensis) the Mauri, 20 (W. Britannia) the Picts.
 - **The army.** A barbarian army is a province actor of type 11 (marching) or 12 (becoming 11 once blocked, `0x240A2`); its size is +0x30, 1-8 when placed.
 
 ### 27.2 A round
@@ -1135,7 +1135,7 @@ The calendar sets `DS:0x6D97` when the 18-month counter wraps; the next step sta
 
 ### 28.5 Checked against the saves
 
-- In 16 of 17 saves every province actor's cell has bit `0x80`. In `CAESARXT` the marching army's cell doesn't: the monthly province routine `0x2E0BE` clears the bit over the whole map (`0x2E0F9`), and the army hasn't reached a new cell since.
+- In every save but one every province actor's cell has bit `0x80`. In `CAESARXT` the marching army's cell doesn't: the monthly province routine `0x2E0BE` clears the bit over the whole map (`0x2E0F9`), and the army hasn't reached a new cell since.
 - The three saves with a marching army (`CAESARXT`, `XS`, `XR`) all have it heading for the city tile, (28, 18).
 - `test_province_movement`, `test_province_armies`, `test_province_matches_saves`.
 
@@ -1207,7 +1207,7 @@ The manual's Tribune screen shows "five sets of numbers ... the numbers of plebs
 
 ### 29.3 Checked against the saves
 
-In all 17 saves, recomputing from the saved counts (difficulty 0) gives the saved needs, the assignment leaves every duty, the unassigned and the auxiliaries as saved, the three saved thresholds match -- including `CAESARWX`'s fire threshold of 90 (10 of 11) and `CAESARXT`/`XR`'s 86 (20 of 23) -- and welfare leaves the pleb count unchanged, each save sitting at the point where the expectation equals the welfare or falls short by one (half of which rounds to nothing). `test_plebs_duties`, `test_plebs_match_saves`.
+In every save, recomputing from the saved counts (difficulty 0) gives the saved needs, the assignment leaves every duty, the unassigned and the auxiliaries as saved, the three saved thresholds match -- including `CAESARWX`'s fire threshold of 90 (10 of 11) and `CAESARXT`/`XR`'s 86 (20 of 23) -- and welfare leaves the pleb count unchanged, each save sitting at the point where the expectation equals the welfare or falls short by one (half of which rounds to nothing). `test_plebs_duties`, `test_plebs_match_saves`.
 
 ### 29.4 In Gaius
 
@@ -1242,7 +1242,7 @@ When the year equals `DS:0x6C98`, that word grows by (walk & 7) + 1 and `0x09AFD
 
 ### 30.4 Checked against the saves
 
-- The average, in all 17.
+- The average, in every save.
 - Culture's raw scores `DS:0x6C82`/`0x6C80`, from the city and the year-end units (`table_60_d`), in 14 of 17; the other three changed since the year turned (`CAESARXX` gained a temple cell, `CAESARXS` lost entertainment, `CAESARXR` gained two temple cells).
 - Peace and Prosperity across `CAESARXS` (year 7) -> `CAESARXR` (year 8), the one pair of consecutive years: 36 + 2 = 38, and 8 + 1 (0.11 Dn a head) + 0 (496 units) - 2 (a loss) = 7.
 - No save earns a promotion (averages up to 16 at rank 1).
@@ -1284,7 +1284,7 @@ A draw, then seven passes, repeated from the start until the river fits (`DS:0x4
 
 ### 31.3 Checked
 
-- **Against the saves:** every shore tile of all 17 saves' maps is the tile the pattern rule gives its neighbours -- the original generator's output, so the rule and the patterns are confirmed (`test_campaign_terrain_matches_saves`). The lakes, erosion, grass and river depend on the generator's state at the time, which no save keeps.
+- **Against the saves:** every shore tile of every save's map is the tile the pattern rule gives its neighbours -- the original generator's output, so the rule and the patterns are confirmed (`test_campaign_terrain_matches_saves`). The lakes, erosion, grass and river depend on the generator's state at the time, which no save keeps.
 - **Generated maps** hold only water, shores, grass and river pieces, a river from row 0, and shores that obey the rule; the same generator state gives the same map (`test_campaign_terrain`). `test_campaign_start_province` checks the reset, the funds by rank, the Prima Cohors and the highway's entry.
 
 ### 31.4 Open
@@ -1537,7 +1537,7 @@ Four panels (`1F6F:2008`) of bars (`1F6F:236C`), one per yearly history buffer (
 ### 36.3 The industry report (region 8, `0x09D22`)
 
 - **The header.** "Industry Report on" plus the province's 16-character name (`DS:0x70F2`, index `DS:0x6CA6`).
-- **Overall Industry Rating -.** `0x09FF1` averages `level & 7` (+0x10) over the workshop records whose +0x08 is set, and stores it in `DS:0x6BE8` -- the same word the yearly accounts compute, and all 17 saves hold exactly this average. The grade: 1 or less Terrible, 3 or less Poor, 5 or less Average, 6 Good, 7 Excellent.
+- **Overall Industry Rating -.** `0x09FF1` averages `level & 7` (+0x10) over the workshop records whose +0x08 is set, and stores it in `DS:0x6BE8` -- the same word the yearly accounts compute, and every save holds exactly this average. The grade: 1 or less Terrible, 3 or less Poor, 5 or less Average, 6 Good, 7 Excellent.
 - **Prospects for Expansion -.** `DS:0x6BF4` graded: -2 or less, 0 or less, 2 or less, 4 or less, 5 and up.
 - **A row per goods** (`0x0A04E`, y = 12i + 0x28). The name (`DS:0x46F1`: Glass, Tin, Pottery, Copper, Wine, Ivory, Wheat, Spices), the icon 0x38 + i, then the suitability `3496:1880`[province × 8 + i] -- the base of a workshop's level (section 20) -- named -3 Terrible, -2 Poor, 0 Average, 1 Good, 2 Excellent, while -1 shows nothing. Last, the factories `DS:0x5816`[i].
 
@@ -1554,7 +1554,7 @@ A click with the pointer's y in 0x78-0xB3 advances `DS:0x6D2A` (0, 1, 2, 0...) a
 
 Anything else -- a rating of 100, or x on 0, 80, 160 or 240 -- gives "you need no help here". `DS:0x6C84` is set to 1 by an army reaching the city (`0x24C01`) and to 2 by a collapse's rioter (`0x2DC56`). Earlier sections' "`0xD007` advisor text picker" is this routine's middle.
 
-**Checked** by `test_forum_figures`: the statue's limits, the doubling scale, the caption years, every hint branch, and the industry average against all 17 saves.
+**Checked** by `test_forum_figures`: the statue's limits, the doubling scale, the caption years, every hint branch, and the industry average against every save.
 
 ## 37. The map of the Empire (2026-09-16)
 
@@ -1731,7 +1731,7 @@ Pixel (0x16 + x, 0x26 + y) is cell (x, y). The layers are read through bases tha
 ### 40.1 Where the name lives
 
 - **In memory.** 12 characters at `DS:0x0DD0`, "  Octavian  " to begin with, reached through the far pointer `DS:0x5858` (set by `0x0F6FF`). It survives a new game.
-- **In a save.** The writer copies it to the 12 bytes at `DS:0x6B9E` (`0x0434E`) and saves them as `final_state` bytes 12-23; the loader copies them back (`0x054CA`). All 17 saves hold "  Octavian  ".
+- **In a save.** The writer copies it to the 12 bytes at `DS:0x6B9E` (`0x0434E`) and saves them as `final_state` bytes 12-23; the loader copies them back (`0x054CA`). Every save holds "  Octavian  ".
 - **On screen.** The governor's screen draws it in `FONT1` at (0x40 + 16i, 0x3C) (`0x0C328`), with the button at `DS:0x0444`'s first record (`0x0BE58`) opening the same dialog there.
 
 ### 40.2 The dialog (`0x0C41D`)
@@ -1756,7 +1756,7 @@ The start screen's "Choose name" button (`0x27F84`) calls it with the button rec
 
 - The platform layer gained `CommandType::TextKey` and `set_text_entry`: SDL's text input while a field is open. On a phone that brings up the on-screen keyboard, though the arrows make it unnecessary.
 - The viewer keeps the name like `DS:0x0DD0`: across new games, written into each new game's state, and read back from a loaded game.
-- **Checked** by `test_name_entry`: both arrows including the down arrow's quirk, every key, the clicks, and the name in all 17 saves.
+- **Checked** by `test_name_entry`: both arrows including the down arrow's quirk, every key, the clicks, and the name in every save.
 - The viewer's governor page shows the name (2026-09-16). **Not modeled:** the governor's screen's own name button.
 
 ### 38.4 MINIFONT's colour (2026-09-16)
@@ -1940,7 +1940,7 @@ Every `EMPIRE2.0xx` starts with two bytes before its 40 x 40 cells, `14 14` in a
 
   These reach the two bytes only off the grid's top-left corner. That happens only when the pointer or a neighbour is outside the map, and none of those reads compares with `0x14`.
 - **Not dimensions.** The map's size is the constant 40 (`0x28`) in every one of those index calculations, and the province view's scroll limits (`0x066FE`) are the constants 20 and 29, not the file's bytes.
-- **The saves agree.** All 17 saves carry `14 14` at the start of their embedded map (save offset 55076), unchanged from the scenario they started with.
+- **The saves agree.** Every save carries `14 14` at the start of its embedded map (save offset 55076), unchanged from the scenario they started with.
 
 So the bytes are most likely left over from whatever tool wrote the scenarios (what they meant there isn't recoverable from the game). Gaius keeps them verbatim (`formats::empire2::EmpireMap::prefix`), and any scenario it writes should keep `14 14`.
 
@@ -2170,7 +2170,7 @@ First play on a PC: a click beside a reservoir built another reservoir where the
 - **Across a road or a gate:** `0x36` -> `0x42`, `0x37` -> `0x43`, `0x93` -> `0xA1`, `0x92` -> `0xA0`, each refused if a neighbour already holds the piece. Anything else is refused.
 - The cost is the command's 3 Dn a cell (section 25.1), charged as the drag lays each cell, and a right-click during the drag gives it back.
 
-**Checked against the real saves.** All seventeen saves: every reservoir (`0xA4`: the two to four of the second session's seven saves) stands on a water piece (`0x4A` or `0x56` in `7BB4`) with no reservoir beside it, and the plain pipe pieces (`0x44`-`0x49`, up to 76 in a save) reset to open ground and laid again in row order come back identical in every cell, with nothing refused and nothing else touched (`test_construction_pipes_real_saves`). DEFINITIVE for the placement; the table itself is read straight from the image.
+**Checked against the real saves.** Every real save: every reservoir (`0xA4`: the two to four of the second session's seven saves) stands on a water piece (`0x4A` or `0x56` in `7BB4`) with no reservoir beside it, and the plain pipe pieces (`0x44`-`0x49`, up to 76 in a save) reset to open ground and laid again in row order come back identical in every cell, with nothing refused and nothing else touched (`test_construction_pipes_real_saves`). DEFINITIVE for the placement; the table itself is read straight from the image.
 
 **The two menus.** The click handlers of the Forum (`0x1770D`) and Workshop (`0x17931`) buttons open a menu through `0334:A5B9` ("Select Forum Type": Aventine, Caelian, Esquiline, Janiculan, Regia, Pincian, Palatine, Romanum) and `0334:A66C` ("Select Industry Type": Glass, Tin, Pottery, Copper, Wine, Ivory, Wheat, Spices), skipped at 30 forums or 30 workshops; the answer (0 = none) is the grade `DS:0x6D89` or the goods `DS:0x6D87`, plus for the Forum the seed tile `0xDF` + the answer. They are the only two buttons with a choice. Gaius cycled the type with V; the viewer now opens these menus (`Screen::Choice`), and V still cycles.
 

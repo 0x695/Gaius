@@ -17,7 +17,7 @@
 //           0x6A/0x6E its bends) wandering by the draws until it leaves the
 //           map; three tries on a backup of the tiles, then the whole map again
 // Water is tile 0, shores 0x01-0x1C. Checked on real saves: every shore cell
-// of all 17 saves' maps is the tile the pattern rule gives
+// of every save's map is the tile the pattern rule gives
 // (test_campaign_terrain_matches_saves).
 
 #pragma once

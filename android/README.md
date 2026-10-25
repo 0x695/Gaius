@@ -120,6 +120,6 @@ are marked as such; the "Layout" section above and this note serve that
 purpose. SDL2's full license text ships in the source tree `fetch_sdl2.ps1`
 downloads (`app/jni/SDL/LICENSE.txt`).
 
-This is unrelated to the project's rule about original Caesar assets (see
-`CLAUDE.md`): SDL2 is freely redistributable; game assets are neither and are
+This is unrelated to the project's rule about original Caesar assets (see the
+IP posture in the top-level `README.md`): SDL2 is freely redistributable; game assets are neither and are
 never committed or bundled.

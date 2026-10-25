@@ -300,7 +300,7 @@ bool clear_area(model::CityMap& city, month::Random& random, int x, int y);
 // patrols (actors, steps 75-84): until 2026-10-11 Gaius placed barracks with
 // place(), which writes the building and no record, so a barracks the player
 // built never sent one, and clearing it took the count below zero. All
-// seventeen real saves with a barracks hold its record and its count.
+// the real saves with a barracks hold its record and its count.
 //
 // All three place through the shared footprint writer (0x1232E) -- the same
 // terrain rule and part indices as place() -- and return false where it

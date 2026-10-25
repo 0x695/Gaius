@@ -641,10 +641,6 @@ int main(int argc, char** argv) {
     ui::GovernorDialog governor_dialog = ui::GovernorDialog::None;  // open over the governor's screen
     int help_command = -1;      // the online help box (0x0D650) is up for this command; -1: closed
     bool help_resume = false;   // time was running when it opened
-    bool help_held = false;     // opened by the two buttons: it stays only while both are down
-    // The right button acts when it goes down, so pressed first of the two it has already changed the mode by the
-    // time the left one calls for help: what the mode was is kept while the button stays down, to put it back.
-    bool right_toggled = false, right_was_tool = false, right_was_province = false;
     bool pause_until_click = false;  // "Pause the game" (0x0F01E): a click or T resumes
     char key_last = 0, key_prev = 0;  // 2EF9:002F and 2EF9:0031: the last key typed and the one before
     // The original screens' buttons, run once a frame (0x0D41D / 0x0D521).
@@ -2390,7 +2386,6 @@ int main(int argc, char** argv) {
             help_command = -1;
             if (help_resume) time_running = true;
             help_resume = false;
-            help_held = false;
         };
         const auto cancel_drag = [&]() {
         // The original's drag-cancel gesture (see DragUndoCell's
@@ -2912,9 +2907,7 @@ int main(int argc, char** argv) {
                     continue;
                 }
                 if (help_command >= 0) {
-                    // Opened by the buttons, it goes when one is let go (0x0F91A; below) and no click acts
-                    // meanwhile. Opened by the key, a click or a key puts it away and does nothing else.
-                    if (help_held && cmd->type != platform::CommandType::Quit) continue;
+                    // Opened by its key: a click or a key puts it away and does nothing else.
                     const platform::CommandType t = cmd->type;
                     if (t == platform::CommandType::Quit) running = false;
                     if (t == platform::CommandType::Select || t == platform::CommandType::Secondary ||
@@ -3081,9 +3074,6 @@ int main(int argc, char** argv) {
                             if (order_cohort >= 0 || patrol_x >= 0) {
                                 order_cohort = patrol_x = patrol_y = -1;
                             } else {
-                                right_toggled = true;
-                                right_was_tool = tool_armed;
-                                right_was_province = province_armed;
                                 province_armed = !province_armed;
                                 province_drag_x = province_drag_y = -1;
                             }
@@ -3092,9 +3082,6 @@ int main(int argc, char** argv) {
                         if (save_mode && screen == Screen::City) {
                             // The original's two modes (manual, "Scroll mode"): with a command chosen the right button
                             // returns to command mode to pick a new icon; in command mode it takes the last command up again.
-                            right_toggled = true;
-                            right_was_tool = tool_armed;
-                            right_was_province = province_armed;
                             if (tool_armed) {
                                 tool_armed = false;
                             } else if (tool_remembered) {
@@ -3447,15 +3434,6 @@ int main(int argc, char** argv) {
                     screen = Screen::City;
                     time_running = true;
                     last_step_ms = SDL_GetTicks();
-                }
-            }
-            if (right_toggled && !(SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON_RMASK)) right_toggled = false;
-            if (help_command >= 0 && help_held) {
-                // 0x0F91A: the help stays until one of the two buttons is up.
-                const Uint32 held = SDL_GetMouseState(nullptr, nullptr);
-                if (!(held & SDL_BUTTON_LMASK) || !(held & SDL_BUTTON_RMASK)) {
-                    close_help();
-                    last_step_ms = SDL_GetTicks();  // no catching up on the time it was open
                 }
             }
             if (time_running) {

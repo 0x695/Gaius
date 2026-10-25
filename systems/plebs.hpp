@@ -24,7 +24,7 @@
 // A threshold is the share of the need covered, in percent (100 when covered):
 // month 0x2DF7D's rolls fire when the generator's walk (1-99) exceeds it.
 //
-// Checked against real saves: in all 17, the needs recomputed from the saved
+// Checked against real saves: in every save, the needs recomputed from the saved
 // counts, the assignment and the three saved thresholds match, and welfare
 // leaves the pleb count as saved (test_plebs_match_saves).
 

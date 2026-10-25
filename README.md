@@ -10,7 +10,6 @@
 <p align="center">
   <a href="https://github.com/0x695/Gaius/actions/workflows/build.yml"><img src="https://github.com/0x695/Gaius/actions/workflows/build.yml/badge.svg" alt="build status"></a>
   <img src="https://img.shields.io/badge/status-playable-d4a537?style=flat-square" alt="status: playable">
-  <img src="https://img.shields.io/badge/checked_against-17_real_saves-8b1a1a?style=flat-square" alt="checked against 17 real saves">
   <img src="https://img.shields.io/badge/platforms-Browser%20%C2%B7%20Windows%20%C2%B7%20Linux%20%C2%B7%20Steam%20Deck%20%C2%B7%20Android-8b1a1a?style=flat-square" alt="platforms: browser, Windows, Linux, Steam Deck, Android">
   <img src="https://img.shields.io/badge/code-GPL--3.0--or--later-d4a537?style=flat-square" alt="code: GPL-3.0-or-later">
   <img src="https://img.shields.io/badge/docs-CC%20BY--SA%204.0-d4a537?style=flat-square" alt="docs: CC BY-SA 4.0">
@@ -18,7 +17,6 @@
 
 <p align="center">
   <a href="#what-is-gaius">What is it</a> ·
-  <a href="#screenshots">Screenshots</a> ·
   <a href="#download">Download</a> ·
   <a href="#quick-start">Build it</a> ·
   <a href="#controls">Controls</a> ·
@@ -30,7 +28,7 @@
 
 <p align="center">
   <img src="docs/images/city.png" alt="Gaius running a city from a real save: houses, a coliseum, a hospital and the aqueduct's reservoirs" width="800"><br>
-  <sub>A city from a real play session, drawn by Gaius from the game's own files. The simulation behind it reproduces the original's saves cell for cell.</sub>
+  <sub>A city from a real play session, drawn by Gaius from the game's own files. The simulation behind it reproduces the original's saves cell for cell. A capture of Gaius running the author's own copy, so it shows the original's art, whose rights stay with their holders.</sub>
 </p>
 
 ## What is Gaius?
@@ -48,28 +46,13 @@ It is not an emulator. Gaius **reimplements** the game: the simulation is transc
 | | |
 |---|---|
 | **A whole career** | A new game from the start screen; the city, the province with its Cohorts and battles, the Forum and its advisors, the map of the Empire, saving and loading, promotion through the Empire's ranks to Caesar, or dismissal if you stop paying tribute. |
-| **Exact where it can be** | A month is the original's 106 steps with its random numbers. One pass of the transcribed rules reproduces the land value and service layers of all 17 real saves on every one of their 10,000 cells; a month of steps reproduces six consecutive saves; the yearly accounts match every save's last year. |
+| **Exact where it can be** | A month is the original's 106 steps with its random numbers. One pass of the transcribed rules reproduces the land value and service layers of every real save on every one of its 10,000 cells; a month of steps reproduces six consecutive saves; the yearly accounts match every save's last year. |
 | **The original's look and sound** | Housing, workshops and walkers drawn from your `.PL8` sheets, the control bar, message box, Forum screens and battle screen as the original draws them (several checked pixel for pixel against DOSBox captures), the original opening, and the music and effects through a transcribed AIL driver on an emulated YM3812. |
 | **Runs everywhere** | In a browser (WebAssembly, nothing to install), on Windows, Linux, the Steam Deck and Android (arm64 and x86_64), all from one code base, with a resolution-independent UI, gamepad and touch controls, and a paged toolbar that grows with the screen. |
-| **Modern comforts** | Fullscreen, borderless or windowed; UI scale 1 to 4; edge, key and middle-drag scrolling; every key and button rebindable; a tutorial through the first rank; German and French translations of Gaius's own texts; your choice of Gaius's gold pointer or the original's arrow; and the original's game pace or a faster one. |
-| **Compatible saves** | Reads and writes the original's `.SAV` files; all 17 real saves round-trip byte for byte. Gaius saves to its own folder, never over your DOS game's. |
+| **Modern comforts** | Fullscreen, borderless or windowed; UI scale 1 to 4; edge, key and middle-drag scrolling; every key and button rebindable, with the original's own keys (F1-F3, F, G, R, S, 1-3, T) as well; a tutorial through the first rank that warns before a tax or a run of losing years ruins the city; German and French translations of Gaius's own texts; your choice of Gaius's gold pointer or the original's arrow; and the original's game pace or a faster one. |
+| **Compatible saves** | Reads and writes the original's `.SAV` files; every real save round-trips byte for byte. Gaius saves to its own folder, never over your DOS game's. |
 | **Tools for modders and tinkerers** | Python scripts to export every picture, sprite, sound, tune and map to PNG, WAV and MIDI; list, render, compare and check saves; command-line tools for every file format. |
 | **A bot that plays it** | `tools/playtest` plays a career through the real game logic, a regression test with a sense of humour. |
-
-## Screenshots
-
-<table>
-  <tr>
-    <td width="50%"><img src="docs/images/forum.png" alt="The Forum: choose an advisor"><br><sub><b>The Forum.</b> Click a figure to open the Treasurer, Tribune, Legion, ratings, histories or the governor's page.</sub></td>
-    <td width="50%"><img src="docs/images/battle.png" alt="The battle screen"><br><sub><b>The battle screen.</b> Four tactics against the province's barbarians, with strength bars and morale.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/images/empire.png" alt="The map of the Empire"><br><sub><b>The map of the Empire.</b> Fifty provinces to be promoted through.</sub></td>
-    <td width="50%"><img src="docs/images/treasurer.png" alt="The Treasurer's report"><br><sub><b>The Treasurer.</b> Taxes, costs and the tribute to Rome, year by year.</sub></td>
-  </tr>
-</table>
-
-<sub>These are captures of Gaius running with the author's own copy of the game, so they show the original's art, whose rights stay with their holders. Make your own with `gaius_viewer --screenshot out.png` (see the quick start).</sub>
 
 ## Download
 
@@ -143,13 +126,13 @@ The right button works as in the original: with a building chosen the map builds
 | Settings | Esc | Menu | Back |
 | Window mode, data layers | F11, F8 | — | — |
 
-The game also saves itself (each year by default, into three rotating autosaves apart from your eight slots) and stops the clock while its window is not in front; both are in Settings > Game, and the Load page leads with the newest of the game's own saves (an autosave, the quicksave, the save made when you last left the window), with its *Autosaves* button listing them all. A controller's buttons are drawn as the Steam Deck's own (coloured A B X Y, L1 R1, L2 R2, View, Menu) in Settings > Keys, and Settings > Keys > *Controller help* says what each does. Every key and button can be rebound in Settings > Keys. Gamepad play on the Steam Deck is described in [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md); touch in [`android/README.md`](android/README.md).
+The game also saves itself (each year by default, into three rotating autosaves apart from your eight slots, which you can name when you save) and stops the clock while its window is not in front; both are in Settings > Game, and the Load page leads with the newest of the game's own saves (an autosave, the quicksave, the save made when you last left the window), with its *Autosaves* button listing them all. A controller's buttons are drawn as the Steam Deck's own (coloured A B X Y, L1 R1, L2 R2, View, Menu) in Settings > Keys, and Settings > Keys > *Controller help* says what each does. Every key and button can be rebound in Settings > Keys. Gamepad play on the Steam Deck is described in [`packaging/linux/STEAM_DECK.md`](packaging/linux/STEAM_DECK.md); touch in [`android/README.md`](android/README.md).
 
 ## How it was built
 
 Nobody handed over the source. Gaius was built by reading the game: the US build's `CSR.EXE` is unpacked and disassembled, each system is transcribed from the instructions that run it, and every claim is checked against something the real game did: real save files, and DOSBox captures of the running game.
 
-- **Real saves are the test suite.** 17 saves from three play sessions. The service propagators, the housing pass, a whole month, the economy's yearly accounts, the Legion and the plebs each reproduce what the engine saved.
+- **Real saves are the test suite.** The service propagators, the housing pass, a whole month, the economy's yearly accounts, the Legion and the plebs each reproduce what the engine saved.
 - **Every finding is confidence-labelled** (DEFINITIVE, HIGH CONFIDENCE, STRONG INFERENCE, UNRESOLVED), and the dead ends are kept, because why they failed is the lesson. The write-up is [49 sections](docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md) long.
 - **4,537 checks** run in `gaius_tests` (2,772 without a game folder, which is what CI runs on Linux and Windows).
 
@@ -159,13 +142,13 @@ A few things that turned up on the way:
 - The reservoir command is a *drag* command with its own 528-instruction handler; reservoirs can only be built on water.
 - A game year takes about 85 seconds at the original's pace. Gaius first stepped 3.5 times faster, which is why its barbarians seemed too many; the simulation matched, the clock didn't.
 - The construction dispatcher only turned up once the search stopped looking for plain offsets: the executable's tables hold far pointers (offset and segment), and a scan for runs of them found it on the sixth pass.
-- The Forum's statue has a cheat, opened by typing "c" and then "B".
+- The Forum's statue has a cheat, opened by typing "c" and then "B". Gaius adds one of its own: Settings > Game puts 1000 Dn in the treasury at each press, up to the 25000 the original allows.
 
 ## Contributing
 
 The cheapest way to help is a **save file**. Play the US build, send a `CAESAR??.SAV`, and `python scripts/check_saves.py` shows whether Gaius's simulation reproduces it cell for cell. Every new save widens the net that caught every wrong parameter in the first version of the service layer.
 
-Phase 11 of the [roadmap](GAIUS_ROADMAP.md#phase-11--play-testing-and-fidelity-to-the-originals-screens) lists what is open: the Tower command, the original's start screen, captures of the province view and the message box to check against, and a water plan so the playtest bot can reach Caesar again. Nothing has run on a physical Android phone or a Steam Deck yet; reports from either are welcome.
+What is open: the Tower command, the original's start screen, captures of the province view and the message box to check against, and a water plan so the playtest bot can reach Caesar again. Nothing has run on a physical Android phone or a Steam Deck yet; reports from either are welcome.
 
 House rules: new source files start with an `SPDX-License-Identifier` line; findings carry their confidence label; tests that need game files skip rather than fail when `GAIUS_TEST_ASSETS` is not set; and no original game file goes into this repository, ever.
 
@@ -195,14 +178,12 @@ House rules: new source files start with an `SPDX-License-Identifier` line; find
 
 ## IP posture
 
-This repo ships **no original game files**, ever. Every decoder and every test that needs a real Caesar file reads it from a directory you point at via the `GAIUS_TEST_ASSETS` environment variable, or from the game folder Gaius is given: your own legally obtained copy (e.g. from GOG). The screenshots in `docs/images` are captures of the game running and are the only images here that show the original's art. See `GAIUS_MASTERPLAN.md` section 3.
+This repo ships **no original game files**, ever. Every decoder and every test that needs a real Caesar file reads it from a directory you point at via the `GAIUS_TEST_ASSETS` environment variable, or from the game folder Gaius is given: your own legally obtained copy (e.g. from GOG). The city picture at the top is a capture of the game running and is the only image here that shows the original's art.
 
 ## Documentation
 
 | | |
 |---|---|
-| [`GAIUS_MASTERPLAN.md`](GAIUS_MASTERPLAN.md) | scope, IP posture and architecture |
-| [`GAIUS_ROADMAP.md`](GAIUS_ROADMAP.md) | the phases, what is done and what is open |
 | [`docs/FORMATS.md`](docs/FORMATS.md) | every file format, with its status |
 | [`docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md`](docs/CAESAR_CONSTRUCTION_DISPATCH_FINDINGS.md) | the reverse engineering behind every system, 49 sections |
 | [`docs/CAESAR_CITY_RENDERER_FINDINGS.md`](docs/CAESAR_CITY_RENDERER_FINDINGS.md) | how the city view is drawn |
@@ -213,7 +194,6 @@ This repo ships **no original game files**, ever. Every decoder and every test t
 | [`docs/RELEASING.md`](docs/RELEASING.md), [`CHANGELOG.md`](CHANGELOG.md) | how a release is made, and what each one changed |
 | [`docs/CODE_SIGNING_POLICY.md`](docs/CODE_SIGNING_POLICY.md) | what is signed, by whom, and what the program does with the network |
 | [`THIRD_PARTY_NOTICES.txt`](THIRD_PARTY_NOTICES.txt) | the licences of the components Gaius contains |
-| [`docs/TRAILER_PROMPT.md`](docs/TRAILER_PROMPT.md) | a prompt pack for a teaser trailer |
 
 ## Reference
 
@@ -270,14 +250,14 @@ systems/    Layer 3 — the simulation, transcribed from the executable: service
 render/     the city, the province and the empire map as the original draws them (no SDL)
 ui/         the original's screens and toolbar, fonts, settings and translations (no SDL, no apps/)
 audio/      the game's sound driver (AIL 2.14, transcribed) and sound layer, no SDL dependency
-platform/   window/input/paths abstraction — see GAIUS_MASTERPLAN.md section 5a
+platform/   window/input/paths abstraction
 apps/       gaius_viewer: the game (a Caesar folder, a save or an EMPIRE2 scenario); with no argument it finds the game or explains where it goes
 android/    Android target — see android/README.md
 web/        the browser build's page (Emscripten) — see web/README.md
 tools/      CLI utilities built on the layers above, and the playtest bot
 scripts/    small Python scripts over the tools
 tests/      dependency-free test harness (see above)
-docs/       FORMATS.md, the findings (the reverse engineering behind each system), IGA_ENTRY.md, TRAILER_PROMPT.md
+docs/       FORMATS.md, the findings (the reverse engineering behind each system)
 lang/       Gaius's own texts in other languages (ui/strings.hpp); scripts/extract_strings.py makes the template
 packaging/  the Windows and Linux packages, Steam Deck notes and Gaius's icon
 VERSION.txt the version, read by CMake, Android, the web page and the release workflow
@@ -300,8 +280,8 @@ does not hold, which is deliberate: that's the direction that helps the wider
 community. AGPL itself was considered and rejected, since its distinguishing
 network-use clause is inert for a local single-player game.
 
-**Documentation: [CC BY-SA 4.0](docs/LICENSE)**, covering `docs/`, `GAIUS_MASTERPLAN.md`
-and `GAIUS_ROADMAP.md`. The reverse-engineering findings are arguably this repo's most
+**Documentation: [CC BY-SA 4.0](docs/LICENSE)**, covering `docs/`. The
+reverse-engineering findings are arguably this repo's most
 valuable output and a code licence fits prose badly; CC BY-SA keeps the share-alike
 intent while making the findings cleanly quotable back into the wider preservation
 corpus.
@@ -318,4 +298,4 @@ its assets, and its trademarks remain the property of their respective rights
 holders; nothing here grants any right to them, and this repo distributes none of
 them. That's a statement of fact about someone else's intellectual property, kept
 deliberately separate from our copyright in our own work — see the IP posture
-section above, and `GAIUS_MASTERPLAN.md` section 3.
+section above.

@@ -43,7 +43,7 @@ The first public beta: Gaius plays a whole career of Caesar, from the start scre
 - Saving and loading in the original's `.SAV` format, eight slots. Gaius writes to its own folder, never over the DOS game's saves.
 
 ### Faithful to the original
-- The simulation is transcribed from the original executable and checked against real saves: the service and land-value layers match all 17 saves on every cell, a month of steps reproduces six consecutive saves, and the yearly accounts match each save's last year.
+- The simulation is transcribed from the original executable and checked against real saves: the service and land-value layers match every real save on every cell, a month of steps reproduces six consecutive saves, and the yearly accounts match each save's last year.
 - The screens are drawn from the game's own files as the original draws them: the city view, the control bar, the message box, the Forum, the maps screen and the battle screen (several checked pixel for pixel against captures), and the original opening.
 - Music and effects play through a transcription of the original's own sound driver on an emulated YM3812.
 

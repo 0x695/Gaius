@@ -79,7 +79,7 @@ python scripts/check_saves.py "/path/to/saves"
 ```
 
 - **rebuild** rebuilds the service layers from a save's own city and compares
-  them with what the engine saved. Seventeen real saves, all but two match
+  them with what the engine saved. Real saves: all but two match
   exactly. The two that don't (`CAESARXS`, `CAESARXW`) were written *between* a
   month's steps, which a full month-end rebuild can't reproduce. A difference on
   a save you took isn't proof of a bug until you've ruled that out.

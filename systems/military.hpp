@@ -26,7 +26,7 @@
 // morale at +0x2B (5 when formed); battles take their casualties from both the
 // record and the Legion's words (0x22C16-0x22C87).
 //
-// Checked against real saves: in all 17, recruiting from last year's figures
+// Checked against real saves: in every save, recruiting from last year's figures
 // with the year-end population (table_60_d) gives the saved regulars and
 // irregulars, and assigning the saved Legion leaves every Cohort as saved
 // (test_military_year_matches_saves).

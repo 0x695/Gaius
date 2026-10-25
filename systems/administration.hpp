@@ -18,7 +18,7 @@
 // Culture and Prosperity can't exceed twice the number of 50-unit (and
 // 100-unit) population steps (population_cap).
 //
-// Checked against real saves: the average in all 17; Culture's two raw scores
+// Checked against real saves: the average in every save; Culture's two raw scores
 // (DS:0x6C82, 0x6C80) in the 14 saves whose buildings haven't changed since
 // the year turned; Peace and Prosperity across CAESARXS -> CAESARXR, the only
 // consecutive years (test_administration_matches_saves).

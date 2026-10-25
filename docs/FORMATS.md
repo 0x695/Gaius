@@ -1,6 +1,6 @@
 # Gaius — FORMATS.md
 
-Status of every Layer 1 (exact import) format decoder implemented so far. This is the Phase 0 deliverable named in `GAIUS_ROADMAP.md`. For the full reverse-engineering narrative behind each format, see `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` in the RE corpus — this file only documents what's actually implemented and tested in `formats/`.
+Status of every Layer 1 (exact import) format decoder implemented so far. This was the project's first deliverable. For the full reverse-engineering narrative behind each format, see `CAESAR_REVERSE_ENGINEERING_COMPLETE.md` in the RE corpus — this file only documents what's actually implemented and tested in `formats/`.
 
 All formats below are implemented, unit-tested, and (where a real asset was available) validated against actual Caesar (1992) files. **No game assets ship in this repo** — every test that needs one reads from a directory named by the `GAIUS_TEST_ASSETS` environment variable and skips cleanly if it isn't set.
 
@@ -132,7 +132,7 @@ All in `tools/`, all built and smoke-tested against real files:
 - `scripts/` wraps these for players and contributors (`scripts/README.md`): `export_assets.py` writes every picture, sheet, animation, sound, tune and map; the palette each `.VPX` is shown in is a table there, with its confidence (`PANEL1B` and `C` remain unresolved: the executable never loads them).
 - `bindiff_exe <a.exe> <b.exe> [--strings]` — decompress and diff two EXEPACK'd executables (byte-level runs + embedded-string set differences). Already run against both known `CSR.EXE` builds — see `docs/CAESAR_EXEPACK_AND_STRINGS_FINDINGS.md` for what it found.
 
-## Status and what is left (see `GAIUS_ROADMAP.md`)
+## Status and what is left
 
 Every file the game ships is decoded and in use (Phase 8). What is left:
 

@@ -40,8 +40,7 @@ android/build/
 export/
 
 # --- Original Caesar (1992) game assets — NEVER commit these. ---
-# See CLAUDE.md "Critical rule before touching anything" / GAIUS_MASTERPLAN.md
-# section 3 (IP posture). Tests/tools read these from a directory pointed at
+# See the IP posture in README.md. Tests/tools read these from a directory pointed at
 # by the GAIUS_TEST_ASSETS env var, which lives outside this repo entirely —
 # these patterns are a safety net, not the primary defense.
 *.VPX
@@ -97,3 +96,15 @@ LOADER.EXE
 HIRES!.COM
 *.iso
 *.ISO
+
+# Not part of a release: the project's planning notes and working documents, kept
+# locally (2026-10-25), and screenshots the README no longer shows.
+/CLAUDE.md
+/GAIUS_MASTERPLAN.md
+/GAIUS_ROADMAP.md
+/docs/TRAILER_PROMPT.md
+/docs/IGA_ENTRY.md
+/docs/images/forum.png
+/docs/images/battle.png
+/docs/images/empire.png
+/docs/images/treasurer.png
