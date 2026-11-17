@@ -32,8 +32,19 @@ enum class ImportResult {
     Done,      // the game's files were copied
     NotFound,  // the chosen folder holds no complete Caesar US release
     Failed,    // reading or writing failed part-way
+    NoAccess,  // Android: the device search was not given the storage permission
 };
 ImportResult import_result();
+
+// Android: look through the phone's storage and any SD card for a game folder, or a zip with one in it, and copy it
+// in as the picker's import does (the same progress and result). The first time the system's "All files access" page
+// opens, and the search starts once the player comes back with it granted. False where there is no such search.
+bool search_device_for_game();
+
+// Android: the saves folder's files in a zip, put where the player chooses on the system's "save as" page (a toast
+// says when it is written). False where there is no such thing, or no saves.
+bool can_export_saves();
+bool export_saves(const std::string& saves_dir);
 
 // What a folder is, as a place for Gaius to play from. Gaius works from the US release of Caesar (the one every finding
 // was made against). GOG's download keeps it in a folder called US, beside the files of an international release

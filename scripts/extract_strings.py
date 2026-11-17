@@ -22,7 +22,7 @@ SOURCES = ["apps", "ui", "platform"]
 TABLES = {
     "apps/viewer/screens.hpp": ["kTabs", "kAsk"],
     "apps/viewer/settings_page.hpp": ["kTabs"],
-    "apps/viewer/main.cpp": ["kProvinceCommands"],
+    "apps/viewer/main.cpp": ["kProvinceCommands", "kFigures"],
     "apps/viewer/save_view.hpp": ["kOverlayNames"],
     "apps/viewer/tutorial.hpp": ["kTutorialSteps", "kTutorialTreasuryText", "kTutorialAdviceTexts"],
 }

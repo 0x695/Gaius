@@ -288,7 +288,11 @@ inline std::string tutorial_line(int step, const TutorialCensus& c) {
         case TutorialGoal::Promotion: have = c.average; break;  // of the 35 the tutorial's rule asks
         default: break;
     }
-    if (have > 0) line += " (" + std::to_string(have) + ")";
+    if (s.goal == TutorialGoal::Promotion)
+        line += " (" + std::to_string(std::max(have, 0)) + " " + ui::tr("of") + " " +
+                std::to_string(systems::administration::kPromotion[1].average) + ")";
+    else if (have > 0)
+        line += " (" + std::to_string(have) + ")";
     return line;
 }
 

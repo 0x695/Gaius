@@ -99,10 +99,10 @@ struct Metrics {
 Breakpoint breakpoint_for(int physical_w, int physical_h, bool has_touch);
 
 // The scale a touch device gets: the toolbar's scale follows how many physical pixels a pixel of the 320 x 200 picture
-// is. A phone's 1080-pixel-high screen makes it 5.4, which puts the original's 16 px icons at about 5 mm and their
-// 24 px slots at about 8 mm, enough for a finger, so it keeps the original's one-row bar (1x). A screen under 5 pixels
-// per picture pixel (the Steam Deck's 4, a 720p phone's 3.6) takes 2x, where the 1x slots would be too small. The 2x bar
-// is a flat list that fills a third of the picture or more, so it is only worth it where the smaller one is too small.
+// is. From 3 up it is the original's one-row bar (1x): a 720-pixel-high phone (3.6) puts its 24 px slots at about
+// 8 mm, a 1080-pixel one (5.4) at about 8 mm too on its denser screen, the Steam Deck (4) at about 9 mm -- enough for
+// a finger, with the whole slot given to it (Metrics::touch). Below 3 it is 2x. (Until 2026-11-17 the line was 5,
+// and a 720p phone got the 2x bar: a flat two-row list with a label row that covered half its picture.)
 int touch_scale(int physical_w, int physical_h);
 
 // The scale table. Desktop is 1x -- i.e. exactly the original's 16px

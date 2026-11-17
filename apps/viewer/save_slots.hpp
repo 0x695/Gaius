@@ -55,10 +55,21 @@ inline std::vector<std::string> read_slot_names(const std::filesystem::path& dir
     return names;
 }
 inline bool write_slot_names(const std::filesystem::path& dir, const std::vector<std::string>& names) {
-    std::ofstream out(dir / kSlotNamesFile, std::ios::trunc);
-    for (size_t i = 0; i < names.size(); ++i)
-        if (!names[i].empty()) out << (i + 1) << " = " << names[i] << "\n";
-    return static_cast<bool>(out);
+    // Through a temporary file and a rename, as the saves and gaius.cfg are written: a crash mid-write keeps the old list.
+    const std::filesystem::path target = dir / kSlotNamesFile, temp = dir / (std::string(kSlotNamesFile) + ".tmp");
+    {
+        std::ofstream out(temp, std::ios::trunc);
+        for (size_t i = 0; i < names.size(); ++i)
+            if (!names[i].empty()) out << (i + 1) << " = " << names[i] << "\n";
+        if (!out) return false;
+    }
+    std::error_code ec;
+    std::filesystem::rename(temp, target, ec);
+    if (ec) {
+        std::filesystem::remove(target, ec);
+        std::filesystem::rename(temp, target, ec);
+    }
+    return !ec;
 }
 inline std::string away_save_file_name() { return "AWAY.SAV"; }
 inline std::string autosave_file_name(int index) {  // index 0-2 -> AUTOSAV1.SAV

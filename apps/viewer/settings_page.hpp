@@ -60,7 +60,7 @@ inline constexpr int kActionControllerHelp = 1411;
 inline constexpr int kActionResume = 1400, kActionPause = 1401, kActionSettingsLoad = 1402,
                      kActionSettingsSave = 1403, kActionRestart = 1404, kActionExit = 1405, kActionYes = 1406,
                      kActionNo = 1407, kActionResetControls = 1408, kActionImportGame = 1409,
-                     kActionRescanGame = 1410;
+                     kActionRescanGame = 1410, kActionFindGame = 1413, kActionExportSaves = 1414;
 // Settings > Game > Cheat: 1000 Dn into the city's funds, as often as wanted, up to the treasury's cap.
 inline constexpr int kActionCheatFunds = 1412;
 inline constexpr int kCheatFunds = 1000;
@@ -75,6 +75,7 @@ struct SettingsView {
     int funds = 0;                    // the city's funds DS:0x6CA2, for the cheat's row
     bool windowed_platform = true;    // the window mode can change (not on Android)
     bool can_import = false;          // Android: a folder can be imported
+    bool can_export = false;          // Android: the saves can be exported as a zip
     bool game_found = true;
     std::string game_note;            // why the folder cannot be played from, when it cannot (game_folder_note.hpp)
     std::string game_dir;
@@ -249,15 +250,19 @@ inline ui::Page settings_page(const ui::Settings& s, const ui::GameOptions& o, c
             page.rows.push_back({ui::tr("Caesar's files"), ui::tr(v.game_found ? "found" : "not found")});
             if (!v.game_found)
                 for (const std::string& line : wrap_note(v.game_note)) page.rows.push_back({line, ""});
-            if (v.can_import) {
+            if (v.can_import && !v.game_found) {
                 page.rows.push_back({ui::tr("Import copies a folder you choose"), ""});
                 page.buttons.push_back({ui::tr("Import"), kActionImportGame});
+                page.buttons.push_back({ui::tr("Find on phone"), kActionFindGame});
+            } else if (v.can_import) {
+                // A game is there: replacing it under a running career is the setup screen's job, not this page's.
             } else if (platform::web::enabled()) {
                 page.rows.push_back({ui::tr("Use Game data, above, to change them"), ""});
             } else {
                 page.rows.push_back({ui::tr("Drop the Caesar folder on this window"), ""});
             }
             page.rows.push_back({ui::tr("Version"), gaius::kVersion});
+            if (v.can_export) page.buttons.push_back({ui::tr("Export saves"), kActionExportSaves});
             page.buttons.push_back({ui::tr("Look again"), kActionRescanGame});
             back_button();
             break;

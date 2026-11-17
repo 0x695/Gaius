@@ -8,15 +8,24 @@ repository's own CMake project (`GAIUS_GAME_LIBRARY`, see
 
 ## Playing
 
-Gaius ships no game files. On first start it asks for them: **Import** opens
-Android's folder picker (in the Download folder, where a game copied to the phone
-usually is); choose the Caesar folder, or the GOG folder that holds it. Gaius looks
-in what you chose for the folder with Caesar's US files (GOG keeps them in a folder
-called `US`, beside the international release, which Gaius cannot play), and copies
-that folder into its own storage, `Android/data/org.gaius.game/files/game`. If it
-finds none it says so. Files can also be copied there over USB, in the US folder or
-a folder holding it. No storage permission is asked for, which is also why Gaius
-cannot search the phone by itself: Android lets an app see only what you hand it.
+Gaius ships no game files. On first start it asks for them, two ways:
+
+- **Find on phone** looks through the phone's own storage and any SD card for a
+  folder with Caesar's US files, or a zip with one in it, and copies it in. It needs
+  the "All files access" permission: the first time, Android's page for it opens;
+  switch Gaius on there and come back, and the search starts. (This permission is
+  why a build for the Play Store would have to leave the button out; a downloaded
+  APK may ask for it.)
+- **Import** opens Android's folder picker (in the Download folder) and needs no
+  permission: choose the Caesar folder, the GOG folder that holds it, or a folder
+  with a zip of the game in it.
+
+Either way Gaius takes the folder with Caesar's US files (GOG keeps them in a folder
+called `US`, beside the international release, which Gaius cannot play) and copies it
+into its own storage, `Android/data/org.gaius.game/files/game`; if it finds none it
+says so. Files can also be copied there over USB. Settings > Files has both buttons
+too, and **Export saves**, which zips Gaius's saves and lets you choose where to put
+the zip (to send it on, or to keep a copy).
 
 A touch screen gets a one-time page on the controls:
 
@@ -31,12 +40,16 @@ A touch screen gets a one-time page on the controls:
 
 Settings (speed, sound, load, save, language, controls) are the same screen as
 on the desktop, with a Back button on every tab. The toolbar is the original's
-one-row bar on a phone-sized screen (the 2x flat list is kept for the Steam Deck and
-for smaller screens, and the Settings screen's UI scale chooses any), and a finger
-may press anywhere in a button's slot. Gamepads work as on the Steam Deck
+one-row bar on any screen with 3 or more pixels to a pixel of the picture -- a 720p
+phone, the Steam Deck (the 2x flat list is kept for smaller screens, and the
+Settings screen's UI scale chooses any) -- and a finger may press anywhere in a
+button's slot. The Forum's picture has a Back button in its bar. Gamepads work as on the Steam Deck
 (`packaging/linux/STEAM_DECK.md`).
 
-Verified on the `Medium_Phone` emulator (x86_64, 2400 x 1080): the import
+Verified on the `Medium_Phone` emulator (x86_64, 2400 x 1080), 2026-11-17: Find on
+phone over the phone's storage and the emulated SD card, from a game folder and from
+`Download/Caesar-US.zip` (174 files extracted, then the game started), and Export
+saves through Android's "save as" page (the zip held the save). Earlier: the import
 of a GOG top folder through the folder picker (the US folder inside it found and
 copied alone), a new career, the one-row toolbar, a building previewed by one tap
 and built by the second, a touch-laid road with its Undo and the tool put away

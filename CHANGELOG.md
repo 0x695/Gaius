@@ -16,9 +16,15 @@ section below that carries its number (`scripts/release_notes.py`). How a releas
 - Housing is painted: hold the button and drag, and a plot goes down on every cell the pointer passes.
 - Saves can be named: choosing a slot to save to asks for a name, shown on the Save and Load pages.
 - The tutorial names the best goods for the province on its Workshop page, and warns once each when the people's tax goes above 6 percent, the industry tax above 5, three years in a row close at a loss, or the Workshops produce nothing.
+- Android: Find on phone looks through the phone and its SD card for Caesar's files, as a folder or a zip, and Import takes a zip too.
+- Android: Settings > Files > Export saves zips your saves and lets you choose where to put them.
 - A cheat in Settings > Game: 1000 Dn into the city's funds, as often as you like, up to the treasury's 25000.
 
 ### Changed
+- Android and the Steam Deck: a screen with 3 or more pixels to a picture pixel (a 720p phone, the Deck) gets the original's one-row control bar; the double-size bar covered half the picture.
+- Settings, the save and load page and the name dialog stop the game's clock while they are open, as the original's Options screen does.
+- Tribune: Automatic also lets plebs go and lowers a duty when the city has shrunk, so their welfare no longer empties a smaller city's treasury.
+- The start screen's funding arrows: up is more money.
 - The tutorial asks for the Imperial Highway while there is money for it (after 500 people, not 2000), shows what the steps ahead still cost on a line above the goal, and warns once when the treasury falls below that. Its pages now say that a second Workshop of the same goods earns less, and to pipe each Fountain to a reservoir.
 - A recorded session's film has the two games' own sound only.
 - With the tutorial on, the first promotion is offered as soon as the ratings' average reaches 35, even if one rating is still under 12. Without the tutorial, and from the second rank on, Rome asks what the original asks.
@@ -26,6 +32,13 @@ section below that carries its number (`scripts/release_notes.py`). How a releas
 - W, A, S and D no longer scroll the map (S is the original's key for the Tribune); the arrow keys, the mouse at the edge and a middle-drag do.
 
 ### Fixed
+- Dragging a finger across the map scrolls it with the finger; it moved three to five times as far (a middle-mouse drag on the desktop too).
+- Housing is painted by a one-finger drag on a touch screen, as with a held mouse button.
+- A save's name is confirmed with a two-finger tap or gamepad B (Escape or Back calls the save off), and on a touch screen the name being typed shows at the top, above the keyboard.
+- A building previewed by touch is centred on the finger, and one that cannot be built there says so.
+- German Settings > Keys fits its buttons on the screen; the tutorial's best goods line no longer runs into its label in German and French; the Forum's caption is translated.
+- Android's game search and import: a damaged zip is skipped instead of ending the search, the game already there is kept until the new copy is whole, a refused permission is reported (and no longer starts a search later by itself), and the search works on Android 10.
+- The Forum's picture has a Back button: on a phone the strip of tabs at the top could not be reached, and a finger has the right button only as a two-finger tap.
 - The treasury holds at most 25000 Dn, as in the original. Without the limit a very rich city's funds could wrap round and be lost at the year's end.
 - A click on a Cohort's or an army's picture on the province map now takes it: only the lower edge of the picture had counted, so Patrol and Attack kept asking for a Cohort.
 - The Fort command says so when the province already has its ten Cohorts, instead of doing nothing.

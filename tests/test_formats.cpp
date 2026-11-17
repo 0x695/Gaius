@@ -3247,7 +3247,8 @@ void test_touch_scale_and_slots() {
     using namespace gaius::ui;
     using gaius::systems::construction::CommandId;
     CHECK(touch_scale(2400, 1080) == 1 && touch_scale(1920, 1080) == 1 && touch_scale(2560, 1600) == 1);
-    CHECK(touch_scale(1280, 800) == 2 && touch_scale(1280, 720) == 2 && touch_scale(960, 600) == 2);
+    CHECK(touch_scale(1280, 800) == 1 && touch_scale(1600, 720) == 1 && touch_scale(960, 600) == 1);
+    CHECK(touch_scale(800, 480) == 2 && touch_scale(640, 400) == 2);
     // At 1x with touch, the bar answers in the whole 24 px slot, as high as the panel; without touch only on the icon.
     const CommandId ring[] = {CommandId::Road, CommandId::Wall, CommandId::Well};
     Metrics touch = metrics_for_scale(1);
@@ -4423,10 +4424,30 @@ void test_tribune_assist() {
     CHECK(word(plebs::kFirePrevention) == 38 && word(plebs::kBuildingMaintenance) == 20 &&
           word(plebs::kRoadMaintenance) == 13 && word(plebs::kConstruction) == 10);
     CHECK(word(plebs::kUnassigned) == 100 - 8 - 10 - 3);
+    // 300 plebs are far more than these duties need: welfare ten below what they expect, so ten leave.
+    CHECK(word(plebs::kWelfare) == plebs::expected_welfare(*st) - 10);
+    plebs::pay_welfare(*st);
+    CHECK(word(plebs::kPlebs) == 290);
+    // Just enough of them: one above, which keeps the count where it is.
+    set(plebs::kPlebs, 190);
+    gaius::viewer::tribune_assist(*st, 0);
     CHECK(word(plebs::kWelfare) == plebs::expected_welfare(*st) + 1);
     const int paid = word(plebs::kPlebs);
     plebs::pay_welfare(*st);
     CHECK(word(plebs::kPlebs) == paid);
+    // A duty far above its target after the city shrank goes back to it; one a little above stays.
+    {
+        const int before_unassigned = word(plebs::kUnassigned);
+        set(plebs::kFirePrevention, 120);
+        gaius::viewer::tribune_assist(*st, 0);
+        CHECK(word(plebs::kFirePrevention) == 38 && word(plebs::kUnassigned) == before_unassigned + 120 - 38);
+        set(plebs::kFirePrevention, 50);
+        gaius::viewer::tribune_assist(*st, 0);
+        CHECK(word(plebs::kFirePrevention) == 50);
+        set(plebs::kFirePrevention, 38);
+        set(plebs::kUnassigned, before_unassigned);
+        gaius::viewer::tribune_assist(*st, 0);  // settled again on the restored counts
+    }
     // It does not run away: a second month changes nothing.
     const int fire = word(plebs::kFirePrevention), welfare = word(plebs::kWelfare);
     gaius::viewer::tribune_assist(*st, 0);
@@ -4726,7 +4747,7 @@ void test_tutorial() {
         CHECK(!viewer::tutorial_promotion_due(*promo));
         viewer::TutorialCensus census;
         census.average = 31;
-        CHECK(viewer::tutorial_line(step_of(TutorialGoal::Promotion), census) == "Earn Rome's promotion (31)");
+        CHECK(viewer::tutorial_line(step_of(TutorialGoal::Promotion), census) == "Earn Rome's promotion (31 of 35)");
     }
     // The goods a province suits: province 31 (the first session's) is best at Wheat, then Pottery; the Work page
     // names them.

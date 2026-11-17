@@ -11,10 +11,14 @@
 //   * the fire, building-maintenance and road duties, then the province construction duty, are raised from the plebs
 //     nobody has been given work, to what the city needs plus a fifth (the city grows between two months), the
 //     construction duty also for a road's worth of pieces not laid yet;
-//   * welfare is set so the plebs keep coming until the duties, army duty and the 50 kept back are all covered, and then
-//     so they stay where they are.
-// It never lowers a duty and never takes plebs from army duty (the auxiliaries are the player's choice), and it changes
-// nothing in systems/: the simulation stays the original's, and a player who switches it off plays the original's rule.
+//   * welfare is set so the plebs keep coming until the duties, army duty and the 50 kept back are all covered, then
+//     so they stay where they are;
+//   * when the city has shrunk, a duty far above its target is brought back to it, and welfare is set ten below what
+//     the plebs expect while there are many more of them than the city needs, so they leave (ten a month at most).
+//     (Added 2026-11-17: a playtest on Hard grew to 575 plebs for a shrinking city -- 169 on fire duty for a need of
+//     96 -- and their welfare emptied the treasury; only ever raising duties was the cause.)
+// It never takes plebs from army duty (the auxiliaries are the player's choice), and it changes nothing in systems/: the
+// simulation stays the original's, and a player who switches it off plays the original's rule.
 
 #pragma once
 
@@ -67,13 +71,20 @@ inline void tribune_assist(model::CityState& state, int difficulty) {
         while (word(systems::forum::duty_word(t.duty)) < t.want && word(plebs::kUnassigned) > 0 &&
                systems::forum::raise_duty(state, t.duty)) {
         }
+        // Far above the target (the city shrank): back to it. A little above stays, so it does not see-saw.
+        if (word(systems::forum::duty_word(t.duty)) > t.want + t.want / 2 + 5)
+            while (word(systems::forum::duty_word(t.duty)) > t.want && systems::forum::lower_duty(state, t.duty)) {
+            }
     }
 
     // Welfare: ten above what the plebs expect while there are fewer of them than the duties need (they grow by 5 a
     // month), one above once there are enough (no change in either direction).
     const int needed = plebs::kPlebsKeptBack + wanted + word(plebs::kArmyDuty) + kTribuneSpare;
     const int expected = plebs::expected_welfare(state);
-    const int welfare = word(plebs::kPlebs) < needed ? expected + 10 : expected + 1;
+    const int plebs_now = word(plebs::kPlebs);
+    const int welfare = plebs_now < needed                        ? expected + 10
+                        : plebs_now > needed + 2 * kTribuneSpare ? expected - 10
+                                                                  : expected + 1;
     model::set_global_word(state, plebs::kWelfare, welfare < 0 ? 0 : welfare > 9999 ? 9999 : welfare);
 }
 

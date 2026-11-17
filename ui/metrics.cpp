@@ -33,7 +33,7 @@ Breakpoint breakpoint_for(int physical_w, int physical_h, bool has_touch) {
 int touch_scale(int physical_w, int physical_h) {
     const double per_pixel = std::min(physical_w / static_cast<double>(kOriginalScreenW),
                                       physical_h / static_cast<double>(kOriginalScreenH));
-    return per_pixel >= 5.0 ? 1 : 2;
+    return per_pixel >= 3.0 ? 1 : 2;
 }
 
 Metrics metrics_for(Breakpoint b) {

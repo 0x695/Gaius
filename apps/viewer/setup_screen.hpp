@@ -105,7 +105,7 @@ inline void remember_game_folder(ui::Settings& settings, const std::string& sett
 inline std::string run_setup_screen(ui::Settings& settings, const std::string& settings_path, int logical_w,
                                     int logical_h, const std::string& first_note = std::string(),
                                     const std::string& screenshot_path = std::string()) {
-    constexpr int kImport = 1, kLookAgain = 2, kQuit = 3, kBrowse = 4;
+    constexpr int kImport = 1, kLookAgain = 2, kQuit = 3, kBrowse = 4, kSearch = 5;
     platform::Window window("Gaius", logical_w, logical_h, 960, 600);
     window.set_icon(kWindowIcon, kWindowIconSize);
     platform::open_gamepads();
@@ -125,14 +125,19 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
     int hovered = -1;
     Uint32 last_look = SDL_GetTicks();
     bool was_importing = false;
+    bool searched = false;  // the last import was the device search, not the picker
     while (game_dir.empty()) {
         int copied = 0;
         const bool importing = platform::import_in_progress(&copied);
         if (was_importing && !importing) {
             // The copy has ended: say so if it did not bring a game.
             const platform::ImportResult result = platform::import_result();
-            if (result == platform::ImportResult::NotFound)
+            if (result == platform::ImportResult::NotFound && searched)
+                note = ui::tr("No Caesar folder or zip found on this phone. Put the game, or a zip of it, in Download, or use Import.");
+            else if (result == platform::ImportResult::NotFound)
                 note = ui::tr("No complete Caesar US folder in that one. Choose the folder with HOUSES.PL8 in it (GOG: US), or one that holds it.");
+            else if (result == platform::ImportResult::NoAccess)
+                note = ui::tr("Gaius was not allowed to look through the phone. Use Import, or allow it in Android's settings.");
             else if (result == platform::ImportResult::Failed)
                 note = ui::tr("Copying stopped part-way. Choose the folder again.");
         }
@@ -145,8 +150,14 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
         for (const std::string& line : wrap_note(note)) page.rows.push_back({line, ""});
         if (platform::can_import_game_folder()) {
             page.rows.push_back({ui::tr("Import copies its folder into Gaius"), ""});
-            if (importing) page.rows.push_back({ui::tr("Copying...") + std::string(" ") + std::to_string(copied), ""});
+            page.rows.push_back({ui::tr("Find on phone looks for it, or a zip of it"), ""});
+            // The search walks the storage before it copies anything: a count of 0 says only that it is looking.
+            if (importing)
+                page.rows.push_back({copied == 0 ? std::string(ui::tr("Looking..."))
+                                                 : ui::tr("Copying...") + std::string(" ") + std::to_string(copied),
+                                     ""});
             page.buttons.push_back({ui::tr(importing ? "Importing..." : "Import"), kImport, !importing});
+            page.buttons.push_back({ui::tr("Find on phone"), kSearch, !importing});
         } else {
             if (note.empty()) page.rows.push_back({ui::tr("Gaius looked in the usual places and found none."), ""});
             page.rows.push_back({platform::can_pick_folder() ? ui::tr("Choose the Caesar folder,") : ui::tr("Drop the Caesar folder on this window,"), ""});
@@ -179,7 +190,13 @@ inline std::string run_setup_screen(ui::Settings& settings, const std::string& s
             if (cmd->type != platform::CommandType::Select || !window.window_to_logical(cmd->x, cmd->y, &lx, &ly))
                 continue;
             switch (ui::hit_test(page, lay, lx, ly)) {
+                case kSearch:
+                    searched = true;
+                    if (!platform::search_device_for_game()) note = ui::tr("The search could not start");
+                    else was_importing = true;  // a search that ends before the next frame is still reported
+                    break;
                 case kImport:
+                    searched = false;
                     if (!platform::import_game_folder()) note = ui::tr("The folder picker didn't open");
                     break;
                 case kBrowse: {

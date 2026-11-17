@@ -983,6 +983,7 @@ int main(int argc, char** argv) {
     settings_view.windowed_platform = false;
 #endif
     settings_view.can_import = platform::can_import_game_folder();
+    settings_view.can_export = platform::can_export_saves();
     // DS:0x0DD0: the governor's name, kept across new games and saved with each.
     std::string governor_name = ui::governor_name(state);
     ui::NameEntry name_entry;
@@ -1477,7 +1478,18 @@ int main(int argc, char** argv) {
                 name_save_slot = slot;
                 open_name_entry(had.empty() ? governor_name : had);
             } else if (files_saving) {
-                if (write_state(path)) screen = files_return;
+                if (write_state(path)) {
+                    screen = files_return;
+                    // Saved without a name (no dialog): the slot's old name no longer describes it.
+                    const int slot = action - viewer::kActionSlot;
+                    if (recovered < 0 && slot >= 0 && slot < viewer::kSaveSlots) {
+                        std::vector<std::string> names = viewer::read_slot_names(saves_dir(), viewer::kSaveSlots);
+                        if (!names[static_cast<size_t>(slot)].empty()) {
+                            names[static_cast<size_t>(slot)].clear();
+                            viewer::write_slot_names(saves_dir(), names);
+                        }
+                    }
+                }
             } else if (read_state(path)) {
                 screen = Screen::City;
                 time_running = true;
@@ -1486,8 +1498,9 @@ int main(int argc, char** argv) {
         }
         if (screen == Screen::Start) {
             // 0x27F54-0x27F83: funding 0-9, difficulty 0-2.
-            if (action == viewer::kActionFundingDown && funding_level > 0) --funding_level;
-            if (action == viewer::kActionFundingUp && funding_level < 9) ++funding_level;
+            // Up is more money: the levels run from Trivial (8000 Dn, 0) down to 250 Dn (9).
+            if (action == viewer::kActionFundingUp && funding_level > 0) --funding_level;
+            if (action == viewer::kActionFundingDown && funding_level < 9) ++funding_level;
             if (action == viewer::kActionDifficultyDown && start_difficulty > 0) --start_difficulty;
             if (action == viewer::kActionDifficultyUp && start_difficulty < 2) ++start_difficulty;
             if (action == viewer::kActionTutorialToggle) {
@@ -1885,7 +1898,11 @@ int main(int argc, char** argv) {
         std::vector<ui::PanelButton> overlay_buttons;
         for (int i = 0; i < viewer::kOverlayCount; ++i) overlay_buttons.push_back({ui::tr(viewer::kOverlayNames[i]), 1100 + i});
         const ui::PanelLayout overlay_bar = ui::bar_layout(overlay_buttons, page_metrics, kLogicalW, kLogicalH);
-        const ui::PanelLayout hall_bar = ui::bar_layout({}, page_metrics, kLogicalW, kLogicalH);
+        // The Forum picture's bar: what the figure under the pointer is, and a Back button to the city (Gaius's own: the
+        // original leaves on the right button, which a finger has only as a two-finger tap, and the strip of tabs at the
+        // top of a phone's screen is where the system takes a swipe).
+        const std::vector<ui::PanelButton> hall_buttons = {{ui::tr("Back"), 0}};
+        const ui::PanelLayout hall_bar = ui::bar_layout(hall_buttons, page_metrics, kLogicalW, kLogicalH);
         const ui::PanelLayout strip = ui::strip_layout(screen_tabs, page_metrics, kLogicalW);
         std::vector<ui::PanelButton> province_buttons;
         for (int i = 0; i < kProvinceCommandCount; ++i) province_buttons.push_back({ui::tr(kProvinceCommands[i].label), 1000 + i});
@@ -2049,6 +2066,7 @@ int main(int argc, char** argv) {
                 // 0x0ECA3): Gaius's Settings screen, which holds the original's
                 // options (apps/viewer/settings_page.hpp).
                 if (screen != Screen::Settings) settings_return = screen;
+                touch_preview_x = touch_preview_y = -1;  // a tap there must not leave a building's ghost behind
                 settings_view.tab = viewer::kSettingsGame;
                 settings_view.confirm = viewer::SettingsView::Confirm::None;
                 settings_view.capturing = -1;
@@ -2202,6 +2220,11 @@ int main(int argc, char** argv) {
                     screen = Screen::Notice;
                     return;
                 case viewer::kActionImportGame: platform::import_game_folder(); return;
+                case viewer::kActionFindGame: platform::search_device_for_game(); return;
+                case viewer::kActionExportSaves:
+                    // A zip of the saves folder, put where the player chooses (Android's "save as" page).
+                    if (!platform::export_saves(saves_dir().string())) show_toast(ui::tr("No saves to export"));
+                    return;
                 case viewer::kActionRescanGame: return;  // the page looks each time it's drawn
                 default: break;
             }
@@ -2418,8 +2441,9 @@ int main(int argc, char** argv) {
         }
         const auto drag_tool_here = [&]() {
             if (screen == Screen::City)
-                return tool_armed && systems::construction::placement_spec(kBuildTools[tool_index]).kind ==
-                                         systems::construction::PlacementKind::DragAutoTiled;
+                return tool_armed && (systems::construction::placement_spec(kBuildTools[tool_index]).kind ==
+                                          systems::construction::PlacementKind::DragAutoTiled ||
+                                      kBuildTools[tool_index] == systems::construction::CommandId::Housing);
             if (screen == Screen::Province) {
                 const int id = kProvinceCommands[province_command].id;
                 return id == 35 || id == 36 || id == 37 || id == 42;
@@ -2565,6 +2589,10 @@ int main(int argc, char** argv) {
                     }
                 }
                 return;
+            }
+            if (screen == Screen::ForumHall && hall_bar.frame.contains(lx, ly)) {
+                if (!hall_bar.buttons.empty() && hall_bar.buttons[0].contains(lx, ly)) switch_to(0);
+                return;  // the rest of the bar: nothing, not the figure painted behind it
             }
             if (screen == Screen::ForumHall) {
                 // 0x0DF57: the figure under the click opens its advisor
@@ -2733,8 +2761,9 @@ int main(int argc, char** argv) {
                                         cell_x >= touch_preview_x && cell_x < touch_preview_x + w &&
                                         cell_y >= touch_preview_y && cell_y < touch_preview_y + h;
                 if (!on_preview) {
-                    touch_preview_x = cell_x;
-                    touch_preview_y = cell_y;
+                    // Centred on the finger: a footprint hung from its corner spread down and right onto the road.
+                    touch_preview_x = std::max(0, cell_x - (w - 1) / 2);
+                    touch_preview_y = std::max(0, cell_y - (h - 1) / 2);
                     touch_preview_tool = tool_index;
                     std::printf("preview %s at (%d,%d)\n", systems::construction::command_name(tool), cell_x, cell_y);
                     return;
@@ -2749,6 +2778,7 @@ int main(int argc, char** argv) {
             drag_last_y = cell_y;
             std::printf("place %s at (%d,%d): %s\n", systems::construction::command_name(tool), cell_x, cell_y,
                         ok ? "OK" : "rejected (terrain not buildable / off grid)");
+            if (!ok && select_is_touch) show_toast(ui::tr("It cannot be built there"));
             // A road, wall, plaza or clearing laid by touch puts the tool away, so the next finger that lands scrolls
             // instead of laying more of it.
             if (select_is_touch && spec.kind == systems::construction::PlacementKind::DragAutoTiled) tool_armed = false;
@@ -2947,7 +2977,9 @@ int main(int argc, char** argv) {
                                 settings_view.confirm = viewer::SettingsView::Confirm::None;
                             else
                                 screen = settings_return;
-                        } else if (screen != Screen::NameEntry) {
+                        } else if (screen == Screen::NameEntry) {
+                            finish_name_entry(true);  // Escape or Android's Back: a save is called off
+                        } else {
                             switch_to(4);
                         }
                         break;
@@ -3054,8 +3086,10 @@ int main(int argc, char** argv) {
                             break;
                         }
                         if (save_mode && screen == Screen::NameEntry) {
-                            // 0x0C544: a right-click ends the dialog, keeping the name.
-                            finish_name_entry(true);
+                            // 0x0C544: a right-click ends the dialog, keeping the name -- and for a save's name it is
+                            // the confirmation (a two-finger tap or gamepad B is all a phone or a pad has once the
+                            // keyboard is gone; Escape or Back calls the save off).
+                            finish_name_entry(false);
                             break;
                         }
                         if (save_mode && screen == Screen::Battle && have_battle_art &&
@@ -3268,8 +3302,15 @@ int main(int argc, char** argv) {
                             break;
                         }
                         Camera& c = screen == Screen::Province ? pcam : cam;
-                        c.x -= cmd->dx / c.zoom;
-                        c.y -= cmd->dy / c.zoom;
+                        // The motion is in the window's pixels and the camera in the picture's (320 x 200 shown at
+                        // several window pixels each): divided by that, the map follows the finger one to one. (Until
+                        // 2026-11-17 it was not, and a phone's swipe threw the map three to five times as far.)
+                        int ppw = 0, pph = 0;
+                        window.physical_size(&ppw, &pph);
+                        const double per_pixel =
+                            std::max(1.0, std::min(ppw / static_cast<double>(kLogicalW), pph / static_cast<double>(kLogicalH)));
+                        c.x -= cmd->dx / per_pixel / c.zoom;
+                        c.y -= cmd->dy / per_pixel / c.zoom;
                         if (cmd->zoom_delta != 0) c.zoom *= std::pow(1.1, cmd->zoom_delta);  // a pinch
                         c.clamp();
                         break;
@@ -3436,7 +3477,11 @@ int main(int argc, char** argv) {
                     last_step_ms = SDL_GetTicks();
                 }
             }
-            if (time_running) {
+            // Settings, the save and load page and the name dialog stop the clock while they are open, as the original's
+            // Options screen does (on a phone an autosave and a year's turn once went by while the player was saving).
+            const bool menu_open = screen == Screen::Settings || screen == Screen::Files || screen == Screen::NameEntry;
+            if (menu_open) last_step_ms = SDL_GetTicks();  // no catching up when it closes
+            if (time_running && !menu_open) {
                 const Uint32 now = SDL_GetTicks();
                 // A battle or a promotion offer stops time mid-step.
                 for (int budget = 8; budget > 0 && time_running && now - last_step_ms >= step_ms(); --budget) {
@@ -3618,8 +3663,8 @@ int main(int argc, char** argv) {
                                                             "The histories",           "The Treasurer",
                                                             "The ratings",             "The Tribune of the Plebs",
                                                             "Industry"};
-                ui::render_bar({}, -1, hall_bar, frame, kLogicalW, kLogicalH, page_metrics, font,
-                               kFigures[std::clamp(hall_hover, 0, 8)]);
+                ui::render_bar(hall_buttons, -1, hall_bar, frame, kLogicalW, kLogicalH, page_metrics, font,
+                               ui::tr(kFigures[std::clamp(hall_hover, 0, 8)]));
                 ui::render_strip(screen_tabs, 3, strip, frame, kLogicalW, kLogicalH, page_metrics, font);
             } else if (save_mode && screen == Screen::Province) {
                 if (have_province_sprites) {
@@ -3909,13 +3954,18 @@ int main(int argc, char** argv) {
             if (help_command >= 0)
                 viewer::draw_help_box(frame, kLogicalW, kLogicalH, interface_art, sprites.buildings, help_command);
             // A line of feedback for a moment ("Quicksaved"), and the reason time is stopped while the player is away.
-            if (save_mode && (focus_paused || (!toast_text.empty() && SDL_GetTicks() < toast_until))) {
-                const std::string line = focus_paused ? std::string(ui::tr("Paused")) : toast_text;
+            // On a touch screen the keyboard covers the name dialog, so the name as typed is shown at the top too.
+            const bool naming_on_touch = save_mode && screen == Screen::NameEntry && has_touch;
+            if (save_mode && (naming_on_touch || focus_paused || (!toast_text.empty() && SDL_GetTicks() < toast_until))) {
+                const std::string line = naming_on_touch ? ui::trimmed_name(ui::name_text(name_entry)) + "_"
+                                         : focus_paused  ? std::string(ui::tr("Paused"))
+                                                         : toast_text;
                 const int text_w = font ? ui::game_text_width(line.c_str(), 1, *font) : ui::text_width(line.c_str(), 1);
                 const bool on_map = screen == Screen::City || screen == Screen::Province;
                 const int floor_y = on_map ? static_cast<int>((screen == Screen::Province ? pcam : cam).visible_h) : kLogicalH;
                 // Above the tutorial's goal line when that is showing.
-                const ui::Rect box{4, floor_y - 14 - (tutorial_goal.empty() ? 0 : 14), text_w + 10, 12};
+                const ui::Rect box = naming_on_touch ? ui::Rect{4, 2, text_w + 10, 12}
+                                                     : ui::Rect{4, floor_y - 14 - (tutorial_goal.empty() ? 0 : 14), text_w + 10, 12};
                 for (int y = box.y; y < box.y + box.h; ++y)
                     for (int x = box.x; x < box.x + box.w; ++x) {
                         if (x < 0 || y < 0 || x >= kLogicalW || y >= kLogicalH) continue;
